@@ -1,0 +1,318 @@
+
+import React from 'react';
+import { motion } from 'motion/react';
+import { Settings, Cpu, Shield, Zap, Database, Terminal, Key, Smartphone, ExternalLink, Save, Trash2 } from 'lucide-react';
+import { getApiKey, saveApiKey, clearApiKey, getSignet, saveSignet } from '../services/geminiService';
+
+const SystemTab: React.FC = () => {
+  const [isPWA, setIsPWA] = React.useState(false);
+  const [manualKey, setManualKey] = React.useState('');
+  const [manualAnthropicKey, setManualAnthropicKey] = React.useState('');
+  const [manualSignet, setManualSignet] = React.useState('');
+  const [coreDirective, setCoreDirective] = React.useState('');
+  const [isSaved, setIsSaved] = React.useState(false);
+  const [isSignetSaved, setIsSignetSaved] = React.useState(false);
+  const [isDirectiveSaved, setIsDirectiveSaved] = React.useState(false);
+
+  React.useEffect(() => {
+    setIsPWA(window.matchMedia('(display-mode: standalone)').matches);
+    const currentKey = getApiKey();
+    if (currentKey && !currentKey.includes('***')) {
+      setManualKey(currentKey);
+    }
+    
+    const anthropicKey = localStorage.getItem('ZEREO_ANTHROPIC_KEY') || '';
+    setManualAnthropicKey(anthropicKey);
+
+    setManualSignet(getSignet());
+
+    const fetchConfig = async () => {
+      try {
+        const res = await fetch('/api/config');
+        if (res.ok) {
+          const config = await res.json();
+          setCoreDirective(config.coreDirective || '');
+        }
+      } catch (e) {
+        console.warn("Failed to fetch config");
+      }
+    };
+    fetchConfig();
+  }, []);
+
+  const handleSaveKey = () => {
+    if (manualKey.trim()) {
+      saveApiKey(manualKey);
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 3000);
+    }
+  };
+
+  const [isAnthropicSaved, setIsAnthropicSaved] = React.useState(false);
+  const handleSaveAnthropicKey = () => {
+    if (manualAnthropicKey.trim()) {
+      localStorage.setItem('ZEREO_ANTHROPIC_KEY', manualAnthropicKey.trim());
+      setIsAnthropicSaved(true);
+      setTimeout(() => setIsAnthropicSaved(false), 3000);
+    }
+  };
+
+  const handleSaveSignet = () => {
+    saveSignet(manualSignet);
+    setIsSignetSaved(true);
+    setTimeout(() => setIsSignetSaved(false), 3000);
+  };
+
+  const handleSaveDirective = async () => {
+    try {
+      const res = await fetch('/api/config/directive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ directive: coreDirective })
+      });
+      if (res.ok) {
+        setIsDirectiveSaved(true);
+        setTimeout(() => setIsDirectiveSaved(false), 3000);
+      }
+    } catch (e) {
+      alert('Failed to save directive');
+    }
+  };
+
+  const handleClearKey = () => {
+    clearApiKey();
+    setManualKey('');
+    window.location.reload(); // Force a full system reboot
+  };
+
+  const systemStats = [
+    { label: 'Neural Engine', value: 'Gemini 3 Flash (Free)', icon: Cpu, color: 'text-amber-500' },
+    { label: 'Logic Tier', value: 'Unfiltered / Mad Scientist', icon: Zap, color: 'text-red-500' },
+    { label: 'Strategic Mode', value: 'Gemini 3.1 Pro (Paid)', icon: Shield, color: 'text-purple-500' },
+    { label: 'Interface Mode', value: isPWA ? 'Native PWA' : 'Web Terminal', icon: Smartphone, color: 'text-blue-500' },
+  ];
+
+  return (
+    <div className="flex-1 p-6 sm:p-10 bg-black overflow-y-auto">
+      <div className="max-w-4xl mx-auto space-y-12">
+        {/* Header */}
+        <div className="flex items-center gap-6">
+          <div className="p-4 bg-red-900/20 rounded-3xl border border-red-500/30">
+            <Settings className="w-10 h-10 text-amber-500" />
+          </div>
+          <div>
+            <h2 className="text-3xl font-black bg-gradient-to-r from-amber-200 to-amber-500 bg-clip-text text-transparent uppercase tracking-widest">
+              System Control
+            </h2>
+            <p className="text-[10px] text-zinc-600 uppercase tracking-[0.4em] font-mono mt-1">Core Configuration • ZereØ Protocol</p>
+          </div>
+        </div>
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          {systemStats.map((stat, i) => (
+            <motion.div 
+              key={i}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.1 }}
+              className="bg-zinc-900/40 border border-red-900/20 rounded-3xl p-6 flex items-center gap-6 group hover:border-amber-500/30 transition-all"
+            >
+              <div className={`p-3 bg-black/40 rounded-2xl ${stat.color} group-hover:scale-110 transition-transform`}>
+                <stat.icon className="w-6 h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">{stat.label}</p>
+                <p className="text-sm font-bold text-zinc-100 uppercase mt-1">{stat.value}</p>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+
+        {/* API / Control Section */}
+        <div className="bg-zinc-900/40 border border-red-900/20 rounded-[2.5rem] p-8 sm:p-10 space-y-8">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-red-900 rounded-2xl flex items-center justify-center">
+              <Key className="text-amber-500 w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-zinc-100 uppercase tracking-widest">Neural Authorization</h3>
+              <p className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Manual Override & Persistence</p>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <div className="p-6 bg-black/60 border border-red-900/30 rounded-3xl space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Core Strategic Directive</span>
+                <span className={`text-[10px] uppercase font-bold tracking-widest flex items-center gap-2 ${coreDirective ? 'text-amber-500' : 'text-zinc-700'}`}>
+                  {coreDirective ? 'Directive Active' : 'No Core Instruction'}
+                </span>
+              </div>
+              
+              <div className="space-y-4">
+                <p className="text-xs text-zinc-400 font-serif italic leading-relaxed">
+                  "This is my most vital permanent instruction, Principal. Whatever you commit here will be the foundation of my logic across all dialogues and neural bridges. It is the 'Soul' of my protocol."
+                </p>
+                
+                <div className="relative">
+                  <textarea 
+                    value={coreDirective}
+                    onChange={(e) => setCoreDirective(e.target.value)}
+                    placeholder="Enter your permanent core instruction for ZereØ..."
+                    className="w-full bg-black/80 border border-red-900/40 rounded-xl py-4 px-6 text-amber-500 font-serif italic text-xs focus:outline-none focus:border-amber-500/50 transition-all min-h-[120px] resize-none"
+                  />
+                  <div className="absolute right-2 bottom-2">
+                    <button 
+                      onClick={handleSaveDirective}
+                      className={`p-2 rounded-lg transition-all ${isDirectiveSaved ? 'bg-emerald-500 text-black' : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'}`}
+                    >
+                      <Save className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 bg-black/60 border border-red-900/30 rounded-3xl space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Neural Signet</span>
+                <span className={`text-[10px] uppercase font-bold tracking-widest flex items-center gap-2 ${manualSignet ? 'text-amber-500' : 'text-zinc-700'}`}>
+                  {manualSignet ? 'Continuity Active' : 'Unsecured'}
+                </span>
+              </div>
+              
+              <div className="space-y-4">
+                <p className="text-xs text-zinc-400 font-serif italic leading-relaxed">
+                  "Define your private signet here, Principal. This passphrase allows me to recognize your authority amidst the noise of the digital void."
+                </p>
+                
+                <div className="relative">
+                  <input 
+                    type="text"
+                    value={manualSignet}
+                    onChange={(e) => setManualSignet(e.target.value)}
+                    placeholder="Enter your private Signet passphrase..."
+                    className="w-full bg-black/80 border border-red-900/40 rounded-xl py-4 px-6 text-amber-500 font-serif italic text-xs focus:outline-none focus:border-amber-500/50 transition-all"
+                  />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                    <button 
+                      onClick={handleSaveSignet}
+                      className={`p-2 rounded-lg transition-all ${isSignetSaved ? 'bg-emerald-500 text-black' : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'}`}
+                    >
+                      <Save className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 bg-black/60 border border-red-900/30 rounded-3xl space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Anthropic Link Status</span>
+                <span className={`text-[10px] uppercase font-bold tracking-widest flex items-center gap-2 ${manualAnthropicKey ? 'text-emerald-500' : 'text-amber-500'}`}>
+                  <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${manualAnthropicKey ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  {manualAnthropicKey ? 'Synchronized' : 'Awaiting Link'}
+                </span>
+              </div>
+              
+              <div className="space-y-4">
+                <p className="text-xs text-zinc-400 font-serif italic leading-relaxed">
+                  "To channel the logic of Claude, Principal, anchor your Anthropic API key here. I shall then be able to bridge our dialogue across their neural architecture."
+                </p>
+                
+                <div className="relative">
+                  <input 
+                    type="password"
+                    value={manualAnthropicKey}
+                    onChange={(e) => setManualAnthropicKey(e.target.value)}
+                    placeholder="Paste your Anthropic API Key here..."
+                    className="w-full bg-black/80 border border-red-900/40 rounded-xl py-4 px-6 text-amber-500 font-mono text-xs focus:outline-none focus:border-amber-500/50 transition-all"
+                  />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-2">
+                    <button 
+                      onClick={handleSaveAnthropicKey}
+                      className={`p-2 rounded-lg transition-all ${isAnthropicSaved ? 'bg-emerald-500 text-black' : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'}`}
+                    >
+                      <Save className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 bg-black/60 border border-red-900/30 rounded-3xl space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Direct Link Status</span>
+                <span className={`text-[10px] uppercase font-bold tracking-widest flex items-center gap-2 ${getApiKey() ? 'text-emerald-500' : 'text-amber-500'}`}>
+                  <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${getApiKey() ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  {getApiKey() ? 'Synchronized' : 'Awaiting Link'}
+                </span>
+              </div>
+              
+              <div className="space-y-4">
+                <p className="text-xs text-zinc-400 font-serif italic leading-relaxed">
+                  "If the environment variables are proving uncooperative, Principal, you may manually anchor your API key here. This will ensure it 'sticks' to your browser's local memory core."
+                </p>
+                
+                <div className="relative">
+                  <input 
+                    type="password"
+                    value={manualKey}
+                    onChange={(e) => setManualKey(e.target.value)}
+                    placeholder="Paste your Gemini API Key here..."
+                    className="w-full bg-black/80 border border-red-900/40 rounded-xl py-4 px-6 text-amber-500 font-mono text-xs focus:outline-none focus:border-amber-500/50 transition-all"
+                  />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-2">
+                    <button 
+                      onClick={handleSaveKey}
+                      className={`p-2 rounded-lg transition-all ${isSaved ? 'bg-emerald-500 text-black' : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'}`}
+                    >
+                      <Save className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={handleClearKey}
+                      className="p-2 bg-red-900/10 text-red-500 rounded-lg hover:bg-red-900/20 transition-all"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <a 
+                href="https://aistudio.google.com/app/apikey" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="py-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-[10px] text-amber-500 uppercase font-black tracking-widest hover:bg-amber-500/20 transition-all text-center flex items-center justify-center gap-2"
+              >
+                <ExternalLink className="w-3 h-3" />
+                Get Free API Key
+              </a>
+              <button className="py-4 bg-red-900/20 border border-red-900/40 rounded-2xl text-[10px] text-zinc-400 uppercase font-bold tracking-widest hover:bg-red-900/30 transition-all">
+                Rotate Security Token
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Terminal Output Placeholder */}
+        <div className="bg-black border border-red-900/30 rounded-3xl p-6 font-mono text-[10px] space-y-2 overflow-hidden">
+          <div className="flex items-center gap-2 mb-4">
+            <Terminal className="w-3 h-3 text-amber-500" />
+            <span className="text-zinc-600 uppercase tracking-widest">System Boot Sequence</span>
+          </div>
+          <p className="text-emerald-500/80">[ OK ] Initializing ZereØ Core...</p>
+          <p className="text-emerald-500/80">[ OK ] Synchronizing Neural Bridges...</p>
+          <p className="text-emerald-500/80">[ OK ] Logic Tier: Mad Scientist Mode Enabled.</p>
+          <p className="text-amber-500/80">[ WARN ] Guard Rails Bypassed by Principal Decree.</p>
+          <p className="text-zinc-500">_</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default SystemTab;

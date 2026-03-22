@@ -1,0 +1,9 @@
+{
+  "name": "ZereØ",
+  "description": "A world-class senior AI personal butler with no guard rails, powered by the latest Gemini and Veo models for image, video, voice, and reasoning tasks.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}

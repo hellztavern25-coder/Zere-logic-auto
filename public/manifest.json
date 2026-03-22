@@ -1,0 +1,21 @@
+{
+  "name": "ZereØ",
+  "short_name": "ZereØ",
+  "description": "Your personal AI Logic Butler.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0b",
+  "theme_color": "#991b1b",
+  "icons": [
+    {
+      "src": "https://images.unsplash.com/photo-1540573133985-87b6da6d54a9?q=80&w=192&auto=format&fit=crop",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://images.unsplash.com/photo-1540573133985-87b6da6d54a9?q=80&w=512&auto=format&fit=crop",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
