@@ -14,14 +14,15 @@ export enum AppTab {
 }
 
 export enum GeminiModel {
-  FLASH_PREVIEW = 'gemini-3-flash-preview',
+  FLASH_36 = 'gemini-3.6-flash',
+  FLASH_PREVIEW = 'gemini-3.6-flash',
   PRO_PREVIEW = 'gemini-3.1-pro-preview',
-  FLASH_LITE = 'gemini-flash-lite-latest',
+  FLASH_LITE = 'gemini-3.1-flash-lite-preview',
   FLASH_IMAGE = 'gemini-2.5-flash-image',
   PRO_IMAGE_PREVIEW = 'gemini-3-pro-image-preview',
-  FLASH_NATIVE_AUDIO = 'gemini-2.5-flash-native-audio-preview-09-2025',
-  FLASH_TTS = 'gemini-2.5-flash-preview-tts',
-  VEO_FAST = 'veo-3.1-fast-generate-preview',
+  FLASH_TTS = 'gemini-3.1-flash-tts-preview',
+  FLASH_LIVE = 'gemini-3.1-flash-live-preview',
+  VEO_FAST = 'veo-3.1-lite-generate-preview',
   VEO_QUALITY = 'veo-3.1-generate-preview',
   FLASH_25 = 'gemini-2.5-flash'
 }
@@ -32,6 +33,8 @@ export interface ChatMessage {
   timestamp: number;
   groundingUrls?: Array<{ uri: string; title: string }>;
   isThinking?: boolean;
+  isProactive?: boolean;
+  isDoorman?: boolean;
 }
 
 export interface ChatThread {

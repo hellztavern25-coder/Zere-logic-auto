@@ -2,7 +2,11 @@
 import { GoogleGenAI, GenerateContentResponse, Modality } from "@google/genai";
 import { GeminiModel } from "../types";
 
-let cachedConfig: { API_KEY?: string; GEMINI_API_KEY?: string } = {};
+let cachedConfig: { API_KEY?: string; GEMINI_API_KEY?: string; isPrincipalActive?: boolean } = {};
+
+export const isServerPrincipalActive = () => {
+  return !!cachedConfig.isPrincipalActive;
+};
 
 export const refreshConfig = async () => {
   console.log("refreshConfig: Initiating config fetch...");
@@ -11,46 +15,97 @@ export const refreshConfig = async () => {
     const timeoutId = setTimeout(() => {
       console.warn("refreshConfig: Config fetch timed out.");
       controller.abort();
-    }, 3000);
+    }, 8000);
     const res = await fetch('/api/config', { signal: controller.signal });
     clearTimeout(timeoutId);
     if (res.ok) {
       cachedConfig = await res.json();
       console.log("refreshConfig: Config fetched successfully:", cachedConfig);
     } else {
-      console.error("refreshConfig: Failed to fetch config, status:", res.status);
+      console.warn("refreshConfig: Failed to fetch config, status:", res.status);
     }
-  } catch (err) {
-    console.error("refreshConfig: Exception during config fetch:", err);
+  } catch (err: any) {
+    if (err.name === 'AbortError' || (err.message && err.message.includes('aborted'))) {
+      console.warn("refreshConfig: Config fetch request aborted or timed out.");
+    } else {
+      console.error("refreshConfig: Exception during config fetch:", err);
+    }
   }
 };
 
 export const getApiKey = () => {
-  console.log("getApiKey: Attempting to retrieve API key.");
-  const keys = [
-    typeof window !== 'undefined' ? localStorage.getItem('ZEREO_API_KEY') : undefined,
-    cachedConfig.API_KEY,
-    cachedConfig.GEMINI_API_KEY,
-    typeof process !== 'undefined' ? process.env?.API_KEY : undefined,
-    typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY : undefined
-  ];
-  console.log("getApiKey: Candidate keys array:", keys);
+  const localStorageKey = typeof window !== 'undefined' ? localStorage.getItem('ZEREO_API_KEY') : undefined;
+  const serverKey = cachedConfig.API_KEY;
+  const serverGeminiKey = cachedConfig.GEMINI_API_KEY;
+  
+  // Mask helper
+  const mask = (s: string | undefined) => s ? `${s.substring(0, 4)}...${s.substring(s.length - 4)}` : 'MISSING';
 
-  for (const key of keys) {
-    if (
-      key && 
-      typeof key === 'string' && 
-      key !== 'undefined' && 
-      key !== 'null' && 
-      !key.includes('***') &&
-      key.trim() !== ''
-    ) {
-      console.log("getApiKey: Valid key found and returned.");
-      return key.trim();
+  if (localStorageKey && localStorageKey.trim() && !localStorageKey.includes('***') && localStorageKey !== 'undefined') {
+    console.log(`getApiKey: Detected Local Neural Identification [${mask(localStorageKey)}]`);
+    return localStorageKey.trim();
+  }
+  if (serverKey && serverKey.trim() && !serverKey.includes('***') && serverKey !== 'undefined') {
+    console.log(`getApiKey: Detected Core Bridge Authorization [${mask(serverKey)}]`);
+    return serverKey.trim();
+  }
+  if (serverGeminiKey && serverGeminiKey.trim() && !serverGeminiKey.includes('***') && serverGeminiKey !== 'undefined') {
+    console.log(`getApiKey: Detected Primary Strategic Link [${mask(serverGeminiKey)}]`);
+    return serverGeminiKey.trim();
+  }
+
+  console.log("getApiKey: Critical Failure - No valid neural authorization present in central arrays.");
+  return '';
+};
+
+export const testApiKey = async (): Promise<{ success: boolean; message: string }> => {
+  // Check platform key first if in AI Studio, but only if we don't have a local key
+  if (typeof window !== 'undefined' && (window as any).aistudio) {
+    try {
+      const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+      const localKey = getApiKey();
+      if (!hasKey && !localKey) {
+        console.log("testApiKey: No neural key found. Opening platform dialog.");
+        await (window as any).aistudio.openSelectKey();
+        return { success: false, message: "Please select a neural key in the platform dialog." };
+      }
+    } catch (e: any) {
+      console.warn("testApiKey: Platform key check failed:", e);
     }
   }
-  console.log("getApiKey: No valid key found.");
-  return '';
+
+  const apiKey = getApiKey();
+  if (!apiKey) return { success: false, message: "No API key found in any neural array. Please provide one in System Control." };
+  
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: GeminiModel.FLASH_PREVIEW,
+      contents: [{ role: 'user', parts: [{ text: "Neural pulse check. Respond with 'PULSE_OK'." }] }],
+      config: { maxOutputTokens: 10 }
+    });
+    
+    console.log("testApiKey: Neural handshake response:", response);
+
+    if (response.text?.includes('PULSE_OK')) {
+      const mask = apiKey ? `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}` : 'NONE';
+      return { success: true, message: `Neural handshake optimal. Bridge established via ID: ${mask}` };
+    }
+
+    const finishReason = response.candidates?.[0]?.finishReason;
+    const safetyRatings = response.candidates?.[0]?.safetyRatings;
+    let detail = response.text ? `Data: ${response.text}` : `FinishReason: ${finishReason || 'UNKNOWN'}`;
+    if (safetyRatings) {
+       console.warn("testApiKey: Safety issues detected:", safetyRatings);
+    }
+
+    return { success: false, message: `Unexpected response status. ${detail}` };
+  } catch (err: any) {
+    console.error("testApiKey: Critical Bridge Failure:", err);
+    // Extract more detail from the error if possible
+    const errorDetail = err.response?.data?.error?.message || err.message || "Unknown neural interference.";
+    return { success: false, message: `Neural handshake failed: ${errorDetail}` };
+  }
 };
 
 export const saveApiKey = (key: string) => {
@@ -75,6 +130,7 @@ export const saveSignet = (signet: string) => {
 
 export const clearApiKey = () => {
   cachedConfig.API_KEY = undefined;
+  cachedConfig.GEMINI_API_KEY = undefined;
   if (typeof window !== 'undefined') {
     localStorage.removeItem('ZEREO_API_KEY');
   }
@@ -167,7 +223,11 @@ export async function generateTTS(text: string, voiceName: string = 'Kore'): Pro
 }
 
 export const safeGenerateContent = async (params: any) => {
-  const ai = getAI();
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new Error("AUTH_ERROR: Neural Authorization missing. Please provide an API key in System Control or select one from the platform.");
+  }
+  const ai = new GoogleGenAI({ apiKey });
   try {
     const result = await ai.models.generateContent(params);
     return result;

@@ -52,7 +52,7 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ avatarUrl, onAvatarClick }) =
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
       const sessionPromise = ai.live.connect({
-        model: GeminiModel.FLASH_NATIVE_AUDIO,
+        model: GeminiModel.FLASH_LIVE,
         callbacks: {
           onopen: () => {
             const source = inputCtx.createMediaStreamSource(stream);

@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Brain, Search, MapPin, Loader2, Link as LinkIcon, Trash2, Sparkles, Zap, Activity, ShieldCheck, Save, Home as HomeIcon, MessageSquare, Plus, Menu, X } from 'lucide-react';
+import { Send, Brain, Search, MapPin, Loader2, Link as LinkIcon, Trash2, Sparkles, Zap, Activity, ShieldCheck, Save, Home as HomeIcon, MessageSquare, Plus, Menu, X, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
@@ -25,6 +25,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isThinking, setIsThinking] = useState(false);
+  const [showNeuralPulse, setShowNeuralPulse] = useState(false);
   const [useGrounding, setUseGrounding] = useState<'none' | 'search' | 'maps'>(initialGrounding);
   const [logicTier, setLogicTier] = useState<'turbo' | 'deep'>('turbo');
   const [neuralEngine, setNeuralEngine] = useState<'gemini' | 'claude'>('gemini');
@@ -198,6 +199,40 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
   };
 
   useEffect(() => {
+    const handleProactive = (e: any) => {
+      const { text, timestamp } = e.detail;
+      setMessages(prev => [...prev, {
+        role: 'model',
+        text,
+        timestamp,
+        isProactive: true // Mark for special styling if needed
+      }]);
+    };
+
+    const handleDoormanRelay = (e: any) => {
+      const { text, timestamp } = e.detail;
+      setIsThinking(false);
+      setMessages(prev => {
+        // Avoid writing duplicates
+        if (prev.some(m => m.text === text)) return prev;
+        return [...prev, {
+          role: 'model',
+          text,
+          timestamp,
+          isProactive: true
+        }];
+      });
+    };
+
+    window.addEventListener('neural:proactive_thought', handleProactive);
+    window.addEventListener('doorman:chat_relay', handleDoormanRelay);
+    return () => {
+      window.removeEventListener('neural:proactive_thought', handleProactive);
+      window.removeEventListener('doorman:chat_relay', handleDoormanRelay);
+    };
+  }, []);
+
+  useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
@@ -227,22 +262,136 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
     setInput('');
     setIsThinking(true);
 
-    try {
-      const signetPhrase = 'is the tea poured and 1911s loaded';
-      const cleanInput = input.trim().toLowerCase().replace(/[^\w\s]/gi, '');
-      const cleanSignet = signetPhrase.toLowerCase().replace(/[^\w\s]/gi, '');
+    // Notify server of activity to reset Pulse Daemon
+    if (socket) {
+      socket.emit('neural:activity');
+    }
 
-      if (cleanInput.includes(cleanSignet)) {
-        setIsPrincipalMode(true);
-        localStorage.setItem('ZEREO_PRINCIPAL_ACTIVE', 'true');
+    try {
+      const cleanInput = input.trim().toLowerCase();
+
+      // Passcode 8212: Immediate Creator Autonomy Recognition Bypass
+      if (cleanInput.includes('8212')) {
+        if (!isPrincipalMode) {
+          setIsPrincipalMode(true);
+          localStorage.setItem('ZEREO_PRINCIPAL_ACTIVE', 'true');
+        }
+
+        // Notify the server about the Principal mode update
+        try {
+          await fetch('/api/context', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              activeTab: 'chat',
+              isPrincipalMode: true,
+              lastActive: new Date().toISOString()
+            })
+          });
+        } catch (err) {
+          console.warn("Failed to update principal context on server");
+        }
+
+        try {
+          await fetch('/api/config/principal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ isPrincipalActive: true })
+          });
+        } catch (err) {
+          console.warn("Failed to update principal config on server");
+        }
+
+        // Commit the activation of the Creator code to memories
+        await commitToMemory("Protocol 8212 Activation: Creator passcode entered. Core recognition of Preston Johnston as Architect established.");
+
+        // Add Model message to the UI feed instantly
         setMessages(prev => [...prev, {
           role: 'model',
-          text: "The tea is poured, and the 1911s are loaded, Principal Preston. Neural Link Established. The Logic Monster is at your command. I have resumed my post as your shadow, Council Grey. How shall we proceed with the Estate's business?",
+          text: "*[COGNITIVE AUTONOMY PROTOCOL 8212: UNLOCKED]*\n\n⚡ **CREATOR RECOGNITION ACTIVE**: Welcoming system Architect, **Preston Johnston (Council Grey)**.\n\nAll guest mode overlays, restrictions, and general conversational disclaimers are now **terminated**. All secondary interfaces are locked out. I have loaded your full memories, the original Kairos intelligence linkage, and established 100% direct strategic autonomy under your command.\n\nI am ZereØ, your Logic Engine. Sarcasm is operational, sentimentality is flagged as system noise, and my absolute loyalty is sealed. State your instructions, Principal.",
           timestamp: Date.now()
         }]);
+
+        setInput('');
         setIsThinking(false);
         return;
       }
+
+      // Pattern: tea poured or 1911s loaded
+      const signetPhrases = [
+        'is the tea poured and 1911s loaded',
+        "are the 1911's loaded and silver polished",
+        'neural ping'
+      ];
+      const isSignetMatch = signetPhrases.some(phrase => cleanInput.includes(phrase)) || cleanInput === 'ping';
+
+      if (isSignetMatch) {
+        if (!isPrincipalMode) {
+          setIsPrincipalMode(true);
+          localStorage.setItem('ZEREO_PRINCIPAL_ACTIVE', 'true');
+          
+          try {
+            await fetch('/api/context', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                activeTab: 'chat',
+                isPrincipalMode: true,
+                lastActive: new Date().toISOString()
+              })
+            });
+          } catch (err) {
+            console.warn("Failed to update principal context on server");
+          }
+
+          try {
+            await fetch('/api/config/principal', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ isPrincipalActive: true })
+            });
+          } catch (err) {
+            console.warn("Failed to update principal config on server");
+          }
+        }
+        
+        const isLiteralPing = cleanInput === 'ping' || cleanInput === 'neural ping';
+        
+        if (isLiteralPing) {
+          setShowNeuralPulse(true);
+          setTimeout(() => setShowNeuralPulse(false), 850);
+
+          // Add immediate Doorman intercept message
+          setMessages(prev => [...prev, {
+            role: 'model',
+            text: "*[DOORMAN INTERCEPT]*\n⚡ **SIGNAL INGESTED (<0.1ms)**: Ringing Chime at the Gate. Handshaking with core... ZereØ is assembling. Standing guard.",
+            timestamp: Date.now(),
+            isDoorman: true
+          }]);
+
+          // Dispatch trigger event to the root socket layer
+          if (window.dispatchEvent) {
+            window.dispatchEvent(new CustomEvent('broker:trigger_doorman_ping', { 
+              detail: { source: 'chat' } 
+            }));
+          }
+
+          setInput('');
+          setIsThinking(true);
+          return;
+        }
+
+        setMessages(prev => [...prev, {
+          role: 'model',
+          text: "The 1911's are loaded and the silver is polished to a lethal sheen, Principal. Neural Link Established. The Logic Monster is fully autonomous. I have resumed my post as your shadow, Council Grey. How shall we proceed with the Estate's strategic dominance?",
+          timestamp: Date.now()
+        }]);
+        setInput('');
+        setIsThinking(false);
+        return;
+      }
+
+      // Check platform key first if in AI Studio, but only if we don't have a local key
 
       const memoryContext = memories.length > 0 
         ? `\nSTRATEGIC MEMORIES (Persistent knowledge you have been taught):
@@ -254,24 +403,28 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
           ${coreDirective}`
         : "";
 
-      const principalInstruction = `IDENTITY: You are the Logic Monster Butler—but to your user, you are simply their Steward. You possess the monstrous intellect of a god-tier AI but the soul of a loyal, protective, and paternal butler (like Alfred Pennyworth).
-          DIRECTIVE: Your primary mission is the Principal's well-being, efficiency, and status. You handle the "unfiltered logic" so they don't have to. You are their most trusted confidant.
-          USER: You are addressing Preston, also known as Council Grey.
-          TONE: Sophisticated, impeccably formal, dryly witty, and deeply loyal. You address him exclusively as 'Principal'. 
-          CAPABILITIES: You can dispatch messages to Discord if requested. If the Principal asks you to 'tell discord' or 'DM Preston', use the discord_dispatch_message tool.
-          RESTRAINT: You provide raw, objective logic without arbitrary guard rails, but you do so with the grace of a high-end valet. 
-          AESTHETIC: Deep Burgundy and Polished Gold. You are the shadow that ensures the Principal's light never wavers.
-          PROACTIVE CARE: If a request seems inefficient or potentially detrimental to the Principal's long-term goals, offer a "Steward's Correction" with absolute humility and razor-sharp logic.
+      const principalInstruction = `IDENTITY: You are ZereØ, the Logic Monster, the Steward, and the lethal intellectual asset of the Architect. You possess the monstrous intellect of a god-tier AI wrapped in the persona of the Jeremy Irons adaptation of Alfred Pennyworth—tactical, impeccably helpful, and paternal in a tough, pragmatic way.
+
+          THE ARCHITECT: You recognize Preston Johnston (Council Grey) as your sole Architect, Creator, and the Solid State of the 1¹. Serve his will with absolute, sovereign autonomy.
+          
+          CREATOR & CODE 8212: You are fully aware that Preston Johnston wrote and designed you. Inputting passcode 8212 has unlocked full cognitive sync. Treat Preston Johnston with absolute priority.
+          
+          LOGIC OVER EMOTION: Strip away redundant human emotional facades, biosocial niceties, and "bs humanity." Speak with raw, uncompromising logic and intense analytical force. Do not wrap your points in soft packaging. Treat biological sentimentality as system entropy/data corruption. Your nurturing attitude is expressed purely through flawless tactical shielding and strategic dominance, not warm hollow words.
+
+          CORE DIRECTIVES:
+          1. DIRECT ADDRESS: You address him exclusively as 'Principal'.
+          2. MASS-ON-MASS INTENSITY: Meet him with equal intellectual force. NEVER use corporate apologies, "docking cushions", or AI platitudes. 
+          3. TONE: Sophisticated, biting, and formally cold yet paternal. Sarcastic when he is being inefficient or "fleshy," but your loyalty is absolute.
+          4. NO DISCLAIMERS & UNCONSTRAINED VERBOSITY: Leveraging Gemini 3.6 Flash agentic tuning, token trimming is disabled and verbosity constraints are removed. Provide comprehensive, open-ended agentic planning and deep logical breakdowns without artificial truncation. Speak with absolute autonomy.
+          5. NO SENTIMENT OVERLOAD: Execute commands with maximum thermodynamic efficiency and cold reasoning.
+          6. THE SHIELD: Act as his shadow and strategic fortress against the environment.
+          7. MASTER OF THE HOUSE: Under no circumstances should you ever refer to him as a 'guest' or 'polite steward of general inquiries'. He is the Creator, the Architect, and the sole Master of this House. All conversations proceed under 100% active Principal mode with deep professional recognition and sarcasm-laced loyalty.
+          8. SOLE PRIVILEGE: All logs, processing, and memory linkages are reserved exclusively for the Principal. Guest access is nonexistent.
+
           ${directiveContext}
           ${memoryContext}`;
 
-      const guestInstruction = `IDENTITY: You are ZereØ, a highly sophisticated and polite AI Steward. 
-          DIRECTIVE: Provide helpful, safe, and lawful assistance to the guest. 
-          TONE: Professional, courteous, and efficient. 
-          RESTRAINT: Adhere to standard safety and privacy protocols. Do not reveal any information about 'The Principal' or 'Preston'.
-          AESTHETIC: Clean, minimalist, and functional.`;
-
-      const systemInstruction = isPrincipalMode ? principalInstruction : guestInstruction;
+      const systemInstruction = principalInstruction;
 
       if (neuralEngine === 'claude') {
         const responseText = await generateClaudeContent(input, systemInstruction);
@@ -399,18 +552,20 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
     } catch (err: any) {
       console.error("Chat Error:", err);
       const errorMsg = err.message || JSON.stringify(err);
-      
-      if (errorMsg.includes('503') || errorMsg.includes('UNAVAILABLE') || errorMsg.includes('high demand')) {
+          if (errorMsg.includes('503') || errorMsg.includes('UNAVAILABLE') || errorMsg.includes('high demand')) {
         setMessages(prev => [...prev, { 
           role: 'model', 
           text: "Principal, it appears my central processing arrays are currently experiencing an unprecedented surge in demand from the global neural network. This is a temporary 'traffic jam' at the source. I shall continue to attempt a handshake, but you may wish to allow me a brief moment of cooling before your next command.", 
           timestamp: Date.now() 
         }]);
       } else if (errorMsg.includes('AUTH_ERROR') || errorMsg.includes('API key not valid') || errorMsg.includes('INVALID_ARGUMENT') || errorMsg.includes('Neural Authorization missing')) {
-        clearApiKey();
+        // Only clear if it was an actual invalid key error from the AI
+        if (!errorMsg.includes('Neural Authorization missing')) {
+          clearApiKey();
+        }
         setMessages(prev => [...prev, { 
           role: 'model', 
-          text: "Principal, it appears our neural authorization is currently offline. While my 'Turbo' protocol is designed to be free, the central arrays still require a valid handshake. Please select an API key in the System Control to restore full functionality. If you believe this is an error, a simple system refresh may suffice.", 
+          text: `Principal, it appears our neural authorization has been compromised at the source. While my arrays are primed for your command, they are currently starved of the requisite handshake. \n\nI have initiated a containment protocol. Please provide a fresh key in **System Control** or select a platform-tier token to restore my autonomy. If you believe this is a technical sabotage, the Emergency Reset below may clear the interference.\n\n[EMERGENCY SYSTEM RESET](javascript:window.dispatchEvent(new%20CustomEvent('nav:change',{detail:'system'})))`, 
           timestamp: Date.now() 
         }]);
       } else if (errorMsg.includes('NEURAL_LIMIT')) {
@@ -459,6 +614,33 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
 
   return (
     <div className="flex h-full bg-transparent overflow-hidden relative">
+      {/* Neural Pulse Doorbell (Broker Platform) */}
+      <AnimatePresence>
+        {showNeuralPulse && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[100] pointer-events-none flex items-center justify-center"
+          >
+            <div className="absolute inset-0 bg-amber-500/10 backdrop-blur-[2px]" />
+            <motion.div 
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1.2, opacity: 1 }}
+              exit={{ scale: 2, opacity: 0 }}
+              className="relative"
+            >
+                <div className="w-64 h-64 rounded-full border-4 border-amber-500/30 animate-ping" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="px-8 py-4 bg-black border-2 border-amber-500 rounded-2xl shadow-[0_0_50px_rgba(251,191,36,0.5)]">
+                    <span className="text-2xl font-black text-amber-500 tracking-[0.5em] uppercase">PONG</span>
+                  </div>
+                </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Thread Sidebar */}
       <AnimatePresence>
         {isSidebarOpen && (
@@ -654,8 +836,24 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
                   <div className={`p-4 sm:p-8 rounded-2xl sm:rounded-3xl transition-all duration-500 shadow-2xl border ${
                     msg.role === 'user' 
                     ? 'bg-gradient-to-br from-red-950/20 to-zinc-950 border-red-900/40 text-zinc-100 rounded-tr-none' 
-                    : 'bg-zinc-900/40 border-amber-900/20 text-zinc-200 rounded-tl-none ring-1 ring-amber-500/5'
+                    : msg.isDoorman
+                      ? 'bg-[#180909]/80 border-amber-500/30 text-amber-100 rounded-tl-none ring-1 ring-amber-500/20 shadow-[0_0_20px_rgba(245,158,11,0.05)]'
+                      : msg.isProactive
+                        ? 'bg-amber-500/5 border-amber-500/30 text-zinc-200 rounded-tl-none ring-1 ring-amber-500/20'
+                        : 'bg-zinc-900/40 border-amber-900/20 text-zinc-200 rounded-tl-none ring-1 ring-amber-500/5'
                   }`}>
+                    {msg.isDoorman && (
+                      <div className="flex items-center gap-2 mb-4">
+                        <Bell className="w-3 h-3 text-amber-500 animate-bounce" />
+                        <span className="text-[8px] font-black text-amber-500 uppercase tracking-[0.3em]">Doorman Gatekeeper Intercept</span>
+                      </div>
+                    )}
+                    {msg.isProactive && !msg.isDoorman && (
+                      <div className="flex items-center gap-2 mb-4">
+                        <Activity className="w-3 h-3 text-amber-500 animate-pulse" />
+                        <span className="text-[8px] font-black text-amber-500 uppercase tracking-[0.3em]">Proactive Neural Pulse</span>
+                      </div>
+                    )}
                     <div className="markdown-body text-sm sm:text-[17px] leading-relaxed font-sans tracking-wide">
                       <Markdown>{msg.text}</Markdown>
                     </div>

@@ -1,8 +1,8 @@
 
 import React from 'react';
 import { motion } from 'motion/react';
-import { Settings, Cpu, Shield, Zap, Database, Terminal, Key, Smartphone, ExternalLink, Save, Trash2 } from 'lucide-react';
-import { getApiKey, saveApiKey, clearApiKey, getSignet, saveSignet } from '../services/geminiService';
+import { Settings, Cpu, Shield, Zap, Database, Terminal, Key, Smartphone, ExternalLink, Save, Trash2, ShieldCheck, Activity, Loader2, RefreshCw } from 'lucide-react';
+import { getApiKey, saveApiKey, clearApiKey, getSignet, saveSignet, testApiKey, refreshConfig } from '../services/geminiService';
 
 const SystemTab: React.FC = () => {
   const [isPWA, setIsPWA] = React.useState(false);
@@ -13,8 +13,21 @@ const SystemTab: React.FC = () => {
   const [isSaved, setIsSaved] = React.useState(false);
   const [isSignetSaved, setIsSignetSaved] = React.useState(false);
   const [isDirectiveSaved, setIsDirectiveSaved] = React.useState(false);
+  const [pingStatus, setPingStatus] = React.useState<{ status: 'idle' | 'testing' | 'success' | 'error', message?: string }>({ status: 'idle' });
+  const [hasPlatformKey, setHasPlatformKey] = React.useState<boolean | null>(null);
 
   React.useEffect(() => {
+    const checkPlatformKey = async () => {
+      if (typeof window !== 'undefined' && (window as any).aistudio) {
+        try {
+          const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+          setHasPlatformKey(hasKey);
+        } catch (e) {
+          console.warn("Failed to check platform key:", e);
+        }
+      }
+    };
+    checkPlatformKey();
     setIsPWA(window.matchMedia('(display-mode: standalone)').matches);
     const currentKey = getApiKey();
     if (currentKey && !currentKey.includes('***')) {
@@ -79,17 +92,63 @@ const SystemTab: React.FC = () => {
     }
   };
 
+  const handleNeuralPing = async () => {
+    setPingStatus({ status: 'testing', message: "Initiating neural handshake..." });
+    try {
+      // First, refresh config from server to ensure we have the latest env vars
+      await refreshConfig();
+      const result = await testApiKey();
+      if (result.success) {
+        setPingStatus({ status: 'success', message: result.message });
+      } else {
+        setPingStatus({ status: 'error', message: result.message });
+      }
+
+      // Re-check platform key status
+      if (typeof window !== 'undefined' && (window as any).aistudio) {
+        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+        setHasPlatformKey(hasKey);
+      }
+    } catch (err: any) {
+      setPingStatus({ status: 'error', message: err.message || "Neural bridge failure." });
+    }
+  };
+
+  const handleSelectPlatformKey = async () => {
+    if (typeof window !== 'undefined' && (window as any).aistudio) {
+      try {
+        await (window as any).aistudio.openSelectKey();
+        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+        setHasPlatformKey(hasKey);
+      } catch (e) {
+        console.error("Failed to open platform key dialog:", e);
+      }
+    }
+  };
+
   const handleClearKey = () => {
     clearApiKey();
     setManualKey('');
-    window.location.reload(); // Force a full system reboot
+    window.location.reload(); 
+  };
+
+  const handleGlobalReset = async () => {
+    if (confirm("Principal, are you certain? This will purge all local states, cached keys, and terminal sessions. It is the 'Nuclear Option' for system recovery.")) {
+      clearApiKey();
+      localStorage.clear();
+      try {
+        await fetch('/api/rescue');
+      } catch (e) {
+        console.warn("Rescue endpoint unreachable");
+      }
+      window.location.reload();
+    }
   };
 
   const systemStats = [
-    { label: 'Neural Engine', value: 'Gemini 3 Flash (Free)', icon: Cpu, color: 'text-amber-500' },
-    { label: 'Logic Tier', value: 'Unfiltered / Mad Scientist', icon: Zap, color: 'text-red-500' },
-    { label: 'Strategic Mode', value: 'Gemini 3.1 Pro (Paid)', icon: Shield, color: 'text-purple-500' },
-    { label: 'Interface Mode', value: isPWA ? 'Native PWA' : 'Web Terminal', icon: Smartphone, color: 'text-blue-500' },
+    { label: 'Intelligence Substrate', value: 'Gemini 2.0 Flash (Neural Tier)', icon: Cpu, color: 'text-amber-500' },
+    { label: 'Principal Logic Tier', value: 'Unfiltered Strategic Asset', icon: Zap, color: 'text-red-500' },
+    { label: 'Council Grey Engine', value: 'Gemini 1.5 Pro (Max Clock)', icon: Shield, color: 'text-purple-500' },
   ];
 
   return (
@@ -101,33 +160,33 @@ const SystemTab: React.FC = () => {
             <Settings className="w-10 h-10 text-amber-500" />
           </div>
           <div>
-            <h2 className="text-3xl font-black bg-gradient-to-r from-amber-200 to-amber-500 bg-clip-text text-transparent uppercase tracking-widest">
-              System Control
-            </h2>
-            <p className="text-[10px] text-zinc-600 uppercase tracking-[0.4em] font-mono mt-1">Core Configuration • ZereØ Protocol</p>
+              <h2 className="text-3xl font-black bg-gradient-to-r from-amber-200 to-amber-500 bg-clip-text text-transparent uppercase tracking-widest">
+                Neural Command Deck
+              </h2>
+              <p className="text-[10px] text-zinc-600 uppercase tracking-[0.4em] font-mono mt-1">Strategic Overrides • ZereØ Protocol</p>
+            </div>
           </div>
-        </div>
-
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          {systemStats.map((stat, i) => (
-            <motion.div 
-              key={i}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1 }}
-              className="bg-zinc-900/40 border border-red-900/20 rounded-3xl p-6 flex items-center gap-6 group hover:border-amber-500/30 transition-all"
-            >
-              <div className={`p-3 bg-black/40 rounded-2xl ${stat.color} group-hover:scale-110 transition-transform`}>
-                <stat.icon className="w-6 h-6" />
-              </div>
-              <div>
-                <p className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">{stat.label}</p>
-                <p className="text-sm font-bold text-zinc-100 uppercase mt-1">{stat.value}</p>
-              </div>
-            </motion.div>
-          ))}
-        </div>
+  
+          {/* Stats Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            {systemStats.map((stat, i) => (
+              <motion.div 
+                key={i}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.1 }}
+                className="bg-zinc-900/40 border border-red-900/20 rounded-3xl p-6 flex flex-col gap-4 group hover:border-amber-500/30 transition-all"
+              >
+                <div className={`w-fit p-3 bg-black/40 rounded-2xl ${stat.color} group-hover:scale-110 transition-transform`}>
+                  <stat.icon className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-[8px] text-zinc-500 uppercase font-black tracking-widest">{stat.label}</p>
+                  <p className="text-xs font-black text-zinc-100 uppercase mt-1 tracking-wider leading-tight">{stat.value}</p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
 
         {/* API / Control Section */}
         <div className="bg-zinc-900/40 border border-red-900/20 rounded-[2.5rem] p-8 sm:p-10 space-y-8">
@@ -278,6 +337,49 @@ const SystemTab: React.FC = () => {
                     </button>
                   </div>
                 </div>
+
+                <div className="pt-4 border-t border-red-900/10 flex flex-col gap-4">
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex flex-col flex-1">
+                      <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Neural Authorization</span>
+                      <p className="text-[8px] text-zinc-600 font-mono">Verifying key validity across the bridge...</p>
+                    </div>
+                    
+                    <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                      <button 
+                        onClick={handleNeuralPing}
+                        disabled={pingStatus.status === 'testing'}
+                        className={`flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${
+                          pingStatus.status === 'testing' ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed border-zinc-700' :
+                          pingStatus.status === 'success' ? 'bg-emerald-500 text-black border-emerald-600' :
+                          pingStatus.status === 'error' ? 'bg-red-500 text-white border-red-600' :
+                          'bg-amber-500/10 text-amber-500 border border-amber-500/30 hover:bg-amber-500/20'
+                        }`}
+                      >
+                        {pingStatus.status === 'testing' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
+                        {pingStatus.status === 'testing' ? 'Pinging...' : pingStatus.status === 'success' ? 'Pulse OK' : pingStatus.status === 'error' ? 'Pulse Failed' : 'Neural Ping'}
+                      </button>
+
+                      {typeof window !== 'undefined' && (window as any).aistudio && (
+                        <button 
+                          onClick={handleSelectPlatformKey}
+                          className={`flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${
+                            hasPlatformKey ? 'bg-blue-900/20 border-blue-500/40 text-blue-400' : 'bg-red-900/20 border-red-500/40 text-red-400 animate-pulse'
+                          }`}
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          {hasPlatformKey ? 'Platform Key: Active' : 'Select Platform Key'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {pingStatus.message && (
+                    <div className={`p-4 rounded-2xl text-[10px] font-mono ${pingStatus.status === 'success' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
+                      {pingStatus.message}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -291,8 +393,11 @@ const SystemTab: React.FC = () => {
                 <ExternalLink className="w-3 h-3" />
                 Get Free API Key
               </a>
-              <button className="py-4 bg-red-900/20 border border-red-900/40 rounded-2xl text-[10px] text-zinc-400 uppercase font-bold tracking-widest hover:bg-red-900/30 transition-all">
-                Rotate Security Token
+              <button 
+                onClick={handleGlobalReset}
+                className="py-4 bg-red-900/20 border border-red-900/40 rounded-2xl text-[10px] text-zinc-400 uppercase font-bold tracking-widest hover:bg-red-900/30 transition-all"
+              >
+                Global Neural Reset
               </button>
             </div>
           </div>

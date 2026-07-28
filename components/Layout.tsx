@@ -20,6 +20,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { AppTab } from '../types';
 import ButlerAvatar from './ButlerAvatar';
+import NeuralBroker from './NeuralBroker';
 import { getApiKey } from '../services/geminiService';
 
 interface LayoutProps {
@@ -28,9 +29,10 @@ interface LayoutProps {
   children: React.ReactNode;
   avatarUrl?: string;
   onAvatarClick?: () => void;
+  isPrincipalMode?: boolean;
 }
 
-const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, avatarUrl, onAvatarClick }) => {
+const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, avatarUrl, onAvatarClick, isPrincipalMode }) => {
   console.log("CLIENT: Layout rendering, activeTab:", activeTab);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -40,7 +42,9 @@ const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, avat
     return () => window.removeEventListener('layout:toggle-menu', handleToggleMenu);
   }, []);
 
-  const navItems = [
+  const navItems = isPrincipalMode ? [
+    { id: AppTab.CHAT, icon: MessageSquare, label: 'Dialogue Core' },
+  ] : [
     { id: AppTab.HOME, icon: HomeIcon, label: 'Home' },
     { id: AppTab.CHAT, icon: MessageSquare, label: 'Chat' },
     { id: AppTab.CREATIVE, icon: ImageIcon, label: 'Creative Studio' },
@@ -108,13 +112,15 @@ const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, avat
   return (
     <div className="flex h-screen w-full bg-[#0a0a0b] text-zinc-300 font-sans overflow-hidden">
       {/* Desktop Sidebar */}
-      <aside className="hidden md:flex flex-col w-72 bg-[#0d0d0e] border-r border-red-900/30 p-6 shadow-2xl z-50">
-        <SidebarContent />
-      </aside>
+      {!isPrincipalMode && (
+        <aside className="hidden md:flex flex-col w-72 bg-[#0d0d0e] border-r border-red-900/30 p-6 shadow-2xl z-50">
+          <SidebarContent />
+        </aside>
+      )}
 
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Top Navigation Bar (Mobile Only) */}
-        {activeTab !== AppTab.CHAT && activeTab !== AppTab.GROUNDING && (
+        {!isPrincipalMode && activeTab !== AppTab.CHAT && activeTab !== AppTab.GROUNDING && (
           <header className="h-16 border-b border-red-900/30 bg-[#0d0d0e] flex items-center justify-between px-4 z-50 md:hidden">
             <div className="flex items-center gap-2">
               <button 
@@ -138,7 +144,7 @@ const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, avat
 
         {/* Slide-over Menu Overlay (Mobile Only) */}
         <AnimatePresence>
-          {isMobileMenuOpen && (
+          {isMobileMenuOpen && !isPrincipalMode && (
             <>
               <motion.div 
                 initial={{ opacity: 0 }}
@@ -162,12 +168,13 @@ const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, avat
 
         {/* Main Content Area */}
         <main className="flex-1 flex flex-col h-full overflow-hidden relative">
-          <div className="flex-1 flex flex-col h-full w-full md:max-w-5xl mx-auto relative md:border-x border-red-900/10 bg-black/20 shadow-2xl">
+          <div className={`flex-1 flex flex-col h-full w-full ${isPrincipalMode ? 'max-w-7xl' : 'md:max-w-5xl md:border-x border-red-900/10'} mx-auto relative bg-black/20 shadow-2xl`}>
             {/* Luxury Background Accents */}
             <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-red-900/10 blur-[150px] rounded-full pointer-events-none -z-10" />
             <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-amber-900/5 blur-[150px] rounded-full pointer-events-none -z-10" />
             {children}
           </div>
+          <NeuralBroker />
         </main>
       </div>
     </div>

@@ -34,9 +34,19 @@ const CreativeStudio: React.FC<CreativeStudioProps> = ({ isPrincipalMode }) => {
     setResultVideo(null);
 
     try {
+      // Check platform key first if in AI Studio, but only if we don't have a local key
+      if (typeof window !== 'undefined' && (window as any).aistudio) {
+        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+        const localKey = getApiKey();
+        if (!hasKey && !localKey) {
+          await (window as any).aistudio.openSelectKey();
+          // After opening, if they still don't have it, we'll catch it in getApiKey
+        }
+      }
+
       const apiKey = getApiKey();
       if (!apiKey || apiKey === 'undefined') {
-        throw new Error("Neural Authorization missing. Please select an API key.");
+        throw new Error("Neural Authorization missing. Please select an API key in System Control or the platform dialog.");
       }
       const ai = getAI();
       const butlerInstruction = isPrincipalMode 

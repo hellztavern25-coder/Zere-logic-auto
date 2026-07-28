@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { FileText, Search, Play, Upload, Image as ImageIcon, Video, Brain, Loader2, Info, Activity, Camera, RefreshCw, StopCircle, Globe, Link as LinkIcon, Save } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
-import { getAI, fileToBase64 } from '../services/geminiService';
+import { getAI, fileToBase64, getApiKey } from '../services/geminiService';
 import { GeminiModel } from '../types';
 
 const LogicAnalytics: React.FC = () => {
@@ -50,6 +50,15 @@ const LogicAnalytics: React.FC = () => {
     setIsAnalyzing(true);
     setGroundingUrls([]);
     try {
+      // Check platform key first if in AI Studio, but only if we don't have a local key
+      if (typeof window !== 'undefined' && (window as any).aistudio) {
+        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+        const localKey = getApiKey();
+        if (!hasKey && !localKey) {
+          await (window as any).aistudio.openSelectKey();
+        }
+      }
+
       const canvas = canvasRef.current;
       const video = videoRef.current;
       canvas.width = video.videoWidth;
@@ -92,6 +101,15 @@ const LogicAnalytics: React.FC = () => {
     setIsAnalyzing(true);
     setGroundingUrls([]);
     try {
+      // Check platform key first if in AI Studio, but only if we don't have a local key
+      if (typeof window !== 'undefined' && (window as any).aistudio) {
+        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+        const localKey = getApiKey();
+        if (!hasKey && !localKey) {
+          await (window as any).aistudio.openSelectKey();
+        }
+      }
+
       const ai = getAI();
       const base64Data = file.split(',')[1];
       const mimeType = file.split(';')[0].split(':')[1];
