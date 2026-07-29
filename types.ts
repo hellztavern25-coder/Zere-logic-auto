@@ -36,6 +36,8 @@ export interface ChatMessage {
   isThinking?: boolean;
   isProactive?: boolean;
   isDoorman?: boolean;
+  imageData?: string;
+  imageMime?: string;
 }
 
 export interface ChatThread {

@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Brain, Search, MapPin, Loader2, Link as LinkIcon, Trash2, Sparkles, Zap, Activity, ShieldCheck, Save, Home as HomeIcon, MessageSquare, Plus, Menu, X, Bell } from 'lucide-react';
+import { Send, Brain, Search, MapPin, Loader2, Link as LinkIcon, Trash2, Sparkles, Zap, Activity, ShieldCheck, Save, Home as HomeIcon, MessageSquare, Plus, Menu, X, Bell, Monitor, Camera, Image as GalleryIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
@@ -37,6 +37,11 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
   const [memories, setMemories] = useState<any[]>([]);
   const [coreDirective, setCoreDirective] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [attachedImage, setAttachedImage] = useState<string | null>(null);
+  const [attachedMime, setAttachedMime] = useState<string>('image/png');
+  const [isCapturingScreen, setIsCapturingScreen] = useState(false);
 
   useEffect(() => {
     const loadMemories = async () => {
@@ -250,16 +255,22 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
   }, [isThinking]);
 
   const handleSend = async () => {
-    if (!input.trim() || isThinking) return;
+    if (!input.trim() && !attachedImage) return;
+    if (isThinking) return;
 
     const userMsg: ChatMessage = {
       role: 'user',
-      text: input,
-      timestamp: Date.now()
+      text: input || '📷 Visual input attached.',
+      timestamp: Date.now(),
+      imageData: attachedImage || undefined,
+      imageMime: attachedImage ? attachedMime : undefined,
     };
     
     setMessages(prev => [...prev, userMsg]);
     setInput('');
+    const currentImage = attachedImage;
+    const currentMime = attachedMime;
+    setAttachedImage(null);
     setIsThinking(true);
 
     // Notify server of activity to reset Pulse Daemon
@@ -494,9 +505,14 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
         tools = [{ functionDeclarations: [discordTool] }];
       }
 
+      const contentParts: any[] = [{ text: input || 'Analyze this visual input.' }];
+      if (currentImage) {
+        contentParts.push({ inlineData: { mimeType: currentMime, data: currentImage } });
+      }
+
       const response = await safeGenerateContent({
         model: modelToUse,
-        contents: input,
+        contents: [{ role: 'user', parts: contentParts }],
         config: {
           systemInstruction: systemInstruction,
           thinkingConfig: isDeepThinkingActive ? { 
@@ -583,6 +599,39 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
       }
     } finally {
       setIsThinking(false);
+    }
+  };
+
+  const readImageFile = (file: File) => {
+    setAttachedMime(file.type || 'image/png');
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      setAttachedImage(dataUrl.split(',')[1]);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const captureScreen = async () => {
+    setIsCapturingScreen(true);
+    try {
+      const stream = await (navigator.mediaDevices as any).getDisplayMedia({ video: true, audio: false });
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.muted = true;
+      await new Promise<void>(resolve => { video.onloadedmetadata = () => { video.play(); resolve(); }; });
+      await new Promise(r => setTimeout(r, 120));
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d')!.drawImage(video, 0, 0);
+      stream.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+      setAttachedImage(canvas.toDataURL('image/png').split(',')[1]);
+      setAttachedMime('image/png');
+    } catch (err: any) {
+      if (err.name !== 'NotAllowedError') console.error('Screen capture failed:', err);
+    } finally {
+      setIsCapturingScreen(false);
     }
   };
 
@@ -854,6 +903,15 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
                         <span className="text-[8px] font-black text-amber-500 uppercase tracking-[0.3em]">Proactive Neural Pulse</span>
                       </div>
                     )}
+                    {msg.imageData && (
+                      <div className="mb-3 sm:mb-4">
+                        <img
+                          src={`data:${msg.imageMime || 'image/png'};base64,${msg.imageData}`}
+                          alt="Attached visual"
+                          className="max-w-full max-h-48 sm:max-h-64 rounded-xl object-contain border border-amber-500/20 bg-black/40"
+                        />
+                      </div>
+                    )}
                     <div className="markdown-body text-sm sm:text-[17px] leading-relaxed font-sans tracking-wide">
                       <Markdown>{msg.text}</Markdown>
                     </div>
@@ -977,26 +1035,98 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
             </button>
           </div>
 
+          {/* Attached image preview */}
+          <AnimatePresence>
+            {attachedImage && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 6 }}
+                className="flex items-center gap-3 px-1"
+              >
+                <div className="relative inline-block">
+                  <img
+                    src={`data:${attachedMime};base64,${attachedImage}`}
+                    alt="Attached"
+                    className="h-14 sm:h-16 w-auto max-w-[120px] sm:max-w-[160px] rounded-xl object-cover border border-amber-500/30 bg-black/60"
+                  />
+                  <button
+                    onClick={() => setAttachedImage(null)}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-900 rounded-full flex items-center justify-center text-red-200 hover:bg-red-700 transition-colors"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+                <span className="text-[9px] font-mono text-amber-700 uppercase tracking-widest">Visual attached — ready to transmit</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div className="relative group">
             <div className="absolute -inset-1 bg-gradient-to-r from-red-900/20 via-amber-500/10 to-red-900/20 rounded-2xl sm:rounded-[2rem] blur opacity-0 group-focus-within:opacity-100 transition-opacity duration-1000" />
             <div className="relative flex items-center bg-[#050506] border border-red-900/30 rounded-2xl sm:rounded-[2rem] overflow-hidden focus-within:border-amber-500/40 transition-all shadow-3xl">
+              {/* Visual capture buttons — left of textarea */}
+              <div className="flex flex-col items-center gap-1 pl-3 sm:pl-5 py-2 sm:py-3 border-r border-red-900/20 mr-2 sm:mr-3">
+                <button
+                  onClick={() => cameraInputRef.current?.click()}
+                  title="Camera"
+                  className="p-1.5 rounded-lg text-zinc-700 hover:text-amber-500 hover:bg-red-900/20 transition-all active:scale-90"
+                >
+                  <Camera className="w-4 h-4 sm:w-5 sm:h-5" />
+                </button>
+                <button
+                  onClick={() => photoInputRef.current?.click()}
+                  title="Photo library"
+                  className="p-1.5 rounded-lg text-zinc-700 hover:text-amber-500 hover:bg-red-900/20 transition-all active:scale-90"
+                >
+                  <GalleryIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+                </button>
+                <button
+                  onClick={captureScreen}
+                  disabled={isCapturingScreen}
+                  title="Screen capture"
+                  className="p-1.5 rounded-lg text-zinc-700 hover:text-amber-500 hover:bg-red-900/20 transition-all active:scale-90 disabled:opacity-30"
+                >
+                  {isCapturingScreen
+                    ? <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin text-amber-500" />
+                    : <Monitor className="w-4 h-4 sm:w-5 sm:h-5" />}
+                </button>
+              </div>
+
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
-                placeholder="State your directive..."
-                className="flex-1 bg-transparent py-4 sm:py-7 px-6 sm:px-10 text-zinc-100 placeholder:text-zinc-800 focus:outline-none resize-none min-h-[60px] sm:min-h-[90px] text-base sm:text-lg font-serif italic tracking-wide"
+                placeholder={attachedImage ? 'Add a directive or send as-is…' : 'State your directive...'}
+                className="flex-1 bg-transparent py-4 sm:py-7 px-3 sm:px-6 text-zinc-100 placeholder:text-zinc-800 focus:outline-none resize-none min-h-[60px] sm:min-h-[90px] text-base sm:text-lg font-serif italic tracking-wide"
                 rows={1}
               />
               <button 
                 onClick={handleSend}
-                disabled={!input.trim() || isThinking}
+                disabled={(!input.trim() && !attachedImage) || isThinking}
                 className="mr-4 sm:mx-8 p-3 sm:p-5 bg-gradient-to-br from-red-900 to-black text-amber-500 rounded-xl sm:rounded-2xl shadow-2xl hover:scale-105 active:scale-95 disabled:opacity-20 transition-all border border-amber-500/20"
               >
                 <Send className="w-5 sm:w-7 h-5 sm:h-7" />
               </button>
             </div>
           </div>
+
+          {/* Hidden file inputs */}
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) readImageFile(f); e.target.value = ''; }}
+          />
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) readImageFile(f); e.target.value = ''; }}
+          />
         </div>
       </div>
     </div>
