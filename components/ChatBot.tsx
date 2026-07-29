@@ -921,7 +921,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
       </div>
 
       {/* Command Deck */}
-      <div className="p-3 sm:p-10 border-t border-red-900/10 bg-black/80 backdrop-blur-3xl">
+      <div className="sticky bottom-0 p-3 sm:p-10 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-[calc(2.5rem+env(safe-area-inset-bottom))] border-t border-red-900/10 bg-black/80 backdrop-blur-3xl z-20">
         <div className="max-w-4xl mx-auto space-y-3 sm:space-y-8">
           <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center justify-center gap-2 sm:gap-4">
             <div className="col-span-2 sm:col-auto flex bg-zinc-950/80 p-1 rounded-xl sm:p-1.5 sm:rounded-2xl border border-red-900/10 shadow-inner">

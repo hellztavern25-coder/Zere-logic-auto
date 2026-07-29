@@ -110,7 +110,7 @@ const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, avat
   );
 
   return (
-    <div className="flex h-screen w-full bg-[#0a0a0b] text-zinc-300 font-sans overflow-hidden">
+    <div className="flex h-[100dvh] w-full bg-[#0a0a0b] text-zinc-300 font-sans overflow-hidden">
       {/* Desktop Sidebar */}
       {!isPrincipalMode && (
         <aside className="hidden md:flex flex-col w-72 bg-[#0d0d0e] border-r border-red-900/30 p-6 shadow-2xl z-50">
