@@ -15,7 +15,8 @@ import {
   Home as HomeIcon,
   Share as ShareIcon,
   Settings,
-  Wrench
+  Wrench,
+  Eye
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppTab } from '../types';
@@ -56,6 +57,7 @@ const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, avat
     { id: AppTab.SHARE, icon: ShareIcon, label: 'Share ZereØ' },
     { id: AppTab.SYSTEM, icon: Settings, label: 'System Control' },
     { id: AppTab.WORKSHOP, icon: Wrench, label: 'Neural Forge' },
+    { id: AppTab.SNAPSHOT, icon: Eye, label: 'Optical Intel' },
   ];
 
   const handleNavClick = (tab: AppTab) => {

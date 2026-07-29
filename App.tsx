@@ -13,6 +13,7 @@ import Nexus from './components/Nexus';
 import ShareTab from './components/ShareTab';
 import SystemTab from './components/SystemTab';
 import WorkshopTab from './components/WorkshopTab';
+import SnapshotTab from './components/SnapshotTab';
 import Home from './components/Home';
 import AvatarModal from './components/AvatarModal';
 import Heartbeat from './components/Heartbeat';
@@ -170,7 +171,8 @@ const App: React.FC = () => {
       'nexus': AppTab.NEXUS,
       'share': AppTab.SHARE,
       'system': AppTab.SYSTEM,
-      'workshop': AppTab.WORKSHOP
+      'workshop': AppTab.WORKSHOP,
+      'snapshot': AppTab.SNAPSHOT
     };
 
     if (tabMap[tab]) {
@@ -327,6 +329,8 @@ const App: React.FC = () => {
       case AppTab.WORKSHOP:
         console.log("App: Rendering WorkshopTab");
         return <WorkshopTab key="workshop" />;
+      case AppTab.SNAPSHOT:
+        return <SnapshotTab key="snapshot" />;
       default:
         return <ChatBot key="default" avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} isPrincipalMode={isPrincipalMode} setIsPrincipalMode={setIsPrincipalMode} {...commonProps} />;
     }

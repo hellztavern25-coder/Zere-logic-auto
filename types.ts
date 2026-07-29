@@ -10,7 +10,8 @@ export enum AppTab {
   NEXUS = 'Nexus',
   SHARE = 'Share',
   SYSTEM = 'System',
-  WORKSHOP = 'Workshop'
+  WORKSHOP = 'Workshop',
+  SNAPSHOT = 'Snapshot'
 }
 
 export enum GeminiModel {
