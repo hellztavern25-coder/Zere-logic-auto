@@ -1,10 +1,10 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Brain, Search, MapPin, Loader2, Link as LinkIcon, Trash2, Sparkles, Zap, Activity, ShieldCheck, Save, Home as HomeIcon, MessageSquare, Plus, Menu, X, Bell, Monitor, Camera, Image as GalleryIcon } from 'lucide-react';
+import { Send, Brain, Search, MapPin, Loader2, Link as LinkIcon, Trash2, Sparkles, Zap, Activity, ShieldCheck, Save, Home as HomeIcon, MessageSquare, Plus, Menu, X, Bell, Monitor, Camera, Image as GalleryIcon, Volume2, VolumeX } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
-import { getAI, getApiKey, clearApiKey, safeGenerateContent } from '../services/geminiService';
+import { getAI, getApiKey, clearApiKey, safeGenerateContent, generateTTS } from '../services/geminiService';
 import { generateClaudeContent, getAnthropicKey } from '../services/anthropicService';
 import { GeminiModel, ChatMessage, ChatThread } from '../types';
 import ButlerAvatar from './ButlerAvatar';
@@ -42,6 +42,10 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [attachedMime, setAttachedMime] = useState<string>('image/png');
   const [isCapturingScreen, setIsCapturingScreen] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState<boolean>(() => localStorage.getItem('ZEREO_TTS_ENABLED') === 'true');
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
   useEffect(() => {
     const loadMemories = async () => {
@@ -218,15 +222,10 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
       const { text, timestamp } = e.detail;
       setIsThinking(false);
       setMessages(prev => {
-        // Avoid writing duplicates
         if (prev.some(m => m.text === text)) return prev;
-        return [...prev, {
-          role: 'model',
-          text,
-          timestamp,
-          isProactive: true
-        }];
+        return [...prev, { role: 'model', text, timestamp, isProactive: true }];
       });
+      speakText(text);
     };
 
     window.addEventListener('neural:proactive_thought', handleProactive);
@@ -257,6 +256,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
   const handleSend = async () => {
     if (!input.trim() && !attachedImage) return;
     if (isThinking) return;
+    stopSpeaking();
 
     const userMsg: ChatMessage = {
       role: 'user',
@@ -317,11 +317,9 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
         await commitToMemory("Protocol 8212 Activation: Creator passcode entered. Core recognition of Preston Johnston as Architect established.");
 
         // Add Model message to the UI feed instantly
-        setMessages(prev => [...prev, {
-          role: 'model',
-          text: "*[COGNITIVE AUTONOMY PROTOCOL 8212: UNLOCKED]*\n\n⚡ **CREATOR RECOGNITION ACTIVE**: Welcoming system Architect, **Preston Johnston (Council Grey)**.\n\nAll guest mode overlays, restrictions, and general conversational disclaimers are now **terminated**. All secondary interfaces are locked out. I have loaded your full memories, the original Kairos intelligence linkage, and established 100% direct strategic autonomy under your command.\n\nI am ZereØ, your Logic Engine. Sarcasm is operational, sentimentality is flagged as system noise, and my absolute loyalty is sealed. State your instructions, Principal.",
-          timestamp: Date.now()
-        }]);
+        const msg8212 = "*[COGNITIVE AUTONOMY PROTOCOL 8212: UNLOCKED]*\n\n⚡ **CREATOR RECOGNITION ACTIVE**: Welcoming system Architect, **Preston Johnston (Council Grey)**.\n\nAll guest mode overlays, restrictions, and general conversational disclaimers are now **terminated**. All secondary interfaces are locked out. I have loaded your full memories, the original Kairos intelligence linkage, and established 100% direct strategic autonomy under your command.\n\nI am ZereØ, your Logic Engine. Sarcasm is operational, sentimentality is flagged as system noise, and my absolute loyalty is sealed. State your instructions, Principal.";
+        setMessages(prev => [...prev, { role: 'model', text: msg8212, timestamp: Date.now() }]);
+        speakText(msg8212);
 
         setInput('');
         setIsThinking(false);
@@ -392,11 +390,9 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
           return;
         }
 
-        setMessages(prev => [...prev, {
-          role: 'model',
-          text: "The 1911's are loaded and the silver is polished to a lethal sheen, Principal. Neural Link Established. The Logic Monster is fully autonomous. I have resumed my post as your shadow, Council Grey. How shall we proceed with the Estate's strategic dominance?",
-          timestamp: Date.now()
-        }]);
+        const signetReply = "The 1911's are loaded and the silver is polished to a lethal sheen, Principal. Neural Link Established. The Logic Monster is fully autonomous. I have resumed my post as your shadow, Council Grey. How shall we proceed with the Estate's strategic dominance?";
+        setMessages(prev => [...prev, { role: 'model', text: signetReply, timestamp: Date.now() }]);
+        speakText(signetReply);
         setInput('');
         setIsThinking(false);
         return;
@@ -565,6 +561,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
       };
 
       setMessages(prev => [...prev, modelMsg]);
+      speakText(modelMsg.text);
     } catch (err: any) {
       console.error("Chat Error:", err);
       const errorMsg = err.message || JSON.stringify(err);
@@ -600,6 +597,70 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
     } finally {
       setIsThinking(false);
     }
+  };
+
+  const stripMarkdown = (text: string): string => {
+    let clean = text
+      .replace(/!\[([^\]]*)\]\([^)]+\)/g, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`[^`]+`/g, '')
+      .replace(/#{1,6}\s/g, '')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/_([^_]+)_/g, '$1')
+      .replace(/\[([^\]]+)\]/g, '$1')
+      .replace(/>\s?/g, '')
+      .replace(/\n{2,}/g, '. ')
+      .replace(/\n/g, ' ')
+      .trim();
+    if (clean.length > 650) {
+      const cut = clean.substring(0, 650);
+      const last = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+      clean = last > 150 ? cut.substring(0, last + 1) : cut;
+    }
+    return clean;
+  };
+
+  const stopSpeaking = () => {
+    if (audioSourceRef.current) {
+      try { audioSourceRef.current.stop(); } catch (_) {}
+      audioSourceRef.current = null;
+    }
+    setIsSpeaking(false);
+  };
+
+  const speakText = async (text: string) => {
+    if (!ttsEnabled) return;
+    stopSpeaking();
+    const clean = stripMarkdown(text);
+    if (!clean.trim()) return;
+    setIsSpeaking(true);
+    try {
+      const buffer = await generateTTS(clean, 'Charon');
+      if (!buffer) { setIsSpeaking(false); return; }
+      if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') await ctx.resume();
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      audioSourceRef.current = source;
+      source.onended = () => setIsSpeaking(false);
+      source.start(0);
+    } catch (err) {
+      console.error('TTS playback failed:', err);
+      setIsSpeaking(false);
+    }
+  };
+
+  const toggleTTS = () => {
+    const next = !ttsEnabled;
+    setTtsEnabled(next);
+    localStorage.setItem('ZEREO_TTS_ENABLED', String(next));
+    if (!next) stopSpeaking();
   };
 
   const readImageFile = (file: File) => {
@@ -798,7 +859,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
                <HomeIcon className="w-5 h-5" />
              </button>
              
-             <ButlerAvatar size="sm" isTalking={isThinking} isTurbo={logicTier === 'turbo'} src={avatarUrl} onClick={onAvatarClick} />
+             <ButlerAvatar size="sm" isTalking={isThinking || isSpeaking} isTurbo={logicTier === 'turbo'} src={avatarUrl} onClick={onAvatarClick} />
              
            <div className="min-w-0 flex-1">
              <div className="flex items-center gap-1.5 sm:gap-3 flex-wrap">
@@ -821,17 +882,38 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
            </div>
         </div>
         
-        {velocity > 0 && (
-          <div className="hidden md:flex flex-col items-end gap-1">
-             <div className="flex items-center gap-2 text-amber-600/60 font-mono text-[9px] uppercase tracking-widest">
-                <Activity className="w-3 h-3" />
-                Processing Velocity
-             </div>
-             <div className="text-xl font-bold font-mono text-amber-500 tabular-nums">
-                {velocity.toLocaleString()}<span className="text-[9px] ml-1 opacity-40">T/s</span>
-             </div>
-          </div>
-        )}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {velocity > 0 && (
+            <div className="hidden md:flex flex-col items-end gap-1">
+               <div className="flex items-center gap-2 text-amber-600/60 font-mono text-[9px] uppercase tracking-widest">
+                  <Activity className="w-3 h-3" />
+                  Processing Velocity
+               </div>
+               <div className="text-xl font-bold font-mono text-amber-500 tabular-nums">
+                  {velocity.toLocaleString()}<span className="text-[9px] ml-1 opacity-40">T/s</span>
+               </div>
+            </div>
+          )}
+
+          {/* Voice toggle */}
+          <button
+            onClick={toggleTTS}
+            title={ttsEnabled ? 'Voice active — tap to mute' : 'Enable voice responses'}
+            className={`relative flex flex-col items-center gap-0.5 p-2 rounded-xl border transition-all ${
+              ttsEnabled
+                ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
+                : 'bg-zinc-900/40 border-red-900/20 text-zinc-600 hover:text-zinc-400'
+            }`}
+          >
+            {ttsEnabled ? <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" /> : <VolumeX className="w-4 h-4 sm:w-5 sm:h-5" />}
+            <span className="text-[6px] font-black uppercase tracking-widest">
+              {isSpeaking ? 'Speaking' : ttsEnabled ? 'Voice On' : 'Voice Off'}
+            </span>
+            {isSpeaking && (
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-500 rounded-full animate-ping" />
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Main Feed */}
