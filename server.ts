@@ -2,6 +2,7 @@ console.log("SERVER: Module loading...");
 import express from 'express';
 import cors from 'cors';
 import net from 'net';
+import { spawn } from 'child_process';
 import { createServer as createViteServer } from 'vite';
 import fs from 'fs/promises';
 import path from 'path';
@@ -38,6 +39,16 @@ async function startServer() {
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`Time: ${new Date().toISOString()}`);
     console.log("========================================");
+
+    // Spawn Assistant Manager Daemon Python Process
+    try {
+      const daemonScript = path.join(__dirname, 'src', 'server', 'assistant_daemon.py');
+      const pyProc = spawn('python3', [daemonScript], { stdio: 'ignore', detached: true });
+      pyProc.unref();
+      console.log("SERVER: Assistant Manager Daemon spawned successfully.");
+    } catch (err: any) {
+      console.warn("SERVER: Failed to spawn Assistant Manager Daemon:", err?.message);
+    }
   });
 
   // Ensure files exist
@@ -428,6 +439,51 @@ async function startServer() {
       res.status(503).json({
         status: 'offline',
         message: 'Voice Modulation Daemon socket not connected.',
+        details: err.message
+      });
+    });
+  });
+
+  app.all('/api/assistant', (req, res) => {
+    const SOCKET_PATH = '/tmp/assistant_mgr.sock';
+    const payload = req.body && Object.keys(req.body).length > 0 ? req.body : { action: 'get_status' };
+
+    const client = net.createConnection(SOCKET_PATH, () => {
+      client.write(JSON.stringify(payload));
+    });
+
+    let rawData = '';
+    client.on('data', (data) => {
+      rawData += data.toString();
+    });
+
+    client.on('end', () => {
+      try {
+        res.json(JSON.parse(rawData));
+      } catch (e) {
+        res.json({ status: 'error', message: 'Invalid response from assistant daemon' });
+      }
+    });
+
+    client.on('error', (err) => {
+      // Fallback response if daemon socket is initializing
+      res.json({
+        status: 'standby',
+        message: 'Assistant Manager Daemon socket connecting or in standby.',
+        uptime_seconds: 0,
+        screen_active: false,
+        fps: 30,
+        total_frames: 0,
+        active_touch_count: 0,
+        gestures_count: 0,
+        annotations_count: 0,
+        overlay_config: {
+          mode: 'tactical',
+          ripple_enabled: true,
+          pen_color: '#f59e0b',
+          pen_width: 4,
+          opacity: 0.85
+        },
         details: err.message
       });
     });

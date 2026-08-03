@@ -7,6 +7,7 @@ import Layout from './components/Layout';
 import ChatBot from './components/ChatBot';
 import CreativeStudio from './components/CreativeStudio';
 import VoicePortal from './components/VoicePortal';
+import AssistantManager from './components/AssistantManager';
 import LogicAnalytics from './components/LogicAnalytics';
 import MemoryCore from './components/MemoryCore';
 import Nexus from './components/Nexus';
@@ -314,6 +315,8 @@ const App: React.FC = () => {
         return <CreativeStudio key="creative" isPrincipalMode={isPrincipalMode} />;
       case AppTab.VOICE:
         return <VoicePortal key="voice" avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} />;
+      case AppTab.ASSISTANT:
+        return <AssistantManager key="assistant" />;
       case AppTab.ANALYTICS:
         return <LogicAnalytics key="analytics" />;
       case AppTab.MEMORY:

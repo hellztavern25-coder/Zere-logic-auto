@@ -15,7 +15,8 @@ import {
   Home as HomeIcon,
   Share as ShareIcon,
   Settings,
-  Wrench
+  Wrench,
+  Monitor
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppTab } from '../types';
@@ -44,11 +45,13 @@ const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, avat
 
   const navItems = isPrincipalMode ? [
     { id: AppTab.CHAT, icon: MessageSquare, label: 'Dialogue Core' },
+    { id: AppTab.ASSISTANT, icon: Monitor, label: 'Assistant Manager' },
   ] : [
     { id: AppTab.HOME, icon: HomeIcon, label: 'Home' },
     { id: AppTab.CHAT, icon: MessageSquare, label: 'Chat' },
     { id: AppTab.CREATIVE, icon: ImageIcon, label: 'Creative Studio' },
     { id: AppTab.VOICE, icon: Mic, label: 'Voice Portal' },
+    { id: AppTab.ASSISTANT, icon: Monitor, label: 'Assistant Manager' },
     { id: AppTab.ANALYTICS, icon: LineChart, label: 'Logic Analytics' },
     { id: AppTab.GROUNDING, icon: Search, label: 'Grounding' },
     { id: AppTab.MEMORY, icon: Database, label: 'Memory Core' },

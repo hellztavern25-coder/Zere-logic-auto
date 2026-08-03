@@ -4,6 +4,7 @@ export enum AppTab {
   CHAT = 'Chat',
   CREATIVE = 'Creative',
   VOICE = 'Voice',
+  ASSISTANT = 'Assistant',
   ANALYTICS = 'Analytics',
   GROUNDING = 'Grounding',
   MEMORY = 'Memory',
