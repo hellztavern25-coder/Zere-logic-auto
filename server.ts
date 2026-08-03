@@ -1,6 +1,7 @@
 console.log("SERVER: Module loading...");
 import express from 'express';
 import cors from 'cors';
+import net from 'net';
 import { createServer as createViteServer } from 'vite';
 import fs from 'fs/promises';
 import path from 'path';
@@ -246,6 +247,45 @@ async function startServer() {
       console.log("SERVER: Pulse Daemon reset via Neural Activity.");
     });
 
+    // Voice Modulation Socket IPC Integration (src/server/voice)
+    socket.on('voice:set_params', (params) => {
+      const SOCKET_PATH = '/tmp/voicemod.sock';
+      const client = net.createConnection(SOCKET_PATH, () => {
+        client.write(JSON.stringify({ action: 'set_params', ...params }));
+      });
+      let response = '';
+      client.on('data', (data) => { response += data.toString(); });
+      client.on('end', () => {
+        try {
+          socket.emit('voice:status', JSON.parse(response));
+        } catch {
+          socket.emit('voice:status', { status: 'error' });
+        }
+      });
+      client.on('error', (err) => {
+        socket.emit('voice:status', { status: 'offline', error: err.message });
+      });
+    });
+
+    socket.on('voice:get_status', () => {
+      const SOCKET_PATH = '/tmp/voicemod.sock';
+      const client = net.createConnection(SOCKET_PATH, () => {
+        client.write(JSON.stringify({ action: 'get_status' }));
+      });
+      let response = '';
+      client.on('data', (data) => { response += data.toString(); });
+      client.on('end', () => {
+        try {
+          socket.emit('voice:status', JSON.parse(response));
+        } catch {
+          socket.emit('voice:status', { status: 'error' });
+        }
+      });
+      client.on('error', (err) => {
+        socket.emit('voice:status', { status: 'offline', error: err.message });
+      });
+    });
+
     socket.on('discord:init', (token) => {
       initDiscord(token, socket);
     });
@@ -361,6 +401,36 @@ async function startServer() {
     } catch (err) {
       res.status(500).json({ error: 'Failed to save directive' });
     }
+  });
+
+  app.all('/api/voicemod', (req, res) => {
+    const SOCKET_PATH = '/tmp/voicemod.sock';
+    const payload = req.body && Object.keys(req.body).length > 0 ? req.body : { action: 'get_status' };
+
+    const client = net.createConnection(SOCKET_PATH, () => {
+      client.write(JSON.stringify(payload));
+    });
+
+    let rawData = '';
+    client.on('data', (data) => {
+      rawData += data.toString();
+    });
+
+    client.on('end', () => {
+      try {
+        res.json(JSON.parse(rawData));
+      } catch (e) {
+        res.json({ status: 'error', message: 'Invalid response from voicemod daemon' });
+      }
+    });
+
+    client.on('error', (err) => {
+      res.status(503).json({
+        status: 'offline',
+        message: 'Voice Modulation Daemon socket not connected.',
+        details: err.message
+      });
+    });
   });
 
   app.get('/api/threads', async (req, res) => {

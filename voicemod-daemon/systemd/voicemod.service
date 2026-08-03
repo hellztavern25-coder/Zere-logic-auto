@@ -1,0 +1,13 @@
+[Unit]
+Description=Sovereign Voice Modulation & DSP Daemon
+After=sound.target pulse.target pipewire.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/voicemod-daemon/src/daemon.py
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
