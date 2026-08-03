@@ -36,4 +36,10 @@ externalPort = 80
 
 [[ports]]
 localPort = 24678
-externalPort = 3000
+
+[objectStorage]
+defaultBucketID = "replit-objstore-d04b29b0-7d08-43cd-a4af-61abbe7b4bf0"
+
+[deployment]
+run = "npx tsx server.ts"
+deploymentTarget = "autoscale"
