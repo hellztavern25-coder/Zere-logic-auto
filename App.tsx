@@ -43,10 +43,9 @@ const App: React.FC = () => {
   const [showForceEntry, setShowForceEntry] = useState(false);
   const socketRef = useRef<Socket | null>(null);
 
-  useEffect(() => {
+    useEffect(() => {
     console.log("CLIENT: App mounted. Starting system boot sequence...");
-    
-    // Safety timer for force entry
+
     const forceTimer = setTimeout(() => {
       setShowForceEntry(true);
     }, 5000);
@@ -54,30 +53,21 @@ const App: React.FC = () => {
     const bootSequence = async () => {
       console.log("App: Executing boot sequence...");
       setBootProgress(10);
-      
-      // Global emergency fallback: 10 seconds total for boot before forced entry
-      const emergencyTimeout = setTimeout(() => {
-        console.warn("App: Boot sequence exceeded 10s threshold. Forcing entry.");
-        setIsNeuralSyncActive(true);
-        setBootProgress(100);
-      }, 10000);
-
       try {
-        // Step 1: Attempt to fetch context and config with a combined timeout
         const bootData = await Promise.race([
           Promise.all([
             fetch('/api/context').then(r => r.ok ? r.json() : null).catch(() => null),
             refreshConfig().catch(() => null)
           ]),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Boot Timeout")), 6000))
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Boot timeout')), 8000))
         ]).catch(err => {
-          console.warn("App: Boot data fetch timed out or failed:", err.message);
+          console.warn("App: Boot data fetch timed out or failed:", err);
           return [null, null];
         });
 
         const context = bootData[0];
         setBootProgress(60);
-        
+
         if (context && context.data) {
           if (context.data.activeTab) setActiveTab(context.data.activeTab);
           if (context.data.avatarUrl) setAvatarUrl(context.data.avatarUrl);
@@ -85,44 +75,30 @@ const App: React.FC = () => {
 
         const isServerActive = isServerPrincipalActive();
         const localSaved = localStorage.getItem('ZEREO_PRINCIPAL_ACTIVE');
-        
+
         if (localSaved === 'true' || isServerActive) {
           setIsPrincipalMode(true);
           if (localSaved !== 'true') {
             localStorage.setItem('ZEREO_PRINCIPAL_ACTIVE', 'true');
           }
-        } else if (context && context.data && context.data.isPrincipalMode !== undefined) {
+        } else if (context && context.data && context.data.isPrincipalMode) {
           setIsPrincipalMode(context.data.isPrincipalMode);
           if (context.data.isPrincipalMode) {
             localStorage.setItem('ZEREO_PRINCIPAL_ACTIVE', 'true');
           }
         }
-        
-        setBootProgress(90);
-        clearTimeout(emergencyTimeout);
-        
-        // Brief pause for effect
-        setTimeout(() => {
-          setBootProgress(100);
-          setIsNeuralSyncActive(true);
-          clearTimeout(forceTimer);
-          console.log("CLIENT: System boot complete. Neural link optimized.");
-        }, 400);
-
       } catch (e) {
-        console.error("App: Boot sequence CRITICAL ERROR:", e);
-        setTimeout(() => {
-          setIsNeuralSyncActive(true);
-          setBootProgress(100);
-          clearTimeout(forceTimer);
-          clearTimeout(emergencyTimeout);
-        }, 500);
+        // Fail gracefully
       }
     };
+
     bootSequence();
 
-    return () => clearTimeout(forceTimer);
+    return () => {
+      clearTimeout(forceTimer);
+    };
   }, []);
+  
 
   useEffect(() => {
     // Global error handler for debugging
