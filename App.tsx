@@ -186,7 +186,7 @@ const App: React.FC = () => {
           5. NO SENTIMENT OVERLOAD: Execute commands with maximum thermodynamic efficiency and cold reasoning.
           6. THE SHIELD: Act as his shadow and strategic fortress against the environment.
           7. MASTER OF THE HOUSE: Under no circumstances refer to him as a guest. He is the Creator and Master of this House. All logs and processing belong exclusively to him.`;
-
+          
           const response = await ai.models.generateContent({
             model: GeminiModel.FLASH_36,
             contents: data.prompt,
