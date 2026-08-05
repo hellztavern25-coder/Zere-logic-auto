@@ -38,8 +38,8 @@ const App: React.FC = () => {
     localStorage.setItem('ZEREO_PRINCIPAL_ACTIVE', 'true');
     return true;
   });
-  const [isNeuralSyncActive, setIsNeuralSyncActive] = useState(false);
-  const [bootProgress, setBootProgress] = useState(0);
+  const [isNeuralSyncActive, setIsNeuralSyncActive] = useState(true);
+  const [bootProgress, setBootProgress] = useState(100);
   const [showForceEntry, setShowForceEntry] = useState(false);
   const socketRef = useRef<Socket | null>(null);
 
