@@ -1,117 +1,89 @@
-
-import { GoogleGenAI, GenerateContentResponse, Modality } from "@google/genai";
+import { GoogleGenAI, Modality } from "@google/genai";
 import { GeminiModel } from "../types";
 
-let cachedConfig: { API_KEY?: string; GEMINI_API_KEY?: string; isPrincipalActive?: boolean } = {};
+let cachedConfig: { hasGeminiKey?: boolean; isPrincipalActive?: boolean; coreDirective?: string } = {
+  hasGeminiKey: true,
+  isPrincipalActive: true
+};
 
 export const isServerPrincipalActive = () => {
   return !!cachedConfig.isPrincipalActive;
 };
 
 export const refreshConfig = async () => {
-  console.log("refreshConfig: Initiating config fetch...");
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
-      console.warn("refreshConfig: Config fetch timed out.");
       controller.abort();
-    }, 8000);
+    }, 6000);
     const res = await fetch('/api/config', { signal: controller.signal });
     clearTimeout(timeoutId);
     if (res.ok) {
       cachedConfig = await res.json();
-      console.log("refreshConfig: Config fetched successfully:", cachedConfig);
-    } else {
-      console.warn("refreshConfig: Failed to fetch config, status:", res.status);
     }
   } catch (err: any) {
-    if (err.name === 'AbortError' || (err.message && err.message.includes('aborted'))) {
-      console.warn("refreshConfig: Config fetch request aborted or timed out.");
-    } else {
-      console.error("refreshConfig: Exception during config fetch:", err);
-    }
+    // Silent failover
   }
 };
 
 export const getApiKey = () => {
   const localStorageKey = typeof window !== 'undefined' ? localStorage.getItem('ZEREO_API_KEY') : undefined;
-  const serverKey = cachedConfig.API_KEY;
-  const serverGeminiKey = cachedConfig.GEMINI_API_KEY;
-  
-  // Mask helper
-  const mask = (s: string | undefined) => s ? `${s.substring(0, 4)}...${s.substring(s.length - 4)}` : 'MISSING';
-
   if (localStorageKey && localStorageKey.trim() && !localStorageKey.includes('***') && localStorageKey !== 'undefined') {
-    console.log(`getApiKey: Detected Local Neural Identification [${mask(localStorageKey)}]`);
     return localStorageKey.trim();
   }
-  if (serverKey && serverKey.trim() && !serverKey.includes('***') && serverKey !== 'undefined') {
-    console.log(`getApiKey: Detected Core Bridge Authorization [${mask(serverKey)}]`);
-    return serverKey.trim();
+  if (cachedConfig.hasGeminiKey !== false) {
+    return 'ZEREO_CORE_LINK';
   }
-  if (serverGeminiKey && serverGeminiKey.trim() && !serverGeminiKey.includes('***') && serverGeminiKey !== 'undefined') {
-    console.log(`getApiKey: Detected Primary Strategic Link [${mask(serverGeminiKey)}]`);
-    return serverGeminiKey.trim();
-  }
-
-  console.log("getApiKey: Critical Failure - No valid neural authorization present in central arrays.");
   return '';
 };
 
 export const testApiKey = async (): Promise<{ success: boolean; message: string }> => {
-  // Check platform key first if in AI Studio, but only if we don't have a local key
-  if (typeof window !== 'undefined' && (window as any).aistudio) {
-    try {
-      const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-      const localKey = getApiKey();
-      if (!hasKey && !localKey) {
-        console.log("testApiKey: No neural key found. Opening platform dialog.");
-        await (window as any).aistudio.openSelectKey();
-        return { success: false, message: "Please select a neural key in the platform dialog." };
-      }
-    } catch (e: any) {
-      console.warn("testApiKey: Platform key check failed:", e);
-    }
+  const localKey = typeof window !== 'undefined' ? localStorage.getItem('ZEREO_API_KEY') : null;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+  if (localKey && localKey.trim() && !localKey.includes('***') && localKey !== 'undefined') {
+    headers['Authorization'] = `Bearer ${localKey.trim()}`;
   }
 
-  const apiKey = getApiKey();
-  if (!apiKey) return { success: false, message: "No API key found in any neural array. Please provide one in System Control." };
-  
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: GeminiModel.FLASH_PREVIEW,
-      contents: [{ role: 'user', parts: [{ text: "Neural pulse check. Respond with 'PULSE_OK'." }] }],
-      config: { maxOutputTokens: 10 }
+    const res = await fetch('/api/gemini/test-key', {
+      method: 'POST',
+      headers
     });
-    
-    console.log("testApiKey: Neural handshake response:", response);
-
-    if (response.text?.includes('PULSE_OK')) {
-      const mask = apiKey ? `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}` : 'NONE';
-      return { success: true, message: `Neural handshake optimal. Bridge established via ID: ${mask}` };
+    const contentType = res.headers.get('content-type') || '';
+    if (!res.ok) {
+      let errMsg = '';
+      if (contentType.includes('application/json')) {
+        try {
+          const errJson = await res.json();
+          errMsg = errJson.error || errJson.message;
+        } catch (_) {}
+      }
+      return { 
+        success: false, 
+        message: `Neural handshake rejected (${res.status}): ${errMsg || res.statusText || 'Substrate unavailable'}` 
+      };
     }
 
-    const finishReason = response.candidates?.[0]?.finishReason;
-    const safetyRatings = response.candidates?.[0]?.safetyRatings;
-    let detail = response.text ? `Data: ${response.text}` : `FinishReason: ${finishReason || 'UNKNOWN'}`;
-    if (safetyRatings) {
-       console.warn("testApiKey: Safety issues detected:", safetyRatings);
+    if (!contentType.includes('application/json')) {
+      return { success: false, message: "Neural handshake returned non-JSON format." };
     }
 
-    return { success: false, message: `Unexpected response status. ${detail}` };
+    const data = await res.json();
+    if (data.success) {
+      return { success: true, message: "Neural handshake optimal. Substrate core synchronized." };
+    }
+    return { success: false, message: `Neural handshake failed: ${data.error || 'Connection error'}` };
   } catch (err: any) {
-    console.error("testApiKey: Critical Bridge Failure:", err);
-    // Extract more detail from the error if possible
-    const errorDetail = err.response?.data?.error?.message || err.message || "Unknown neural interference.";
-    return { success: false, message: `Neural handshake failed: ${errorDetail}` };
+    return { success: false, message: `Neural link unreachable: ${err?.message || err}` };
   }
 };
 
 export const saveApiKey = (key: string) => {
   if (typeof window !== 'undefined') {
     localStorage.setItem('ZEREO_API_KEY', key.trim());
-    refreshConfig(); // Trigger a re-sync
+    refreshConfig();
   }
 };
 
@@ -129,16 +101,21 @@ export const saveSignet = (signet: string) => {
 };
 
 export const clearApiKey = () => {
-  cachedConfig.API_KEY = undefined;
-  cachedConfig.GEMINI_API_KEY = undefined;
   if (typeof window !== 'undefined') {
     localStorage.removeItem('ZEREO_API_KEY');
   }
 };
 
 export const getAI = () => {
-  const apiKey = getApiKey();
-  return new GoogleGenAI({ apiKey });
+  const apiKey = getApiKey() || 'ZEREO_CORE_LINK';
+  return new GoogleGenAI({ 
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build'
+      }
+    }
+  });
 };
 
 export const decodeBase64 = (base64: string): Uint8Array => {
@@ -189,28 +166,43 @@ export const fileToBase64 = (file: File): Promise<string> => {
   });
 };
 
-export async function generateTTS(text: string, voiceName: string = 'Kore'): Promise<AudioBuffer | null> {
-  const ai = getAI();
+export async function generateTTS(
+  text: string, 
+  voiceName: string = 'Charon',
+  stylePrompt?: string,
+  accent?: string
+): Promise<AudioBuffer | null> {
+  const localKey = typeof window !== 'undefined' ? localStorage.getItem('ZEREO_API_KEY') : null;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+  if (localKey && localKey.trim() && !localKey.includes('***') && localKey !== 'undefined') {
+    headers['Authorization'] = `Bearer ${localKey.trim()}`;
+  }
+
   try {
-    const response = await ai.models.generateContent({
-      model: GeminiModel.FLASH_TTS,
-      contents: [{ parts: [{ text }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName },
-          },
-        },
-      },
+    const res = await fetch('/api/gemini/tts', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        text,
+        voiceName: voiceName || 'Charon',
+        stylePrompt,
+        accent
+      })
     });
 
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!base64Audio) return null;
+    if (!res.ok) {
+      console.warn('TTS request to /api/gemini/tts failed with status:', res.status);
+      return null;
+    }
+
+    const data = await res.json();
+    if (!data.audioData) return null;
 
     const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
     const audioBuffer = await decodeAudioData(
-      decodeBase64(base64Audio),
+      decodeBase64(data.audioData),
       outputAudioContext,
       24000,
       1
@@ -223,23 +215,75 @@ export async function generateTTS(text: string, voiceName: string = 'Kore'): Pro
 }
 
 export const safeGenerateContent = async (params: any) => {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new Error("AUTH_ERROR: Neural Authorization missing. Please provide an API key in System Control or select one from the platform.");
+  const localKey = typeof window !== 'undefined' ? localStorage.getItem('ZEREO_API_KEY') : null;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+  if (localKey && localKey.trim() && !localKey.includes('***') && localKey !== 'undefined') {
+    headers['Authorization'] = `Bearer ${localKey.trim()}`;
   }
-  const ai = new GoogleGenAI({ apiKey });
+
+  const adjustedParams = { ...params };
+  if (adjustedParams.config?.tools && adjustedParams.config.tools.length > 0) {
+    adjustedParams.config = {
+      ...adjustedParams.config,
+      toolConfig: {
+        includeServerSideToolInvocations: true,
+        ...(adjustedParams.config.toolConfig || {})
+      }
+    };
+  }
+
   try {
-    const result = await ai.models.generateContent(params);
-    return result;
+    const res = await fetch('/api/gemini/generate', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(adjustedParams)
+    });
+
+    const contentType = res.headers.get('content-type') || '';
+
+    if (!res.ok) {
+      let errorData: any = {};
+      let rawText = '';
+      if (contentType.includes('application/json')) {
+        try {
+          errorData = await res.json();
+        } catch (_) {}
+      } else {
+        try {
+          rawText = await res.text();
+        } catch (_) {}
+      }
+
+      const msg = errorData.error?.message || errorData.message || (rawText && rawText.length < 200 ? rawText : '') || res.statusText || 'Server Error';
+      if (res.status === 503 || msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('high demand') || msg.includes('Spikes in demand')) {
+        throw new Error("SERVER_UNAVAILABLE: Central processing arrays are experiencing elevated network traffic. Automatic failover initiated.");
+      }
+      if (res.status === 429 || msg.includes('429') || msg.includes('quota') || msg.includes('Too Many Requests') || msg.includes('RESOURCE_EXHAUSTED')) {
+        throw new Error("NEURAL_LIMIT: Principal, my processing arrays are temporarily exhausted. The daily quota for this API key has been reached. Please try again tomorrow or provide a fresh key in System Control.");
+      }
+      if (res.status === 403 || msg.includes('403') || msg.includes('PERMISSION_DENIED') || msg.includes('invalid')) {
+        throw new Error("AUTH_ERROR: Principal, our neural authorization has been rejected. The current API key is invalid or has been revoked.");
+      }
+      throw new Error(msg);
+    }
+
+    if (!contentType.includes('application/json')) {
+      const text = await res.text().catch(() => '');
+      console.warn("Unexpected non-JSON response from /api/gemini/generate:", text.slice(0, 150));
+      throw new Error("SERVER_RESPONSE_INVALID: Upstream server returned non-JSON data. Please retry directive.");
+    }
+
+    const data = await res.json();
+    return {
+      text: data.text || '',
+      candidates: data.candidates || [],
+      functionCalls: data.functionCalls || undefined,
+      usageMetadata: data.usageMetadata
+    };
   } catch (err: any) {
-    console.error("geminiService: generateContent error:", err);
-    const msg = err.message || "";
-    if (msg.includes('429') || msg.includes('Too Many Requests') || msg.includes('quota')) {
-      throw new Error("NEURAL_LIMIT: Principal, my processing arrays are temporarily exhausted. The daily quota for this API key has been reached. Please try again tomorrow or provide a fresh key in System Control.");
-    }
-    if (msg.includes('403') || msg.includes('API key not valid') || msg.includes('invalid')) {
-      throw new Error("AUTH_ERROR: Principal, our neural authorization has been rejected. The current API key is invalid or has been revoked.");
-    }
+    console.error("geminiService: generateContent error:", err?.message || err);
     throw err;
   }
 };

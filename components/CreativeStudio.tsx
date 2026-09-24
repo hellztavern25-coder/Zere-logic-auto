@@ -1,6 +1,6 @@
 
 import React, { useState, useRef } from 'react';
-import { Image as ImageIcon, Sparkles, Wand2, Monitor, Video, Loader2, Download, Upload, Trash2 } from 'lucide-react';
+import { Image as ImageIcon, Sparkles, Wand2, Monitor, Video, Loader2, Download, Upload, Trash2, Database, Check, ExternalLink, BookmarkCheck } from 'lucide-react';
 import { getAI, fileToBase64, getApiKey, clearApiKey, safeGenerateContent } from '../services/geminiService';
 import { GeminiModel } from '../types';
 
@@ -15,9 +15,58 @@ const CreativeStudio: React.FC<CreativeStudioProps> = ({ isPrincipalMode }) => {
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [resultVideo, setResultVideo] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSavingToMemory, setIsSavingToMemory] = useState(false);
+  const [isSavedToMemory, setIsSavedToMemory] = useState(false);
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [imageSize, setImageSize] = useState('1K');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const saveToMemoryCore = async () => {
+    if (!resultImage || isSavingToMemory) return;
+    setIsSavingToMemory(true);
+    try {
+      const title = prompt.trim() 
+        ? (prompt.length > 50 ? `${prompt.slice(0, 50)}...` : prompt)
+        : `Creative Session Capture [${new Date().toLocaleTimeString()}]`;
+      
+      const payload = {
+        title,
+        description: prompt || 'Synthesized via Creative Studio array.',
+        imageUrl: resultImage,
+        source: 'creative_session',
+        metadata: {
+          prompt,
+          aspectRatio,
+          mode: activeMode,
+          model: activeMode === 'edit' ? GeminiModel.FLASH_IMAGE : GeminiModel.PRO_IMAGE_PREVIEW,
+          resolution: imageSize,
+          tags: ['creative_studio', activeMode, aspectRatio]
+        },
+        timestamp: Date.now()
+      };
+
+      const res = await fetch('/api/visual-captures', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        setIsSavedToMemory(true);
+        setTimeout(() => setIsSavedToMemory(false), 4000);
+        window.dispatchEvent(new CustomEvent('visual:new_capture_saved', { detail: payload }));
+      }
+    } catch (err) {
+      console.error('Failed to commit visual capture to memory core:', err);
+    } finally {
+      setIsSavingToMemory(false);
+    }
+  };
+
+  const jumpToMemoryCore = () => {
+    window.dispatchEvent(new CustomEvent('nav:change', { detail: 'memory' }));
+    window.dispatchEvent(new CustomEvent('memory:filter_visual'));
+  };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -250,12 +299,66 @@ const CreativeStudio: React.FC<CreativeStudioProps> = ({ isPrincipalMode }) => {
         )}
 
         {resultImage && (
-          <div className="relative group max-h-full">
-            <img src={resultImage} className="rounded-2xl shadow-[0_0_100px_rgba(153,27,27,0.2)] max-h-[70vh] border border-red-900/30" />
-            <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
-              <a href={resultImage} download className="p-3 bg-black/80 text-amber-500 rounded-xl hover:bg-red-900"><Download className="w-5 h-5" /></a>
-              <button onClick={() => setResultImage(null)} className="p-3 bg-black/80 text-red-500 rounded-xl"><Trash2 className="w-5 h-5" /></button>
+          <div className="relative group max-h-full flex flex-col items-center">
+            <div className="relative">
+              <img src={resultImage} alt="Generated Asset" className="rounded-2xl shadow-[0_0_100px_rgba(153,27,27,0.2)] max-h-[66vh] border border-red-900/30 object-contain" />
+              <div className="absolute top-4 right-4 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all bg-black/60 p-1.5 rounded-2xl backdrop-blur-md border border-red-900/40">
+                <button
+                  onClick={saveToMemoryCore}
+                  disabled={isSavingToMemory || isSavedToMemory}
+                  className={`p-2.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 transition-all ${
+                    isSavedToMemory 
+                      ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' 
+                      : 'bg-amber-500/20 text-amber-300 hover:bg-amber-500 hover:text-black border border-amber-500/40'
+                  }`}
+                  title="Archive to Visual Memory Core"
+                >
+                  {isSavingToMemory ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : isSavedToMemory ? (
+                    <>
+                      <BookmarkCheck className="w-4 h-4" />
+                      <span className="hidden sm:inline">Archived</span>
+                    </>
+                  ) : (
+                    <>
+                      <Database className="w-4 h-4" />
+                      <span className="hidden sm:inline">Commit to Memory</span>
+                    </>
+                  )}
+                </button>
+                <a 
+                  href={resultImage} 
+                  download={`zereo-creative-${Date.now()}.png`} 
+                  className="p-2.5 bg-black/80 text-amber-500 rounded-xl hover:bg-red-900 transition-colors"
+                  title="Download Asset"
+                >
+                  <Download className="w-4 h-4" />
+                </a>
+                <button 
+                  onClick={() => setResultImage(null)} 
+                  className="p-2.5 bg-black/80 text-red-500 rounded-xl hover:bg-red-950 transition-colors"
+                  title="Clear Display Buffer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
+
+            {/* Post-Commit Quick Nav Banner */}
+            {isSavedToMemory && (
+              <div className="mt-3 px-4 py-2 bg-zinc-950/90 border border-amber-600/40 rounded-xl flex items-center gap-3 animate-fade-in shadow-xl">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[11px] font-mono text-zinc-300">Committed to Visual Memory Core Ledger</span>
+                <button
+                  onClick={jumpToMemoryCore}
+                  className="px-2.5 py-1 bg-amber-500 text-black font-mono font-bold text-[10px] rounded-lg uppercase tracking-wider flex items-center gap-1 hover:bg-amber-400"
+                >
+                  <span>Open Timeline</span>
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              </div>
+            )}
           </div>
         )}
 

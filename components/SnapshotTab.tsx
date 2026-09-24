@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
 import {
   Monitor, Upload, Clipboard, Scan, Zap, X, AlertTriangle,
-  CheckCircle, Loader2, Send, Trash2, Copy, Eye, Camera
+  CheckCircle, Loader2, Send, Trash2, Copy, Eye, Camera, Database, BookmarkCheck
 } from 'lucide-react';
 import { safeGenerateContent } from '../services/geminiService';
 import { GeminiModel } from '../types';
@@ -38,8 +38,40 @@ const SnapshotTab: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<number | null>(null);
+  const [archivedFeedback, setArchivedFeedback] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
+
+  const archiveToVisualMemoryCore = async (result: AnalysisResult, idx: number) => {
+    try {
+      const payload = {
+        title: `Optical Audit Snapshot [${new Date(result.timestamp).toLocaleTimeString()}]`,
+        description: result.text.slice(0, 200) + '...',
+        imageUrl: `data:${imageMime || 'image/png'};base64,${result.imageThumbnail}`,
+        source: 'screen_snapshot',
+        metadata: {
+          prompt: result.directive,
+          model: GeminiModel.FLASH_PREVIEW,
+          tags: ['snapshot', 'optical_audit', 'screen_capture']
+        },
+        timestamp: result.timestamp
+      };
+
+      const res = await fetch('/api/visual-captures', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        setArchivedFeedback(idx);
+        setTimeout(() => setArchivedFeedback(null), 2500);
+        window.dispatchEvent(new CustomEvent('visual:new_capture_saved', { detail: payload }));
+      }
+    } catch (err) {
+      console.error('Failed to archive snapshot to visual memory core:', err);
+    }
+  };
 
   // Paste listener
   useEffect(() => {
@@ -365,6 +397,17 @@ const SnapshotTab: React.FC = () => {
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => archiveToVisualMemoryCore(result, idx)}
+                      className={`p-1.5 rounded-lg text-xs font-mono transition-all flex items-center gap-1 ${
+                        archivedFeedback === idx 
+                          ? 'bg-emerald-600/30 text-emerald-400 border border-emerald-500/40' 
+                          : 'hover:bg-amber-500/10 text-zinc-600 hover:text-amber-400'
+                      }`}
+                      title="Archive to Visual Memory Core"
+                    >
+                      {archivedFeedback === idx ? <BookmarkCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Database className="w-3.5 h-3.5" />}
+                    </button>
                     <button
                       onClick={() => copyToClipboard(result.text, idx)}
                       className="p-1.5 hover:bg-amber-500/10 rounded-lg text-zinc-600 hover:text-amber-500 transition-all"

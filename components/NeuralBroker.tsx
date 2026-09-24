@@ -88,14 +88,50 @@ const NeuralBroker: React.FC = () => {
   if (!showBroker) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-[100] flex flex-col items-end gap-3 pointer-events-none">
+    <div className="fixed top-20 right-3.5 sm:top-24 sm:right-6 z-[90] flex flex-col items-end gap-2.5 pointer-events-none">
+      <motion.button
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={handleManualPing}
+        className={`pointer-events-auto group relative w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center transition-all overflow-hidden cursor-pointer ${
+          fastPong 
+            ? 'bg-amber-500/15 border-2 border-amber-500 scale-115 shadow-[0_0_35px_rgba(245,158,11,0.5)]' 
+            : doormanStatus === 'ready'
+              ? 'bg-emerald-950/25 border border-emerald-500/50 scale-110 shadow-[0_0_25px_rgba(16,185,129,0.3)] hover:border-emerald-400'
+              : 'bg-[#180808]/90 border border-red-950/50 hover:border-amber-500/45 shadow-[0_0_30px_rgba(153,27,27,0.15)]'
+        }`}
+        title="Ring the Gatekeeper's Doorbell (Doorman Chime)"
+      >
+        {/* Deep Burgundy and Polished Gold color scheme */}
+        <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/5 to-red-950/10 opacity-70" />
+        <div className="absolute inset-0 bg-amber-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+        
+        {fastPong ? (
+          <Zap className="w-5 h-5 text-amber-500 fill-amber-500/25 animate-bounce" />
+        ) : doormanStatus === 'intercepting' ? (
+          <Activity className="w-5 h-5 text-amber-400 animate-pulse" />
+        ) : doormanStatus === 'ready' ? (
+          <ShieldCheck className="w-5 h-5 text-emerald-400" />
+        ) : (
+          <Bell className="w-5 h-5 text-amber-500/90 group-hover:text-amber-400 transition-colors" />
+        )}
+
+        {/* Small operational LED light */}
+        <div className={`absolute top-0 right-0 w-2 h-2 rounded-full m-2 border border-black/80 shadow-md ${
+           doormanStatus === 'ready' ? 'bg-emerald-500 animate-pulse' :
+           doormanStatus === 'intercepting' ? 'bg-amber-400' :
+           getApiKey() ? 'bg-amber-600/60' : 'bg-red-600'
+        }`} />
+      </motion.button>
+
+      {/* Telemetry card drops below button */}
       <AnimatePresence>
         {pulse !== 'idle' && (
           <motion.div 
-            initial={{ opacity: 0, scale: 0.9, y: 15 }}
+            initial={{ opacity: 0, scale: 0.9, y: -10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 10 }}
-            className={`px-4 py-3 rounded-xl border backdrop-blur-xl shadow-[0_10px_35px_rgba(0,0,0,0.8)] flex flex-col gap-2 min-w-[210px] ${
+            exit={{ opacity: 0, scale: 0.9, y: -10 }}
+            className={`px-4 py-3 rounded-xl border backdrop-blur-xl shadow-[0_10px_35px_rgba(0,0,0,0.8)] flex flex-col gap-2 min-w-[210px] pointer-events-auto ${
               doormanStatus === 'syncing' ? 'bg-amber-500/5 border-amber-500/20 text-amber-500' :
               doormanStatus === 'intercepting' ? 'bg-amber-500/10 border-amber-500/35 text-amber-400' :
               doormanStatus === 'ready' ? 'bg-emerald-500/5 border-emerald-500/30 text-emerald-400 font-medium' :
@@ -142,41 +178,6 @@ const NeuralBroker: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
-
-      <motion.button
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={handleManualPing}
-        className={`pointer-events-auto group relative w-12 h-12 rounded-full flex items-center justify-center transition-all overflow-hidden ${
-          fastPong 
-            ? 'bg-amber-500/15 border-2 border-amber-500 scale-115 shadow-[0_0_35px_rgba(245,158,11,0.5)]' 
-            : doormanStatus === 'ready'
-              ? 'bg-emerald-950/25 border border-emerald-500/50 scale-110 shadow-[0_0_25px_rgba(16,185,129,0.3)] hover:border-emerald-400'
-              : 'bg-[#180808]/90 border border-red-950/50 hover:border-amber-500/45 shadow-[0_0_30px_rgba(153,27,27,0.15)]'
-        }`}
-        title="Ring the Gatekeeper's Doorbell"
-      >
-        {/* Deep Burgundy and Polished Gold color scheme */}
-        <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/5 to-red-950/10 opacity-70" />
-        <div className="absolute inset-0 bg-amber-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-        
-        {fastPong ? (
-          <Zap className="w-5 h-5 text-amber-500 fill-amber-500/25 animate-bounce" />
-        ) : doormanStatus === 'intercepting' ? (
-          <Activity className="w-5 h-5 text-amber-400 animate-pulse" />
-        ) : doormanStatus === 'ready' ? (
-          <ShieldCheck className="w-5 h-5 text-emerald-400" />
-        ) : (
-          <Bell className="w-5 h-5 text-amber-600/70 group-hover:text-amber-500 transition-colors" />
-        )}
-
-        {/* Small operational LED light */}
-        <div className={`absolute top-0 right-0 w-2 h-2 rounded-full m-2 border border-black/80 shadow-md ${
-           doormanStatus === 'ready' ? 'bg-emerald-500 animate-pulse' :
-           doormanStatus === 'intercepting' ? 'bg-amber-400' :
-           getApiKey() ? 'bg-amber-600/60' : 'bg-red-600'
-        }`} />
-      </motion.button>
     </div>
   );
 };

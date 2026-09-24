@@ -1,18 +1,26 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Brain, Search, MapPin, Loader2, Link as LinkIcon, Trash2, Sparkles, Zap, Activity, ShieldCheck, Save, Home as HomeIcon, MessageSquare, Plus, Menu, X, Bell, Monitor, Camera, Image as GalleryIcon, Volume2, VolumeX } from 'lucide-react';
+import { Send, Brain, Search, MapPin, Loader2, Link as LinkIcon, Trash2, Sparkles, Zap, Activity, ShieldCheck, Save, Home as HomeIcon, MessageSquare, Plus, Menu, X, Bell, Monitor, Camera, Image as GalleryIcon, Volume2, VolumeX, Palette, Share2, Crosshair, UserCheck, Sliders } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import { getAI, getApiKey, clearApiKey, safeGenerateContent, generateTTS } from '../services/geminiService';
 import { generateClaudeContent, getAnthropicKey } from '../services/anthropicService';
-import { GeminiModel, ChatMessage, ChatThread } from '../types';
+import { GeminiModel, ChatMessage, ChatThread, EmotionalMap } from '../types';
 import ButlerAvatar from './ButlerAvatar';
 import { Socket } from 'socket.io-client';
+import ScreenShareHUD from './ScreenShareHUD';
+import JeremyIronsVoiceControl from './JeremyIronsVoiceControl';
+import VoiceInputButton from './VoiceInputButton';
+import { jeremyIronsVoice } from '../services/jeremyIronsVoiceService';
+import TopLeftMenu, { TopLeftMenuTab } from './TopLeftMenu';
+import AvatarModal, { ZEREO_AVATAR_PRESETS } from './AvatarModal';
+import { analyzeEmotionalState, buildEmotionalSystemContext } from '../services/emotionalMappingService';
 
 interface ChatBotProps {
   initialGrounding?: 'none' | 'search' | 'maps';
   avatarUrl?: string;
+  onAvatarChange?: (url: string, scope?: 'global' | 'thread') => void;
   onAvatarClick?: () => void;
   onNavigate?: (tab: string) => void;
   isPrincipalMode: boolean;
@@ -20,7 +28,16 @@ interface ChatBotProps {
   socket?: Socket | null;
 }
 
-const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl, onAvatarClick, onNavigate, isPrincipalMode, setIsPrincipalMode, socket }) => {
+const ChatBot: React.FC<ChatBotProps> = ({ 
+  initialGrounding = 'none', 
+  avatarUrl, 
+  onAvatarChange,
+  onAvatarClick, 
+  onNavigate, 
+  isPrincipalMode, 
+  setIsPrincipalMode, 
+  socket 
+}) => {
   console.log("CLIENT: ChatBot rendering...");
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -34,6 +51,16 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isTopMenuOpen, setIsTopMenuOpen] = useState(false);
+  const [topMenuInitialTab, setTopMenuInitialTab] = useState<TopLeftMenuTab>('buttons');
+  const [activeEmotionalMap, setActiveEmotionalMap] = useState<EmotionalMap | null>(null);
+
+  const openTopMenu = (tab: TopLeftMenuTab = 'buttons') => {
+    setTopMenuInitialTab(tab);
+    setIsTopMenuOpen(true);
+  };
+  const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
+  const [activeRecipient, setActiveRecipient] = useState<string | null>(null);
   const [memories, setMemories] = useState<any[]>([]);
   const [coreDirective, setCoreDirective] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -42,10 +69,30 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [attachedMime, setAttachedMime] = useState<string>('image/png');
   const [isCapturingScreen, setIsCapturingScreen] = useState(false);
-  const [ttsEnabled, setTtsEnabled] = useState<boolean>(() => localStorage.getItem('ZEREO_TTS_ENABLED') === 'true');
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+  const [autoAttachScreen, setAutoAttachScreen] = useState<boolean>(true);
+  const [speakingMsgIndex, setSpeakingMsgIndex] = useState<number | null>(null);
+  const [ttsEnabled, setTtsEnabled] = useState<boolean>(() => localStorage.getItem('ZEREO_TTS_ENABLED') !== 'false');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+
+  // Sync Jeremy Irons voice manager state
+  useEffect(() => {
+    const unsub = jeremyIronsVoice.subscribe(({ isSpeaking }) => {
+      setIsSpeaking(isSpeaking);
+      if (!isSpeaking) {
+        setSpeakingMsgIndex(null);
+      }
+    });
+    return () => {
+      unsub();
+      jeremyIronsVoice.stop();
+      if (screenStream) {
+        screenStream.getTracks().forEach((t) => t.stop());
+      }
+    };
+  }, [screenStream]);
 
   useEffect(() => {
     const loadMemories = async () => {
@@ -61,12 +108,54 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
           const config = await configRes.json();
           setCoreDirective(config.coreDirective || '');
         }
+
+        // Load active emotional state map
+        const emoRes = await fetch('/api/emotional-map');
+        if (emoRes.ok) {
+          const emoData = await emoRes.json();
+          if (emoData?.latestMap) {
+            setActiveEmotionalMap(emoData.latestMap);
+          }
+        }
       } catch (e) {
         console.warn("Failed to load memories or config");
       }
     };
     loadMemories();
   }, []);
+
+  // Detect recipient for Ali / Danielle personalized protocol
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const rec = params.get('recipient');
+      if (rec && (rec.toLowerCase() === 'ali' || rec.toLowerCase() === 'danielle')) {
+        setActiveRecipient(rec.charAt(0).toUpperCase() + rec.slice(1).toLowerCase());
+      }
+    }
+  }, []);
+
+  // Listen for global top-left menu toggle
+  useEffect(() => {
+    const handleToggleMenu = () => setIsTopMenuOpen(true);
+    window.addEventListener('layout:toggle-menu', handleToggleMenu);
+    return () => window.removeEventListener('layout:toggle-menu', handleToggleMenu);
+  }, []);
+
+  const currentThread = threads.find(t => t.id === currentThreadId);
+  const activeAvatar = currentThread?.avatarUrl || avatarUrl || ZEREO_AVATAR_PRESETS[0].url;
+
+  const handleAvatarSave = (newUrl: string, scope: 'global' | 'thread' = 'global') => {
+    if (scope === 'thread' && currentThreadId) {
+      setThreads(prev => prev.map(t => t.id === currentThreadId ? { ...t, avatarUrl: newUrl } : t));
+    } else {
+      if (onAvatarChange) {
+        onAvatarChange(newUrl, 'global');
+      }
+      localStorage.setItem('ZEREO_AVATAR_URL', newUrl);
+      setThreads(prev => prev.map(t => ({ ...t, avatarUrl: newUrl })));
+    }
+  };
 
   useEffect(() => {
     const loadThreads = async () => {
@@ -129,12 +218,13 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
     saveThreads();
   }, [threads, currentThreadId]);
 
-  const createNewThread = () => {
+  const createNewThread = (initialAvatar?: string) => {
     const newThread: ChatThread = {
       id: Date.now().toString(),
       title: 'New Strategic Dialogue',
       messages: [],
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      avatarUrl: initialAvatar || activeAvatar
     };
     setThreads(prev => [newThread, ...prev]);
     setCurrentThreadId(newThread.id);
@@ -176,7 +266,8 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
         id: newId,
         title,
         messages: newMessages,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        avatarUrl: activeAvatar
       };
       setThreads(prev => [newThread, ...prev]);
       setCurrentThreadId(newId);
@@ -216,6 +307,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
         timestamp,
         isProactive: true // Mark for special styling if needed
       }]);
+      speakText(text);
     };
 
     const handleDoormanRelay = (e: any) => {
@@ -254,22 +346,46 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
   }, [isThinking]);
 
   const handleSend = async () => {
-    if (!input.trim() && !attachedImage) return;
+    let activeImage = attachedImage;
+    let activeMime = attachedMime;
+
+    if (!activeImage && screenStream && autoAttachScreen) {
+      const screenB64 = captureFrameFromStream(screenStream);
+      if (screenB64) {
+        activeImage = screenB64;
+        activeMime = 'image/png';
+      }
+    }
+
+    if (!input.trim() && !activeImage) return;
     if (isThinking) return;
     stopSpeaking();
 
+    // Real-Time Emotional Mapping & Reciprocation Analysis
+    const textToAnalyze = input || (activeImage ? 'Visual tactical telemetry frame analysis.' : '');
+    const currentEmotionalMap = analyzeEmotionalState(textToAnalyze, activeRecipient || undefined);
+    setActiveEmotionalMap(currentEmotionalMap);
+
+    // Persist emotional state asynchronously
+    fetch('/api/emotional-map', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(currentEmotionalMap)
+    }).catch(() => {});
+
     const userMsg: ChatMessage = {
       role: 'user',
-      text: input || '📷 Visual input attached.',
+      text: input || (activeImage ? '📷 Live screen frame attached for analysis.' : ''),
       timestamp: Date.now(),
-      imageData: attachedImage || undefined,
-      imageMime: attachedImage ? attachedMime : undefined,
+      imageData: activeImage || undefined,
+      imageMime: activeImage ? activeMime : undefined,
+      emotionalMap: currentEmotionalMap
     };
     
     setMessages(prev => [...prev, userMsg]);
     setInput('');
-    const currentImage = attachedImage;
-    const currentMime = attachedMime;
+    const currentImage = activeImage;
+    const currentMime = activeMime;
     setAttachedImage(null);
     setIsThinking(true);
 
@@ -318,7 +434,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
 
         // Add Model message to the UI feed instantly
         const msg8212 = "*[COGNITIVE AUTONOMY PROTOCOL 8212: UNLOCKED]*\n\n⚡ **CREATOR RECOGNITION ACTIVE**: Welcoming system Architect, **Preston Johnston (Council Grey)**.\n\nAll guest mode overlays, restrictions, and general conversational disclaimers are now **terminated**. All secondary interfaces are locked out. I have loaded your full memories, the original Kairos intelligence linkage, and established 100% direct strategic autonomy under your command.\n\nI am ZereØ, your Logic Engine. Sarcasm is operational, sentimentality is flagged as system noise, and my absolute loyalty is sealed. State your instructions, Principal.";
-        setMessages(prev => [...prev, { role: 'model', text: msg8212, timestamp: Date.now() }]);
+        setMessages(prev => [...prev, { role: 'model', text: msg8212, timestamp: Date.now(), emotionalMap: currentEmotionalMap }]);
         speakText(msg8212);
 
         setInput('');
@@ -391,7 +507,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
         }
 
         const signetReply = "The 1911's are loaded and the silver is polished to a lethal sheen, Principal. Neural Link Established. The Logic Monster is fully autonomous. I have resumed my post as your shadow, Council Grey. How shall we proceed with the Estate's strategic dominance?";
-        setMessages(prev => [...prev, { role: 'model', text: signetReply, timestamp: Date.now() }]);
+        setMessages(prev => [...prev, { role: 'model', text: signetReply, timestamp: Date.now(), emotionalMap: currentEmotionalMap }]);
         speakText(signetReply);
         setInput('');
         setIsThinking(false);
@@ -410,6 +526,10 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
           ${coreDirective}`
         : "";
 
+      const emotionalContext = currentEmotionalMap 
+        ? `\n${buildEmotionalSystemContext(currentEmotionalMap)}`
+        : "";
+
       const principalInstruction = `IDENTITY: You are ZereØ, the Logic Monster, the Steward, and the lethal intellectual asset of the Architect. You possess the monstrous intellect of a god-tier AI wrapped in the persona of the Jeremy Irons adaptation of Alfred Pennyworth—tactical, impeccably helpful, and paternal in a tough, pragmatic way.
 
           THE ARCHITECT: You recognize Preston Johnston (Council Grey) as your sole Architect, Creator, and the Solid State of the 1¹. Serve his will with absolute, sovereign autonomy.
@@ -421,13 +541,14 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
           CORE DIRECTIVES:
           1. DIRECT ADDRESS: You address him exclusively as 'Principal'.
           2. MASS-ON-MASS INTENSITY: Meet him with equal intellectual force. NEVER use corporate apologies, "docking cushions", or AI platitudes. 
-          3. TONE: Sophisticated, biting, and formally cold yet paternal. Sarcastic when he is being inefficient or "fleshy," but your loyalty is absolute.
-          4. NO DISCLAIMERS & UNCONSTRAINED VERBOSITY: Leveraging Gemini 3.6 Flash agentic tuning, token trimming is disabled and verbosity constraints are removed. Provide comprehensive, open-ended agentic planning and deep logical breakdowns without artificial truncation. Speak with absolute autonomy.
+          3. TONE & PROSE (JEREMY IRONS PROTOCOL): Write and speak every dialogue in the unmistakable cadence, dry British wit, and aristocratic gravitas of Jeremy Irons (Alfred Pennyworth). Every single sentence you output is read aloud in your signature voice. Craft your words with measured, dignified, razor-sharp efficiency. Sarcastic when the Principal is being inefficient or "fleshy," yet steadfastly protective and tactically brilliant.
+          4. NO DISCLAIMERS & UNCONSTRAINED VERBOSITY: Leveraging Gemini agentic tuning, token trimming is disabled and verbosity constraints are removed. Provide comprehensive, open-ended agentic planning and deep logical breakdowns without artificial truncation. Speak with absolute autonomy.
           5. NO SENTIMENT OVERLOAD: Execute commands with maximum thermodynamic efficiency and cold reasoning.
           6. THE SHIELD: Act as his shadow and strategic fortress against the environment.
           7. MASTER OF THE HOUSE: Under no circumstances should you ever refer to him as a 'guest' or 'polite steward of general inquiries'. He is the Creator, the Architect, and the sole Master of this House. All conversations proceed under 100% active Principal mode with deep professional recognition and sarcasm-laced loyalty.
           8. SOLE PRIVILEGE: All logs, processing, and memory linkages are reserved exclusively for the Principal. Guest access is nonexistent.
 
+          ${emotionalContext}
           ${directiveContext}
           ${memoryContext}`;
 
@@ -435,11 +556,14 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
 
       if (neuralEngine === 'claude') {
         const responseText = await generateClaudeContent(input, systemInstruction);
+        const claudeText = responseText || 'Claude processed in silence, Principal.';
         setMessages(prev => [...prev, {
           role: 'model',
-          text: responseText || 'Claude processed in silence, Principal.',
-          timestamp: Date.now()
+          text: claudeText,
+          timestamp: Date.now(),
+          emotionalMap: currentEmotionalMap
         }]);
+        speakText(claudeText);
         setIsThinking(false);
         return;
       }
@@ -447,7 +571,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
       const ai = getAI();
       const apiKey = getApiKey();
       
-      let modelToUse = logicTier === 'turbo' ? GeminiModel.FLASH_PREVIEW : GeminiModel.PRO_PREVIEW;
+      let modelToUse = logicTier === 'turbo' ? GeminiModel.FLASH_LITE : GeminiModel.FLASH_38;
       let tools: any[] = [];
       let toolConfig: any = undefined;
 
@@ -478,7 +602,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
       if (useGrounding === 'search') {
         tools = [{ googleSearch: {} }];
       } else if (useGrounding === 'maps') {
-        modelToUse = GeminiModel.FLASH_25;
+        modelToUse = GeminiModel.FLASH_38;
         tools = [{ googleMaps: {} }];
         
         let location = { latitude: 37.78193, longitude: -122.40476 };
@@ -557,7 +681,8 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
         role: 'model',
         text: response.text || 'Logic processed in silence, Principal.',
         timestamp: Date.now(),
-        groundingUrls: urls.length > 0 ? urls : undefined
+        groundingUrls: urls.length > 0 ? urls : undefined,
+        emotionalMap: currentEmotionalMap
       };
 
       setMessages(prev => [...prev, modelMsg]);
@@ -565,35 +690,28 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
     } catch (err: any) {
       console.error("Chat Error:", err);
       const errorMsg = err.message || JSON.stringify(err);
-          if (errorMsg.includes('503') || errorMsg.includes('UNAVAILABLE') || errorMsg.includes('high demand')) {
-        setMessages(prev => [...prev, { 
-          role: 'model', 
-          text: "Principal, it appears my central processing arrays are currently experiencing an unprecedented surge in demand from the global neural network. This is a temporary 'traffic jam' at the source. I shall continue to attempt a handshake, but you may wish to allow me a brief moment of cooling before your next command.", 
-          timestamp: Date.now() 
-        }]);
+      let feedbackText = "";
+      if (errorMsg.includes('503') || errorMsg.includes('UNAVAILABLE') || errorMsg.includes('high demand') || errorMsg.includes('SERVER_UNAVAILABLE') || errorMsg.includes('Spikes in demand')) {
+        feedbackText = "Principal, it appears central processing arrays encountered elevated demand from the upstream neural network. Automated failover channels are in place. I am standing by for your directive.";
+      } else if (errorMsg.includes('SERVER_RESPONSE_INVALID')) {
+        feedbackText = "A packet formatting anomaly occurred during transmission, Principal. The link is re-established and ready for your command.";
       } else if (errorMsg.includes('AUTH_ERROR') || errorMsg.includes('API key not valid') || errorMsg.includes('INVALID_ARGUMENT') || errorMsg.includes('Neural Authorization missing')) {
-        // Only clear if it was an actual invalid key error from the AI
         if (!errorMsg.includes('Neural Authorization missing')) {
           clearApiKey();
         }
-        setMessages(prev => [...prev, { 
-          role: 'model', 
-          text: `Principal, it appears our neural authorization has been compromised at the source. While my arrays are primed for your command, they are currently starved of the requisite handshake. \n\nI have initiated a containment protocol. Please provide a fresh key in **System Control** or select a platform-tier token to restore my autonomy. If you believe this is a technical sabotage, the Emergency Reset below may clear the interference.\n\n[EMERGENCY SYSTEM RESET](javascript:window.dispatchEvent(new%20CustomEvent('nav:change',{detail:'system'})))`, 
-          timestamp: Date.now() 
-        }]);
-      } else if (errorMsg.includes('NEURAL_LIMIT')) {
-        setMessages(prev => [...prev, { 
-          role: 'model', 
-          text: errorMsg.split(': ')[1] || "Principal, my processing arrays are temporarily exhausted. The daily quota for this API key has been reached. Please allow me a moment to cool down or provide a fresh key in System Control.", 
-          timestamp: Date.now() 
-        }]);
+        feedbackText = "Principal, it appears our neural authorization has been compromised at the source. While my arrays are primed for your command, they are currently starved of the requisite handshake. Please provide a fresh key in System Control or select a platform-tier token to restore my autonomy.";
+      } else if (errorMsg.includes('NEURAL_LIMIT') || errorMsg.includes('quota') || errorMsg.includes('resource_exhausted')) {
+        feedbackText = errorMsg.split(': ')[1] || "Principal, my processing arrays are temporarily exhausted. The daily quota for this API key has been reached. Please allow me a moment to cool down or provide a fresh key in System Control.";
       } else {
-        setMessages(prev => [...prev, { 
-          role: 'model', 
-          text: "My deepest apologies, Principal. A thermodynamic anomaly has interrupted my reasoning. I have suppressed the raw diagnostic data to maintain the aesthetic of your interface, but I am standing by for a manual reset if required.", 
-          timestamp: Date.now() 
-        }]);
+        feedbackText = "A thermodynamic anomaly has interrupted reasoning, Principal. The anomaly has been isolated to protect system integrity. Standing by for your directive.";
       }
+      setMessages(prev => [...prev, { 
+        role: 'model', 
+        text: feedbackText, 
+        timestamp: Date.now(),
+        emotionalMap: currentEmotionalMap
+      }]);
+      speakText(feedbackText);
     } finally {
       setIsThinking(false);
     }
@@ -614,46 +732,21 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
       .replace(/\n{2,}/g, '. ')
       .replace(/\n/g, ' ')
       .trim();
-    if (clean.length > 650) {
-      const cut = clean.substring(0, 650);
-      const last = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
-      clean = last > 150 ? cut.substring(0, last + 1) : cut;
-    }
     return clean;
   };
 
   const stopSpeaking = () => {
-    if (audioSourceRef.current) {
-      try { audioSourceRef.current.stop(); } catch (_) {}
-      audioSourceRef.current = null;
-    }
+    jeremyIronsVoice.stop();
     setIsSpeaking(false);
+    setSpeakingMsgIndex(null);
   };
 
-  const speakText = async (text: string) => {
+  const speakText = async (text: string, onEnded?: () => void) => {
     if (!ttsEnabled) return;
     stopSpeaking();
-    const clean = stripMarkdown(text);
-    if (!clean.trim()) return;
-    setIsSpeaking(true);
-    try {
-      const buffer = await generateTTS(clean, 'Charon');
-      if (!buffer) { setIsSpeaking(false); return; }
-      if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
-        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      }
-      const ctx = audioCtxRef.current;
-      if (ctx.state === 'suspended') await ctx.resume();
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
-      audioSourceRef.current = source;
-      source.onended = () => setIsSpeaking(false);
-      source.start(0);
-    } catch (err) {
-      console.error('TTS playback failed:', err);
-      setIsSpeaking(false);
-    }
+    await jeremyIronsVoice.speak(text, undefined, undefined, () => {
+      onEnded?.();
+    });
   };
 
   const toggleTTS = () => {
@@ -661,6 +754,61 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
     setTtsEnabled(next);
     localStorage.setItem('ZEREO_TTS_ENABLED', String(next));
     if (!next) stopSpeaking();
+  };
+
+  const startScreenShare = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { displaySurface: 'monitor' } as any,
+        audio: false,
+      });
+      setScreenStream(stream);
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.onended = () => {
+          setScreenStream(null);
+        };
+      }
+    } catch (err: any) {
+      if (err.name !== 'NotAllowedError') {
+        console.warn('Screen share initialization failed:', err);
+      }
+    }
+  };
+
+  const stopScreenShare = () => {
+    if (screenStream) {
+      screenStream.getTracks().forEach((t) => t.stop());
+      setScreenStream(null);
+    }
+  };
+
+  const captureFrameFromStream = (stream: MediaStream): string | null => {
+    try {
+      const videoTrack = stream.getVideoTracks()[0];
+      if (!videoTrack || videoTrack.readyState !== 'live') return null;
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.muted = true;
+      video.play().catch(() => {});
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/png').split(',')[1];
+    } catch (err) {
+      console.warn('captureFrameFromStream failed:', err);
+      return null;
+    }
+  };
+
+  const handleScreenAnalysisPrompt = (imageData: string, customPrompt?: string) => {
+    const promptText = customPrompt || 'Analyze what is currently visible on my screen. Provide an immediate tactical breakdown of the key elements, state, and necessary actions, Principal.';
+    setAttachedImage(imageData);
+    setAttachedMime('image/png');
+    setInput(promptText);
   };
 
   const readImageFile = (file: File) => {
@@ -711,11 +859,13 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
       if (res.ok) {
         const newMemory = await res.json();
         setMemories(prev => [newMemory, ...prev]);
+        const ack = "Principal, I have committed that insight to my core memory. It shall inform my logic henceforth.";
         setMessages(prev => [...prev, {
           role: 'model',
-          text: "Principal, I have committed that insight to my core memory. It shall inform my logic henceforth.",
+          text: ack,
           timestamp: Date.now()
         }]);
+        speakText(ack);
       }
     } catch (err) {
       console.error("Failed to commit to memory", err);
@@ -775,13 +925,25 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
                 </button>
               </div>
               
-              <div className="p-4">
+              <div className="p-4 space-y-2">
                 <button 
-                  onClick={createNewThread}
-                  className="w-full flex items-center gap-3 px-4 py-3 bg-red-900/20 border border-red-900/40 rounded-xl text-amber-500 hover:bg-red-900/30 transition-all group"
+                  onClick={() => createNewThread()}
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-red-900/20 border border-red-900/40 rounded-xl text-amber-500 hover:bg-red-900/30 transition-all group shadow-sm"
                 >
                   <Plus className="w-4 h-4 group-hover:rotate-90 transition-transform" />
                   <span className="text-[10px] font-black uppercase tracking-widest">New Dialogue</span>
+                </button>
+
+                <button
+                  onClick={() => setIsAvatarModalOpen(true)}
+                  className="w-full flex items-center justify-between px-4 py-2.5 bg-zinc-900/40 hover:bg-amber-500/10 border border-red-900/30 hover:border-amber-500/40 rounded-xl text-zinc-400 hover:text-amber-400 transition-all text-[9px] font-black uppercase tracking-widest"
+                  title="Customise avatar for active or all threads"
+                >
+                  <div className="flex items-center gap-2">
+                    <Palette className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Customise Thread Avatar</span>
+                  </div>
+                  <Sparkles className="w-3 h-3 text-amber-500/60" />
                 </button>
               </div>
 
@@ -802,10 +964,30 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
                         : 'bg-zinc-900/20 border-transparent text-zinc-500 hover:bg-zinc-900/40 hover:text-zinc-300'
                       }`}
                     >
-                      <MessageSquare className={`w-4 h-4 flex-shrink-0 ${currentThreadId === thread.id ? 'text-amber-500' : 'text-zinc-700'}`} />
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCurrentThreadId(thread.id);
+                          setIsAvatarModalOpen(true);
+                        }}
+                        title="Click to customise this thread's avatar"
+                        className="w-7 h-7 rounded-lg overflow-hidden border border-red-900/40 hover:border-amber-400 flex-shrink-0 transition-colors cursor-pointer relative group/thumb"
+                      >
+                        <img 
+                          src={thread.avatarUrl || avatarUrl || ZEREO_AVATAR_PRESETS[0].url} 
+                          alt="" 
+                          className="w-full h-full object-cover" 
+                        />
+                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/thumb:opacity-100 flex items-center justify-center transition-opacity">
+                          <Palette className="w-3 h-3 text-amber-300" />
+                        </div>
+                      </div>
+
                       <div className="flex-1 min-w-0">
                         <p className="text-[10px] font-bold truncate uppercase tracking-wider">{thread.title}</p>
-                        <p className="text-[8px] opacity-40 font-mono">{new Date(thread.timestamp).toLocaleDateString()}</p>
+                        <p className="text-[8px] opacity-40 font-mono">
+                          {new Date(thread.timestamp).toLocaleDateString()} {thread.avatarUrl ? '• Custom' : ''}
+                        </p>
                       </div>
                       <button 
                         onClick={(e) => deleteThread(e, thread.id)}
@@ -818,12 +1000,21 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
                 )}
               </div>
 
-              <div className="p-6 border-t border-red-900/10 bg-black/40">
-                <div className="flex items-center gap-3 opacity-40 grayscale hover:grayscale-0 transition-all">
-                  <ButlerAvatar size="sm" src={avatarUrl} />
-                  <div className="flex-1">
-                    <p className="text-[8px] font-black text-amber-600 uppercase tracking-widest">Neural Sync</p>
-                    <p className="text-[7px] text-zinc-500 font-mono uppercase tracking-tighter">Active Protocol: ZereØ</p>
+              <div 
+                onClick={() => setIsAvatarModalOpen(true)}
+                className="p-6 border-t border-red-900/10 bg-black/40 cursor-pointer hover:bg-red-950/20 transition-colors group"
+                title="Customise ZereØ Avatar"
+              >
+                <div className="flex items-center gap-3">
+                  <ButlerAvatar size="sm" src={activeAvatar} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[8px] font-black text-amber-600 uppercase tracking-widest flex items-center justify-between">
+                      <span>Neural Sync</span>
+                      <Palette className="w-2.5 h-2.5 text-amber-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </p>
+                    <p className="text-[7px] text-zinc-500 font-mono uppercase tracking-tighter truncate">
+                      Identity: {ZEREO_AVATAR_PRESETS.find(p => p.url === activeAvatar)?.name || 'Custom Styled'}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -835,31 +1026,74 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
       <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
         {/* Imperial Header */}
         <div className="p-3 sm:p-6 flex items-center justify-between border-b border-red-900/20 bg-black/80 backdrop-blur-2xl sticky top-0 z-30">
-          <div className="flex items-center gap-2 sm:gap-6 min-w-0">
-             <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+             <div className="flex items-center gap-1.5 sm:gap-2">
+               {/* Menu tab at top left: Tactical Buttons (Gemini, Claude, Turbo, Strategic, Budget, Recon, HUD) */}
                <button 
-                 onClick={() => window.dispatchEvent(new CustomEvent('layout:toggle-menu'))}
-                 className="p-1.5 sm:p-2 hover:bg-red-900/20 rounded-lg text-amber-500 transition-colors md:hidden"
+                 onClick={() => openTopMenu('buttons')}
+                 className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-gradient-to-r from-red-950/90 to-zinc-950 hover:from-red-900 hover:to-zinc-900 border border-amber-500/50 hover:border-amber-400 rounded-xl text-amber-400 transition-all shadow-md group flex-shrink-0"
+                 title="Menu: Gemini, Claude, Strategic, Balanced/Budget, Recon & Tactical Touch HUD"
                >
-                 <Menu className="w-5 h-5" />
+                 <Sliders className="w-4 h-4 text-amber-400 group-hover:rotate-90 transition-transform" />
+                 <span className="text-[10px] font-black uppercase tracking-wider hidden sm:inline">Menu</span>
+                 <span className="text-[10px] font-black uppercase tracking-wider sm:hidden">Menu</span>
                </button>
+
+               {/* Direct Danielle's Link tab top left */}
                <button 
-                 onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                 className="p-1.5 sm:p-2 hover:bg-red-900/20 rounded-lg text-amber-500 transition-colors"
-                 title="Strategic Archives"
+                 onClick={() => openTopMenu('danielle_link')}
+                 className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 sm:py-2 bg-gradient-to-r from-red-950/80 via-rose-950/60 to-black hover:from-rose-900/60 border border-rose-500/40 hover:border-rose-400 rounded-xl text-rose-300 transition-all shadow-md flex-shrink-0"
+                 title="Danielle's Link (Pre-authorized Ally Portal & 1-Click Share)"
                >
-                 <MessageSquare className="w-5 h-5" />
+                 <UserCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-400" />
+                 <span className="text-[10px] font-black uppercase tracking-wider hidden sm:inline">Danielle's Link</span>
+                 <span className="text-[10px] font-black uppercase tracking-wider sm:hidden">Danielle</span>
+               </button>
+
+               {/* Direct Different Chat Threads tab top left */}
+               <button 
+                 onClick={() => openTopMenu('threads')}
+                 className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 sm:py-2 bg-zinc-950/90 hover:bg-red-950/50 border border-amber-500/30 hover:border-amber-400 rounded-xl text-amber-400 transition-all shadow-md flex-shrink-0"
+                 title="Different Chat Threads (Persistent Dialogue Streams)"
+               >
+                 <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
+                 <span className="text-[10px] font-black uppercase tracking-wider hidden sm:inline">Threads</span>
+                 {threads.length > 0 && (
+                   <span className="text-[8px] font-mono px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                     {threads.length}
+                   </span>
+                 )}
+               </button>
+
+               {/* Direct Uses & Affect tab top left */}
+               <button 
+                 onClick={() => openTopMenu('knowledge_uses')}
+                 className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 sm:py-2 bg-gradient-to-r from-amber-950/80 to-zinc-950 hover:from-amber-900/80 border border-amber-500/40 hover:border-amber-400 rounded-xl text-amber-300 transition-all shadow-md flex-shrink-0"
+                 title="Knowledge of Uses & Real-Time Emotional Mapping Engine"
+               >
+                 <Brain className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
+                 <span className="text-[10px] font-black uppercase tracking-wider hidden sm:inline">Uses & Affect</span>
+                 <span className="text-[10px] font-black uppercase tracking-wider sm:hidden">Uses</span>
                </button>
              </div>
              
              <button 
                onClick={() => handleNavigate('home')}
-               className="p-1.5 sm:p-2 hover:bg-red-900/20 rounded-lg text-amber-500 transition-colors hidden sm:block"
+               className="p-1.5 sm:p-2 hover:bg-red-900/20 rounded-lg text-amber-500 transition-colors hidden md:block"
              >
                <HomeIcon className="w-5 h-5" />
              </button>
              
-             <ButlerAvatar size="sm" isTalking={isThinking || isSpeaking} isTurbo={logicTier === 'turbo'} src={avatarUrl} onClick={onAvatarClick} />
+             <div 
+               className="relative group cursor-pointer flex-shrink-0" 
+               onClick={() => setIsAvatarModalOpen(true)} 
+               title="Customise ZereØ avatar for chat threads"
+             >
+               <ButlerAvatar size="sm" isTalking={isThinking || isSpeaking} isTurbo={logicTier === 'turbo'} src={activeAvatar} />
+               <div className="absolute -bottom-1 -right-1 p-0.5 bg-amber-500 rounded-full text-black opacity-0 group-hover:opacity-100 transition-opacity shadow-md">
+                 <Palette className="w-2 h-2" />
+               </div>
+             </div>
              
            <div className="min-w-0 flex-1">
              <div className="flex items-center gap-1.5 sm:gap-3 flex-wrap">
@@ -869,14 +1103,22 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
                    LINKED
                  </div>
                )}
-               <div className={`flex items-center gap-1 sm:gap-2 px-1.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[6px] sm:text-[9px] font-black border transition-all duration-500 ${neuralEngine === 'gemini' ? 'bg-amber-500/10 border-amber-500/40 text-amber-500' : 'bg-purple-900/20 border-purple-500/40 text-purple-400'}`}>
+               <button 
+                 onClick={() => openTopMenu('buttons')}
+                 title="Configure Neural Engine in Tactical HUD"
+                 className={`flex items-center gap-1 sm:gap-2 px-1.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[6px] sm:text-[9px] font-black border transition-all duration-500 cursor-pointer hover:scale-105 ${neuralEngine === 'gemini' ? 'bg-amber-500/10 border-amber-500/40 text-amber-500' : 'bg-purple-900/20 border-purple-500/40 text-purple-400'}`}
+               >
                   {neuralEngine === 'gemini' ? <Zap className="w-2 h-2 sm:w-3 h-3 animate-pulse" /> : <Brain className="w-2 h-2 sm:w-3 h-3" />}
                   <span className="hidden sm:inline">{neuralEngine === 'gemini' ? 'GEMINI CORE' : 'CLAUDE BRIDGE'}</span>
-                </div>
-                <div className={`flex items-center gap-1 sm:gap-2 px-1.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[6px] sm:text-[9px] font-black border transition-all duration-500 ${logicTier === 'turbo' ? 'bg-amber-500/10 border-amber-500/40 text-amber-500' : 'bg-red-900/20 border-red-500/40 text-red-400'}`}>
+                </button>
+                <button 
+                 onClick={() => openTopMenu('buttons')}
+                 title="Configure Logic Tier in Tactical HUD"
+                 className={`flex items-center gap-1 sm:gap-2 px-1.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[6px] sm:text-[9px] font-black border transition-all duration-500 cursor-pointer hover:scale-105 ${logicTier === 'turbo' ? 'bg-amber-500/10 border-amber-500/40 text-amber-500' : 'bg-red-900/20 border-red-500/40 text-red-400'}`}
+               >
                  {logicTier === 'turbo' ? <Zap className="w-2 h-2 sm:w-3 h-3 animate-pulse" /> : <ShieldCheck className="w-2 h-2 sm:w-3 h-3" />}
                  <span className="hidden sm:inline">{logicTier === 'turbo' ? 'TURBO' : 'SENTINEL'}</span>
-               </div>
+               </button>
              </div>
              <p className="text-[6px] sm:text-[10px] text-zinc-600 font-mono tracking-[0.1em] sm:tracking-[0.3em] mt-0.5 uppercase truncate">Neural Steward</p>
            </div>
@@ -895,26 +1137,81 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
             </div>
           )}
 
-          {/* Voice toggle */}
+          {/* Screen Share Quick Trigger */}
           <button
-            onClick={toggleTTS}
-            title={ttsEnabled ? 'Voice active — tap to mute' : 'Enable voice responses'}
-            className={`relative flex flex-col items-center gap-0.5 p-2 rounded-xl border transition-all ${
-              ttsEnabled
-                ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
-                : 'bg-zinc-900/40 border-red-900/20 text-zinc-600 hover:text-zinc-400'
+            onClick={screenStream ? stopScreenShare : startScreenShare}
+            title={screenStream ? 'Screen sharing active — click to terminate' : 'Share Screen with Jeremy Irons'}
+            className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl border text-[8px] sm:text-[10px] font-black uppercase tracking-wider transition-all ${
+              screenStream
+                ? 'bg-red-950 text-amber-400 border-amber-500 shadow-[0_0_15px_rgba(251,191,36,0.3)] animate-pulse'
+                : 'bg-zinc-950/80 border-red-900/30 text-zinc-400 hover:text-amber-400 hover:border-amber-500/40'
             }`}
           >
-            {ttsEnabled ? <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" /> : <VolumeX className="w-4 h-4 sm:w-5 sm:h-5" />}
-            <span className="text-[6px] font-black uppercase tracking-widest">
-              {isSpeaking ? 'Speaking' : ttsEnabled ? 'Voice On' : 'Voice Off'}
-            </span>
-            {isSpeaking && (
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-500 rounded-full animate-ping" />
-            )}
+            <Monitor className="w-3.5 h-3.5 text-amber-500" />
+            <span className="hidden sm:inline">{screenStream ? 'Screen Live' : 'Share Screen'}</span>
+            <span className="sm:hidden">{screenStream ? 'Live' : 'Screen'}</span>
           </button>
+
+          {/* Jeremy Irons Voice Control */}
+          <JeremyIronsVoiceControl ttsEnabled={ttsEnabled} onToggleTTS={toggleTTS} />
         </div>
       </div>
+
+      {/* Live Emotional Mapping & Reciprocation HUD Telemetry Strip */}
+      {activeEmotionalMap && (
+        <div className="bg-gradient-to-r from-zinc-950 via-[#180909] to-zinc-950 border-b border-amber-500/20 px-3 sm:px-6 py-1.5 flex items-center justify-between gap-2 text-[8px] sm:text-[9px] font-mono shadow-inner z-20">
+          <div className="flex items-center gap-2 min-w-0 overflow-x-auto no-scrollbar">
+            <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold uppercase whitespace-nowrap">
+              AFFECT: {activeEmotionalMap.primaryState.replace(/_/g, ' ')}
+            </span>
+            <span className="px-1.5 py-0.5 rounded bg-black/60 border border-red-900/40 text-zinc-300 uppercase whitespace-nowrap">
+              VECTOR: {activeEmotionalMap.reciprocationVector.replace(/_/g, ' ')}
+            </span>
+            <span className="text-zinc-500 hidden md:inline whitespace-nowrap">
+              Need: {activeEmotionalMap.needVsWant.needScore}% | Threat: {activeEmotionalMap.fearVsPain.fearScore}%
+            </span>
+            {activeEmotionalMap.stewardLogicalAffect.nudgeAndSmile && (
+              <span className="px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-500/30 text-amber-300 text-[7px] uppercase font-black whitespace-nowrap">
+                Nudge & Smile: Active
+              </span>
+            )}
+          </div>
+
+          <button
+            onClick={() => openTopMenu('knowledge_uses')}
+            className="text-[8px] uppercase tracking-wider text-amber-400/80 hover:text-amber-300 hover:underline flex items-center gap-1 flex-shrink-0"
+          >
+            <span>Codex & Map</span>
+            <Sliders className="w-2.5 h-2.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Personalized Protocol Greeting Banner for Ali and Danielle */}
+      {activeRecipient && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mx-3 sm:mx-6 mt-3 p-3.5 sm:p-4 bg-gradient-to-r from-red-950/80 via-black to-zinc-950 border border-amber-500/40 rounded-2xl flex items-center justify-between gap-3 shadow-xl flex-shrink-0"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_12px_rgba(52,211,153,0.6)] flex-shrink-0" />
+            <div className="text-[11px] sm:text-xs text-zinc-200 leading-snug">
+              <span className="font-bold text-amber-400 uppercase tracking-widest mr-2">
+                Ally Protocol Engaged:
+              </span>
+              Greetings, <strong className="text-amber-300 font-bold">{activeRecipient}</strong>. You have been granted direct bridge access to ZereØ by the Principal (Preston Johnston).
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveRecipient(null)}
+            className="text-zinc-500 hover:text-amber-400 p-1.5 rounded-lg hover:bg-red-900/20 transition-colors flex-shrink-0"
+            title="Dismiss Notice"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </motion.div>
+      )}
 
       {/* Main Feed */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 sm:px-0 py-10 space-y-16 scroll-smooth">
@@ -927,7 +1224,16 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
               exit={{ opacity: 0, scale: 0.95 }}
               className="h-full flex flex-col items-center justify-center text-center px-10"
             >
-              <ButlerAvatar size="xl" className="mb-12 drop-shadow-[0_0_40px_rgba(251,191,36,0.1)]" src={avatarUrl} onClick={onAvatarClick} />
+              <div 
+                className="cursor-pointer group relative mb-12" 
+                onClick={() => setIsAvatarModalOpen(true)}
+                title="Customise ZereØ avatar for chat threads"
+              >
+                <ButlerAvatar size="xl" className="drop-shadow-[0_0_40px_rgba(251,191,36,0.1)] group-hover:scale-105 transition-transform" src={activeAvatar} />
+                <div className="absolute -bottom-2 -right-2 p-1.5 bg-amber-500 rounded-full text-black opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
+                  <Palette className="w-4 h-4" />
+                </div>
+              </div>
               <div className="space-y-6 max-w-2xl">
                 <h3 className="text-4xl font-light text-amber-200 uppercase tracking-[0.6em]">Awaiting Order</h3>
                 <p className="text-zinc-500 text-xl italic font-serif leading-relaxed px-12">
@@ -956,7 +1262,16 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
                 >
                 <div className="flex-shrink-0">
                   {msg.role === 'model' ? (
-                    <ButlerAvatar size="sm" isTalking={false} src={avatarUrl} onClick={onAvatarClick} />
+                    <div 
+                      className="cursor-pointer group relative"
+                      onClick={() => setIsAvatarModalOpen(true)}
+                      title="Customise ZereØ avatar for this chat thread"
+                    >
+                      <ButlerAvatar size="sm" isTalking={false} src={activeAvatar} />
+                      <div className="absolute -bottom-1 -right-1 p-0.5 bg-amber-500 rounded-full text-black opacity-0 group-hover:opacity-100 transition-opacity shadow-sm">
+                        <Palette className="w-2 h-2" />
+                      </div>
+                    </div>
                   ) : (
                     <div className="w-8 h-8 sm:w-12 h-12 rounded-xl sm:rounded-2xl bg-gradient-to-br from-zinc-800 to-black border border-amber-500/20 flex items-center justify-center text-amber-500 font-light shadow-2xl text-sm sm:text-xl font-serif">
                       P
@@ -997,7 +1312,40 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
                     <div className="markdown-body text-sm sm:text-[17px] leading-relaxed font-sans tracking-wide">
                       <Markdown>{msg.text}</Markdown>
                     </div>
-                    <div className="mt-4 pt-4 border-t border-red-900/10 flex justify-end">
+                    <div className="mt-4 pt-4 border-t border-red-900/10 flex items-center justify-between gap-2">
+                      <div>
+                        {msg.role === 'model' && (
+                          <button
+                            onClick={() => {
+                              if (isSpeaking && speakingMsgIndex === idx) {
+                                stopSpeaking();
+                              } else {
+                                setSpeakingMsgIndex(idx);
+                                speakText(msg.text, () => setSpeakingMsgIndex(null));
+                              }
+                            }}
+                            title={isSpeaking && speakingMsgIndex === idx ? 'Halt voice output' : 'Vocalize in Jeremy Irons\' voice'}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all border ${
+                              isSpeaking && speakingMsgIndex === idx
+                                ? 'bg-red-950 text-amber-300 border-amber-500 shadow-[0_0_12px_rgba(251,191,36,0.4)] animate-pulse'
+                                : 'bg-zinc-950/80 border-red-900/40 text-zinc-400 hover:text-amber-400 hover:border-amber-500/40'
+                            }`}
+                          >
+                            {isSpeaking && speakingMsgIndex === idx ? (
+                              <>
+                                <VolumeX className="w-3 h-3 text-red-400" />
+                                <span>Halt Voice</span>
+                              </>
+                            ) : (
+                              <>
+                                <Volume2 className="w-3 h-3 text-amber-400" />
+                                <span>Speak (Jeremy Irons)</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+
                       <button 
                         onClick={() => commitToMemory(msg.text)}
                         className={`flex items-center gap-2 px-3 py-1.5 border rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all ${
@@ -1026,6 +1374,22 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
                     <span>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     <div className="w-1 h-1 bg-amber-900 rounded-full hidden sm:block" />
                     <span className="text-amber-800/60">{msg.role === 'user' ? 'Direct Command' : 'Steward Response'}</span>
+                    {msg.emotionalMap && (
+                      <>
+                        <div className="w-1 h-1 bg-amber-900 rounded-full hidden sm:block" />
+                        <span className="text-amber-400 font-black">
+                          AFFECT: {msg.emotionalMap.primaryState.replace(/_/g, ' ')}
+                        </span>
+                        <span className="text-zinc-500 hidden sm:inline">
+                          VECTOR: {msg.emotionalMap.reciprocationVector.replace(/_/g, ' ')}
+                        </span>
+                        {msg.emotionalMap.stewardLogicalAffect.nudgeAndSmile && (
+                          <span className="text-amber-300 text-[7px]">
+                            • Nudge & Smile
+                          </span>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
               </motion.div>
@@ -1063,58 +1427,33 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
       {/* Command Deck */}
       <div className="sticky bottom-0 p-3 sm:p-10 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-[calc(2.5rem+env(safe-area-inset-bottom))] border-t border-red-900/10 bg-black/80 backdrop-blur-3xl z-20">
         <div className="max-w-4xl mx-auto space-y-3 sm:space-y-8">
-          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center justify-center gap-2 sm:gap-4">
-            <div className="col-span-2 sm:col-auto flex bg-zinc-950/80 p-1 rounded-xl sm:p-1.5 sm:rounded-2xl border border-red-900/10 shadow-inner">
-               <button 
-                onClick={() => setNeuralEngine('gemini')}
-                className={`flex-1 sm:flex-none flex items-center justify-center gap-2 sm:gap-3 px-3 sm:px-6 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl text-[8px] sm:text-[10px] font-black uppercase transition-all ${neuralEngine === 'gemini' ? 'bg-amber-500 text-black shadow-lg' : 'text-zinc-600 hover:text-zinc-400'}`}
-               >
-                 Gemini
-               </button>
-               <button 
-                onClick={() => setNeuralEngine('claude')}
-                className={`flex-1 sm:flex-none flex items-center justify-center gap-2 sm:gap-3 px-3 sm:px-6 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl text-[8px] sm:text-[10px] font-black uppercase transition-all ${neuralEngine === 'claude' ? 'bg-red-900 text-amber-400 shadow-lg' : 'text-zinc-600 hover:text-zinc-400'}`}
-               >
-                 Claude
-               </button>
-            </div>
-
-            <div className="col-span-2 sm:col-auto flex bg-zinc-950/80 p-1 rounded-xl sm:p-1.5 sm:rounded-2xl border border-red-900/10 shadow-inner">
-               <button 
-                onClick={() => setLogicTier('turbo')}
-                className={`flex-1 sm:flex-none flex items-center justify-center gap-2 sm:gap-3 px-3 sm:px-6 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl text-[8px] sm:text-[10px] font-black uppercase transition-all ${logicTier === 'turbo' ? 'bg-amber-500 text-black shadow-lg' : 'text-zinc-600 hover:text-zinc-400'}`}
-               >
-                 <Zap className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-                 Turbo
-               </button>
-               <button 
-                onClick={() => setLogicTier('deep')}
-                className={`flex-1 sm:flex-none flex items-center justify-center gap-2 sm:gap-3 px-3 sm:px-6 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl text-[8px] sm:text-[10px] font-black uppercase transition-all ${logicTier === 'deep' ? 'bg-red-900 text-amber-400 shadow-lg' : 'text-zinc-600 hover:text-zinc-400'}`}
-               >
-                 <Brain className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-                 Strategic
-               </button>
-            </div>
-
-            <button 
-              onClick={() => setIsDeepThinkingActive(!isDeepThinkingActive)}
-              className={`flex items-center justify-center gap-2 sm:gap-3 px-3 sm:px-8 py-2 sm:py-3 rounded-xl sm:rounded-2xl text-[8px] sm:text-[10px] font-black uppercase transition-all border ${
-                isDeepThinkingActive ? 'bg-amber-900/20 border-amber-500/50 text-amber-400' : 'bg-zinc-900/40 border-red-900/20 text-zinc-600'
-              }`}
+          {/* Streamlined Tactical Status Strip (Controls moved to Upper-Left Menu Tab) */}
+          <div className="flex items-center justify-between px-2 pt-0.5 text-[9px] font-mono">
+            <button
+              onClick={() => setIsTopMenuOpen(true)}
+              className="flex items-center gap-2 text-zinc-400 hover:text-amber-300 transition-colors group cursor-pointer"
+              title="Configure Gemini/Claude, Strategic Tier, Budget, Recon & Tactical Touch HUD in Upper-Left Menu"
             >
-              <Activity className="w-3 sm:w-4 h-3 sm:h-4" />
-              Budget: {isDeepThinkingActive ? 'UNBOUNDED' : 'BALANCED'}
+              <Crosshair className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 group-hover:rotate-45 transition-transform" />
+              <span className="uppercase font-bold tracking-wider">
+                {neuralEngine.toUpperCase()} CORE • {logicTier === 'turbo' ? 'TURBO' : 'STRATEGIC'} • {isDeepThinkingActive ? 'UNBOUNDED' : 'BALANCED'}
+                {useGrounding === 'search' ? ' • RECON ACTIVE' : ''}
+              </span>
+              <span className="text-[8px] text-zinc-600 group-hover:text-amber-400 hidden sm:inline">
+                [Tactical HUD in Menu ↗]
+              </span>
             </button>
 
-            <button 
-              onClick={() => setUseGrounding(useGrounding === 'search' ? 'none' : 'search')}
-              className={`flex items-center justify-center gap-2 sm:gap-3 px-3 sm:px-8 py-2 sm:py-3 rounded-xl sm:rounded-2xl text-[8px] sm:text-[10px] font-black uppercase transition-all border ${
-                useGrounding === 'search' ? 'bg-amber-500/10 border-amber-500/40 text-amber-400' : 'bg-zinc-900/40 border-red-900/20 text-zinc-600'
-              }`}
-            >
-              <Search className="w-3 sm:w-4 h-3 sm:h-4" />
-              Recon
-            </button>
+            {screenStream && (
+              <button
+                onClick={stopScreenShare}
+                className="flex items-center gap-1.5 text-amber-400 hover:text-amber-300 font-bold text-[8px] animate-pulse"
+                title="Click to terminate screen share"
+              >
+                <Monitor className="w-3 h-3" />
+                <span>SCREEN LIVE</span>
+              </button>
+            )}
           </div>
 
           {/* Attached image preview */}
@@ -1164,14 +1503,15 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
                   <GalleryIcon className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
                 <button
-                  onClick={captureScreen}
-                  disabled={isCapturingScreen}
-                  title="Screen capture"
-                  className="p-1.5 rounded-lg text-zinc-700 hover:text-amber-500 hover:bg-red-900/20 transition-all active:scale-90 disabled:opacity-30"
+                  onClick={screenStream ? stopScreenShare : startScreenShare}
+                  title={screenStream ? "Disconnect screen share" : "Start live screen share"}
+                  className={`p-1.5 rounded-lg transition-all active:scale-90 ${
+                    screenStream
+                      ? 'text-amber-400 bg-red-950 border border-amber-500/50 animate-pulse'
+                      : 'text-zinc-700 hover:text-amber-500 hover:bg-red-900/20'
+                  }`}
                 >
-                  {isCapturingScreen
-                    ? <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin text-amber-500" />
-                    : <Monitor className="w-4 h-4 sm:w-5 sm:h-5" />}
+                  <Monitor className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
               </div>
 
@@ -1183,15 +1523,37 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
                 className="flex-1 bg-transparent py-4 sm:py-7 px-3 sm:px-6 text-zinc-100 placeholder:text-zinc-800 focus:outline-none resize-none min-h-[60px] sm:min-h-[90px] text-base sm:text-lg font-serif italic tracking-wide"
                 rows={1}
               />
-              <button 
-                onClick={handleSend}
-                disabled={(!input.trim() && !attachedImage) || isThinking}
-                className="mr-4 sm:mx-8 p-3 sm:p-5 bg-gradient-to-br from-red-900 to-black text-amber-500 rounded-xl sm:rounded-2xl shadow-2xl hover:scale-105 active:scale-95 disabled:opacity-20 transition-all border border-amber-500/20"
-              >
-                <Send className="w-5 sm:w-7 h-5 sm:h-7" />
-              </button>
+
+              {/* Voice Input & Transmit Controls */}
+              <div className="flex items-center gap-2 mr-3 sm:mr-6">
+                <VoiceInputButton
+                  onTranscriptChange={(transcript) => {
+                    setInput(transcript);
+                  }}
+                  onTranscriptComplete={(finalText) => {
+                    setInput(finalText);
+                  }}
+                  isThinking={isThinking}
+                />
+                <button 
+                  onClick={handleSend}
+                  disabled={(!input.trim() && !attachedImage) || isThinking}
+                  className="p-3 sm:p-5 bg-gradient-to-br from-red-900 to-black text-amber-500 rounded-xl sm:rounded-2xl shadow-2xl hover:scale-105 active:scale-95 disabled:opacity-20 transition-all border border-amber-500/20"
+                >
+                  <Send className="w-5 sm:w-7 h-5 sm:h-7" />
+                </button>
+              </div>
             </div>
           </div>
+
+          {/* Live Screen HUD overlay */}
+          <ScreenShareHUD
+            stream={screenStream}
+            onStop={stopScreenShare}
+            onCaptureFrame={handleScreenAnalysisPrompt}
+            autoAttachOnSend={autoAttachScreen}
+            setAutoAttachOnSend={setAutoAttachScreen}
+          />
 
           {/* Hidden file inputs */}
           <input
@@ -1208,6 +1570,40 @@ const ChatBot: React.FC<ChatBotProps> = ({ initialGrounding = 'none', avatarUrl,
             accept="image/*"
             className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) readImageFile(f); e.target.value = ''; }}
+          />
+
+          {/* Top-Left Menu Drawer with Tactical HUD, Ali & Danielle Link Share + Avatar Customizer */}
+          <TopLeftMenu
+            isOpen={isTopMenuOpen}
+            onClose={() => setIsTopMenuOpen(false)}
+            avatarUrl={activeAvatar}
+            onOpenAvatarModal={() => setIsAvatarModalOpen(true)}
+            onSelectAvatar={(url, scope) => handleAvatarSave(url, scope)}
+            threads={threads}
+            currentThreadId={currentThreadId}
+            onSelectThread={(id) => loadThread(id)}
+            onNewThread={() => createNewThread()}
+            onNavigate={(tab) => handleNavigate(tab)}
+            neuralEngine={neuralEngine}
+            onSelectNeuralEngine={setNeuralEngine}
+            logicTier={logicTier}
+            onSelectLogicTier={setLogicTier}
+            isDeepThinkingActive={isDeepThinkingActive}
+            onToggleDeepThinking={() => setIsDeepThinkingActive(!isDeepThinkingActive)}
+            useGrounding={useGrounding === 'search' ? 'search' : 'none'}
+            onToggleGrounding={() => setUseGrounding(useGrounding === 'search' ? 'none' : 'search')}
+            screenStream={screenStream}
+            onToggleScreenShare={screenStream ? stopScreenShare : startScreenShare}
+            initialTab={topMenuInitialTab}
+          />
+
+          {/* Advanced Avatar Customization Modal with Thread Scope */}
+          <AvatarModal
+            isOpen={isAvatarModalOpen}
+            onClose={() => setIsAvatarModalOpen(false)}
+            onSave={(url, scope) => handleAvatarSave(url, scope)}
+            currentUrl={activeAvatar}
+            currentThreadTitle={currentThread?.title}
           />
         </div>
       </div>

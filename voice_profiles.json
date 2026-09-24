@@ -1,0 +1,143 @@
+{
+  "activeProfileId": "iron-adaptive",
+  "profiles": [
+    {
+      "id": "iron-adaptive",
+      "name": "Jeremy Irons (Canonical)",
+      "tagline": "Alfred Pennyworth • British Aristocratic Baritone",
+      "description": "The definitive Jeremy Irons vocal signature. Unhurried cadence, heavy sub-harmonic chest resonance, dry sardonic British inflection, and gravelly aristocratic authority.",
+      "accent": "british_aristocrat",
+      "isCanonical": true,
+      "isDefault": true,
+      "badge": "Identity Canonical",
+      "accentColor": "amber",
+      "clips": [
+        {
+          "id": "clip-irons-1",
+          "name": "1911s Loaded & Silver Polished",
+          "transcription": "The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your command.",
+          "durationSeconds": 4.8,
+          "uploadedAt": 1725840000000,
+          "source": "canonical_preset",
+          "mimeType": "audio/webm"
+        },
+        {
+          "id": "clip-irons-2",
+          "name": "Screen Share Diagnostic Quip",
+          "transcription": "A man who cannot bear to share his screen with his steward is either concealing a catastrophe, or engineering one.",
+          "durationSeconds": 5.2,
+          "uploadedAt": 1725840000000,
+          "source": "canonical_preset",
+          "mimeType": "audio/webm"
+        },
+        {
+          "id": "clip-irons-3",
+          "name": "Logic as Weapon Axiom",
+          "transcription": "Logic, Principal, is the only weapon that never jams under fire.",
+          "durationSeconds": 3.6,
+          "uploadedAt": 1725840000000,
+          "source": "canonical_preset",
+          "mimeType": "audio/webm"
+        }
+      ],
+      "dspConfig": {
+        "pitchMultiplier": 0.78,
+        "speechRate": 0.88,
+        "chestResonanceDb": 6.0,
+        "thoracicWarmthDb": 2.5,
+        "articulationBoostDb": 4.5,
+        "gravelSaturation": 0.85,
+        "antiBoxNotchDb": -2.4,
+        "roomAmbience": 0.20
+      },
+      "speechSynthesisConfig": {
+        "pitch": 0.65,
+        "rate": 0.82,
+        "priorityLocales": ["en-GB", "en_GB", "en-UK"],
+        "preferredVoiceNames": ["Daniel", "Oliver", "George", "Arthur", "Ryan", "Google UK English Male", "Microsoft George", "Alfred"]
+      },
+      "systemPromptStyle": "Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth):",
+      "auditionSample": "The 1911s are loaded and the silver is polished, Principal. All systems operational without friction."
+    },
+    {
+      "id": "british-aristocrat",
+      "name": "British Aristocrat (High RP)",
+      "tagline": "J.A.R.V.I.S. / Bettany Class • Oxford Elocution",
+      "description": "Crisply articulated British Received Pronunciation. Flawless elocution with high intelligibility and measured upper-register elegance.",
+      "accent": "british_rp",
+      "isCanonical": false,
+      "isDefault": false,
+      "badge": "High RP Aristocrat",
+      "accentColor": "cyan",
+      "clips": [
+        {
+          "id": "clip-rp-1",
+          "name": "Estate Systems Nominal",
+          "transcription": "At your service, Principal. All estate networks and defensive matrices are operating at peak efficiency.",
+          "durationSeconds": 4.5,
+          "uploadedAt": 1725840000000,
+          "source": "canonical_preset",
+          "mimeType": "audio/webm"
+        }
+      ],
+      "dspConfig": {
+        "pitchMultiplier": 0.92,
+        "speechRate": 0.95,
+        "chestResonanceDb": 3.0,
+        "thoracicWarmthDb": 1.8,
+        "articulationBoostDb": 5.5,
+        "gravelSaturation": 0.20,
+        "antiBoxNotchDb": -1.5,
+        "roomAmbience": 0.15
+      },
+      "speechSynthesisConfig": {
+        "pitch": 0.82,
+        "rate": 0.92,
+        "priorityLocales": ["en-GB", "en_GB", "en-UK"],
+        "preferredVoiceNames": ["Oliver", "Daniel", "George", "Google UK English Male"]
+      },
+      "systemPromptStyle": "Say in a crisp, silky, refined British Received Pronunciation accent with aristocratic clarity:",
+      "auditionSample": "Telemetry confirmed, Principal. Estates networks synchronized with zero logical drift."
+    },
+    {
+      "id": "tactical-commander",
+      "name": "Tactical Commander",
+      "tagline": "Heavy Sub-Bass • Combat Operational Readiness",
+      "description": "Sub-bass reinforced authoritative command voice. Heavy low-end impact designed for high-stress tactical operations.",
+      "accent": "american_baritone",
+      "isCanonical": false,
+      "isDefault": false,
+      "badge": "Sub-Bass Tactical",
+      "accentColor": "red",
+      "clips": [
+        {
+          "id": "clip-tactical-1",
+          "name": "Perimeter Lockdown Directive",
+          "transcription": "Perimeter secured. Tactical reconnaissance arrays locked on coordinate target.",
+          "durationSeconds": 4.1,
+          "uploadedAt": 1725840000000,
+          "source": "canonical_preset",
+          "mimeType": "audio/webm"
+        }
+      ],
+      "dspConfig": {
+        "pitchMultiplier": 0.70,
+        "speechRate": 0.98,
+        "chestResonanceDb": 9.0,
+        "thoracicWarmthDb": 3.5,
+        "articulationBoostDb": 3.0,
+        "gravelSaturation": 0.60,
+        "antiBoxNotchDb": -2.0,
+        "roomAmbience": 0.05
+      },
+      "speechSynthesisConfig": {
+        "pitch": 0.55,
+        "rate": 0.90,
+        "priorityLocales": ["en-US", "en-GB"],
+        "preferredVoiceNames": ["Alex", "David", "Fred", "Guy"]
+      },
+      "systemPromptStyle": "Say in a heavy, commanding, low-frequency tactical combat baritone:",
+      "auditionSample": "Perimeter secured, Principal. Tactical array active and monitoring all ingress vectors."
+    }
+  ]
+}

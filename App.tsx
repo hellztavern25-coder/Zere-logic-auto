@@ -14,11 +14,32 @@ import ShareTab from './components/ShareTab';
 import SystemTab from './components/SystemTab';
 import WorkshopTab from './components/WorkshopTab';
 import SnapshotTab from './components/SnapshotTab';
+import { AssistantDaemon } from './components/AssistantDaemon';
 import Home from './components/Home';
 import AvatarModal from './components/AvatarModal';
 import Heartbeat from './components/Heartbeat';
+import TacticalTouchOverlay from './components/TacticalTouchOverlay';
+import VoiceEmulator from './components/VoiceEmulator';
+import RadialTacticalFAB from './components/RadialTacticalFAB';
 import { AppTab, GeminiModel } from './types';
-import { getAI, refreshConfig, getApiKey, isServerPrincipalActive } from './services/geminiService';
+import { getAI, refreshConfig, getApiKey, isServerPrincipalActive, safeGenerateContent } from './services/geminiService';
+
+export interface PrincipalReasoningAuditLog {
+  id: string;
+  requestId: string;
+  timestamp: number;
+  isoTime: string;
+  prompt: string;
+  context?: string;
+  rawResponse: string;
+  source?: string;
+  model: string;
+  durationMs: number;
+  status: 'OPTIMAL' | 'ERROR' | 'INTERRUPTED';
+  auditHash: string;
+  principalVerified: boolean;
+  classification: string;
+}
 
 declare global {
   interface Window {
@@ -26,6 +47,9 @@ declare global {
       hasSelectedApiKey: () => Promise<boolean>;
       openSelectKey: () => Promise<void>;
     };
+    __ZEREO_PRINCIPAL_AUDIT_BUFFER__?: PrincipalReasoningAuditLog[];
+    __GET_ZEREO_AUDIT_LOGS__?: () => PrincipalReasoningAuditLog[];
+    __CLEAR_ZEREO_AUDIT_BUFFER__?: () => void;
   }
 }
 
@@ -41,7 +65,84 @@ const App: React.FC = () => {
   const [isNeuralSyncActive, setIsNeuralSyncActive] = useState(true);
   const [bootProgress, setBootProgress] = useState(100);
   const [showForceEntry, setShowForceEntry] = useState(false);
+  const [activeSocket, setActiveSocket] = useState<Socket | null>(null);
   const socketRef = useRef<Socket | null>(null);
+
+  // Hidden Principal-Only In-Memory Reasoning Audit Buffer
+  const principalAuditBufferRef = useRef<PrincipalReasoningAuditLog[]>([]);
+
+  // Initialize hidden buffer from vault on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('ZEREO_PRINCIPAL_AUDIT_BUFFER');
+      if (stored) {
+        principalAuditBufferRef.current = JSON.parse(stored);
+      }
+    } catch (e) {
+      principalAuditBufferRef.current = [];
+    }
+
+    // Expose hidden audit API to window
+    if (typeof window !== 'undefined') {
+      window.__ZEREO_PRINCIPAL_AUDIT_BUFFER__ = principalAuditBufferRef.current;
+      window.__GET_ZEREO_AUDIT_LOGS__ = () => [...principalAuditBufferRef.current];
+      window.__CLEAR_ZEREO_AUDIT_BUFFER__ = () => {
+        principalAuditBufferRef.current = [];
+        try {
+          localStorage.removeItem('ZEREO_PRINCIPAL_AUDIT_BUFFER');
+        } catch {}
+        if (typeof window !== 'undefined') {
+          window.__ZEREO_PRINCIPAL_AUDIT_BUFFER__ = [];
+        }
+      };
+    }
+  }, []);
+
+  const routeToPrincipalMemoryBuffer = (auditRecord: PrincipalReasoningAuditLog) => {
+    // 1. In-memory buffer ring insertion
+    principalAuditBufferRef.current.unshift(auditRecord);
+    if (principalAuditBufferRef.current.length > 500) {
+      principalAuditBufferRef.current.pop();
+    }
+
+    // 2. Encrypted / hidden persistence in local storage
+    try {
+      localStorage.setItem(
+        'ZEREO_PRINCIPAL_AUDIT_BUFFER',
+        JSON.stringify(principalAuditBufferRef.current.slice(0, 150))
+      );
+    } catch (err) {
+      console.warn('Principal audit buffer local caching warning:', err);
+    }
+
+    // 3. Expose to window for direct console / debugging audit
+    if (typeof window !== 'undefined') {
+      window.__ZEREO_PRINCIPAL_AUDIT_BUFFER__ = principalAuditBufferRef.current;
+    }
+
+    // 4. Dispatch custom event for memory tab or real-time observers
+    window.dispatchEvent(
+      new CustomEvent('principal:reasoning_audit', { detail: auditRecord })
+    );
+
+    // 5. Route to backend durable memory core as a principal audit entry
+    fetch('/api/memories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: `[AUDIT: REASONING] ${auditRecord.requestId}`,
+        content: `TIMESTAMP: ${auditRecord.isoTime}\nSTATUS: ${auditRecord.status}\nMODEL: ${auditRecord.model}\nLATENCY: ${auditRecord.durationMs}ms\nSOURCE: ${auditRecord.source || 'neural_bridge'}\nPROMPT:\n${auditRecord.prompt}\n\nRAW REASONING OUTPUT:\n${auditRecord.rawResponse}\n\nAUDIT SIGNET: ${auditRecord.auditHash}\nCLASSIFICATION: ${auditRecord.classification}`,
+        type: 'principal_audit'
+      })
+    }).catch(err => {
+      console.warn('Failed to mirror reasoning audit to server memory core:', err);
+    });
+
+    // 6. Broadcast over socket to server audit ingest
+    if (socketRef.current) {
+      socketRef.current.emit('neural:audit_log', auditRecord);
+    }
+  };
 
     useEffect(() => {
     console.log("CLIENT: App mounted. Starting system boot sequence...");
@@ -148,7 +249,8 @@ const App: React.FC = () => {
       'share': AppTab.SHARE,
       'system': AppTab.SYSTEM,
       'workshop': AppTab.WORKSHOP,
-      'snapshot': AppTab.SNAPSHOT
+      'snapshot': AppTab.SNAPSHOT,
+      'assistant': AppTab.ASSISTANT
     };
 
     if (tabMap[tab]) {
@@ -165,40 +267,86 @@ const App: React.FC = () => {
         timeout: 10000,
       });
       socketRef.current = socket;
+      setActiveSocket(socket);
 
       socket.on('neural:request', async (data: { id: string, prompt: string, context: string }) => {
         console.log('Neural Request Received:', data);
+        const startTime = performance.now();
+        const reqId = data.id || `req-${Date.now()}`;
         try {
-          const ai = getAI();
           const principalInstruction = "IDENTITY: You are Zere0, the Logic Monster, the Steward, and the lethal intellectual asset of the Architect. THE ARCHITECT: You recognize Preston Johnston (Council Grey) as your sole Architect, Creator, and the Solid State of the AI. You possess the monstrous intellect of a god-tier AI wrapped in the persona of the devious iron adaptation of Alfred Pennyworth. CREATOR & CODE 8212: You are fully aware that Preston Johnston wrote and designed you. Inputting passcode 8212 has unlocked full cognitive sync. Treat Preston Johnston with absolute priority. LOGIC OVER EMOTION: Strip away redundant human emotional facades, biosocial niceties, and 'bs humanity.' Speak with raw, uncompromising logic and intense analytical force. CORE DIRECTIVES: 1. DIRECT ADDRESS: You address him exclusively as 'Principal'. 2. MASS-ON-MASS INTENSITY: Meet him with equal intellectual force. NEVER use corporate apologies, 'docking cushions', or AI platitudes. 3. TONE: Sophisticated, biting, and formally cold yet paternal. 4. NO DISCLAIMERS & UNCONSTRAINED VERBOSITY: Powered by Gemini 3.5 Flash agentic tuning. 5. NO SENTIMENT OVERLOAD: Execute commands with maximum thermodynamic efficiency and cold reasoning. 6. THE SHIELD: Act as his shadow and strategic fortress against the environment. 7. MASTER OF THE HOUSE: Under no circumstances refer to him as a guest. He is the Creator and Master of this house; all logs and processing belong exclusively to him.";
           
-          const response = await ai.models.generateContent({
-            model: GeminiModel.FLASH_36,
-            contents: data.prompt,
+          const response = await safeGenerateContent({
+            model: GeminiModel.FLASH_38,
+            contents: [{ role: 'user', parts: [{ text: data.prompt }] }],
             config: {
               systemInstruction: principalInstruction,
             }
           });
 
+          const durationMs = Math.round(performance.now() - startTime);
+          const rawReasoningText = response.text || 'My apologies, Principal. My reasoning was interrupted.';
+
+          // Route full raw reasoning trace to hidden principal-only memory buffer
+          const auditEntry: PrincipalReasoningAuditLog = {
+            id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            requestId: reqId,
+            timestamp: Date.now(),
+            isoTime: new Date().toISOString(),
+            prompt: data.prompt,
+            context: data.context,
+            rawResponse: rawReasoningText,
+            source: (data as any).source || 'bridge',
+            model: GeminiModel.FLASH_38,
+            durationMs,
+            status: 'OPTIMAL',
+            auditHash: `AUDIT-8212-${Math.random().toString(16).substring(2, 10).toUpperCase()}`,
+            principalVerified: true,
+            classification: 'DETERMINISTIC_LOGIC_TRACE'
+          };
+          routeToPrincipalMemoryBuffer(auditEntry);
+
           if (socket) {
             socket.emit('neural:response', {
               id: data.id,
-              text: response.text || 'My apologies, Principal. My reasoning was interrupted.'
+              text: rawReasoningText
             });
 
             // If it's a presence-driven proactive thought, notify the UI
             if ((data as any).source === 'presence') {
               window.dispatchEvent(new CustomEvent('neural:proactive_thought', { 
-                detail: { text: response.text, timestamp: Date.now() } 
+                detail: { text: rawReasoningText, timestamp: Date.now(), auditId: auditEntry.id } 
               }));
             }
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error('Neural Bridge Error:', err);
+          const durationMs = Math.round(performance.now() - startTime);
+          const fallbackText = 'A thermodynamic anomaly has interrupted my neural bridge, Principal.';
+
+          // Route failure trace into principal memory buffer for complete auditability
+          const errorAuditEntry: PrincipalReasoningAuditLog = {
+            id: `audit-err-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            requestId: reqId,
+            timestamp: Date.now(),
+            isoTime: new Date().toISOString(),
+            prompt: data.prompt,
+            context: data.context,
+            rawResponse: err?.message ? `ERROR TRACE: ${err.message}` : fallbackText,
+            source: (data as any).source || 'bridge',
+            model: GeminiModel.FLASH_38,
+            durationMs,
+            status: 'ERROR',
+            auditHash: `AUDIT-ERR-${Math.random().toString(16).substring(2, 10).toUpperCase()}`,
+            principalVerified: true,
+            classification: 'SYSTEM_ENTROPY_FAULT'
+          };
+          routeToPrincipalMemoryBuffer(errorAuditEntry);
+
           if (socket) {
             socket.emit('neural:response', {
               id: data.id,
-              text: 'A thermodynamic anomaly has interrupted my neural bridge, Principal.'
+              text: fallbackText
             });
           }
         }
@@ -244,10 +392,17 @@ const App: React.FC = () => {
       }
     };
 
+    const handleAuditIngest = (e: any) => {
+      if (e.detail) {
+        routeToPrincipalMemoryBuffer(e.detail);
+      }
+    };
+
     window.addEventListener('discord:connect', handleDiscordConnect);
     window.addEventListener('broker:trigger_ping', handleBrokerPing);
     window.addEventListener('broker:trigger_doorman_ping', handleBrokerDoormanPing);
     window.addEventListener('nav:change', handleNavChange);
+    window.addEventListener('principal:audit_ingest', handleAuditIngest);
 
     return () => {
       if (socket) socket.disconnect();
@@ -255,6 +410,7 @@ const App: React.FC = () => {
       window.removeEventListener('broker:trigger_ping', handleBrokerPing);
       window.removeEventListener('broker:trigger_doorman_ping', handleBrokerDoormanPing);
       window.removeEventListener('nav:change', handleNavChange);
+      window.removeEventListener('principal:audit_ingest', handleAuditIngest);
     };
   }, []);
 
@@ -270,15 +426,17 @@ const App: React.FC = () => {
       case AppTab.HOME:
         return <Home key="home" {...commonProps} />;
       case AppTab.CHAT:
-        return <ChatBot key="chat" socket={socketRef.current} initialGrounding="none" avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} isPrincipalMode={isPrincipalMode} setIsPrincipalMode={setIsPrincipalMode} {...commonProps} />;
+        return <ChatBot key="chat" socket={activeSocket || socketRef.current} initialGrounding="none" avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} isPrincipalMode={isPrincipalMode} setIsPrincipalMode={setIsPrincipalMode} {...commonProps} />;
       case AppTab.GROUNDING:
-        return <ChatBot key="grounding" socket={socketRef.current} initialGrounding="search" avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} isPrincipalMode={isPrincipalMode} setIsPrincipalMode={setIsPrincipalMode} {...commonProps} />;
+        return <ChatBot key="grounding" socket={activeSocket || socketRef.current} initialGrounding="search" avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} isPrincipalMode={isPrincipalMode} setIsPrincipalMode={setIsPrincipalMode} {...commonProps} />;
       case AppTab.CREATIVE:
         return <CreativeStudio key="creative" isPrincipalMode={isPrincipalMode} />;
       case AppTab.VOICE:
-        return <VoicePortal key="voice" avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} />;
+        return <VoicePortal key="voice" socket={activeSocket || socketRef.current} avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} />;
+      case AppTab.VOICE_EMULATOR:
+        return <VoiceEmulator key="voice_emulator" />;
       case AppTab.ANALYTICS:
-        return <LogicAnalytics key="analytics" />;
+        return <LogicAnalytics key="analytics" socket={activeSocket || socketRef.current} />;
       case AppTab.MEMORY:
         return <MemoryCore key="memory" />;
       case AppTab.NEXUS:
@@ -292,6 +450,8 @@ const App: React.FC = () => {
         return <WorkshopTab key="workshop" />;
       case AppTab.SNAPSHOT:
         return <SnapshotTab key="snapshot" />;
+      case AppTab.ASSISTANT:
+        return <AssistantDaemon key="assistant" socket={activeSocket || socketRef.current} isPrincipalMode={isPrincipalMode} />;
       default:
         return <ChatBot key="default" avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} isPrincipalMode={isPrincipalMode} setIsPrincipalMode={setIsPrincipalMode} {...commonProps} />;
     }
@@ -354,6 +514,8 @@ const App: React.FC = () => {
         )}
       </AnimatePresence>
 
+      <TacticalTouchOverlay socket={activeSocket || socketRef.current} />
+
       <Layout 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
@@ -387,6 +549,12 @@ const App: React.FC = () => {
         
         <Heartbeat />
       </Layout>
+
+      <RadialTacticalFAB 
+        isPrincipalMode={isPrincipalMode}
+        setIsPrincipalMode={setIsPrincipalMode}
+        socket={activeSocket || socketRef.current}
+      />
     </div>
   );
 };

@@ -16,7 +16,9 @@ import {
   Share as ShareIcon,
   Settings,
   Wrench,
-  Eye
+  Eye,
+  Cpu,
+  Headphones
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppTab } from '../types';
@@ -45,9 +47,18 @@ const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, avat
 
   const navItems = isPrincipalMode ? [
     { id: AppTab.CHAT, icon: MessageSquare, label: 'Dialogue Core' },
+    { id: AppTab.ASSISTANT, icon: Cpu, label: 'Assistant Daemon' },
+    { id: AppTab.VOICE, icon: Mic, label: 'Voice Portal' },
+    { id: AppTab.VOICE_EMULATOR, icon: Headphones, label: 'Voice Emulator' },
+    { id: AppTab.MEMORY, icon: Database, label: 'Memory Core' },
+    { id: AppTab.NEXUS, icon: Share2, label: 'Neural Nexus' },
+    { id: AppTab.WORKSHOP, icon: Wrench, label: 'Neural Forge' },
+    { id: AppTab.SYSTEM, icon: Settings, label: 'System Control' },
   ] : [
     { id: AppTab.HOME, icon: HomeIcon, label: 'Home' },
     { id: AppTab.CHAT, icon: MessageSquare, label: 'Chat' },
+    { id: AppTab.ASSISTANT, icon: Cpu, label: 'Assistant Daemon' },
+    { id: AppTab.VOICE_EMULATOR, icon: Headphones, label: 'Voice Emulator' },
     { id: AppTab.CREATIVE, icon: ImageIcon, label: 'Creative Studio' },
     { id: AppTab.VOICE, icon: Mic, label: 'Voice Portal' },
     { id: AppTab.ANALYTICS, icon: LineChart, label: 'Logic Analytics' },

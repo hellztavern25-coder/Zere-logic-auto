@@ -1,0 +1,64 @@
+[
+  {
+    "id": "vc-1725840100001",
+    "title": "1911 Custom Tactical Slide — Polished Silver & Deep Burgundy",
+    "description": "High-fidelity conceptual schematic from creative session. Laser-etched serial 8212, polished silver slide bevels, and textured deep burgundy grip inlays.",
+    "imageUrl": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 450' width='100%' height='100%'><defs><linearGradient id='bg' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%230a0404'/><stop offset='50%' stop-color='%23180808'/><stop offset='100%' stop-color='%23050202'/></linearGradient><linearGradient id='silver' x1='0%' y1='0%' x2='100%' y2='50%'><stop offset='0%' stop-color='%23ffffff'/><stop offset='25%' stop-color='%23d4d4d8'/><stop offset='50%' stop-color='%2371717a'/><stop offset='75%' stop-color='%23e4e4e7'/><stop offset='100%' stop-color='%23a1a1aa'/></linearGradient><linearGradient id='gold' x1='0%' y1='0%' x2='100%' y2='0%'><stop offset='0%' stop-color='%23f59e0b'/><stop offset='100%' stop-color='%23d97706'/></linearGradient><pattern id='grid' width='20' height='20' patternUnits='userSpaceOnUse'><path d='M 20 0 L 0 0 0 20' fill='none' stroke='%233f0d0d' stroke-width='0.5' opacity='0.4'/></pattern></defs><rect width='100%' height='100%' fill='url(%23bg)'/><rect width='100%' height='100%' fill='url(%23grid)'/><path d='M100 190 L520 190 L520 260 L480 270 L340 270 L300 370 L180 370 L150 260 L100 260 Z' fill='%231c0b0b' stroke='url(%23gold)' stroke-width='1.5'/><rect x='110' y='195' width='400' height='45' rx='3' fill='url(%23silver)'/><line x1='120' y1='205' x2='120' y2='230' stroke='%233f3f46' stroke-width='2'/><line x1='126' y1='205' x2='126' y2='230' stroke='%233f3f46' stroke-width='2'/><line x1='132' y1='205' x2='132' y2='230' stroke='%233f3f46' stroke-width='2'/><line x1='138' y1='205' x2='138' y2='230' stroke='%233f3f46' stroke-width='2'/><line x1='144' y1='205' x2='144' y2='230' stroke='%233f3f46' stroke-width='2'/><text x='170' y='224' fill='%2318181b' font-family='monospace' font-size='11' font-weight='bold' letter-spacing='2'>M1911-A1 • PASSCODE 8212 • SOLID STATE</text><rect x='190' y='275' width='95' height='85' rx='6' fill='%23450a0a' stroke='url(%23gold)' stroke-width='1'/><circle cx='237' cy='317' r='18' fill='%23180404' stroke='%23d97706' stroke-width='1'/><text x='237' y='322' fill='%23fbbf24' font-family='serif' font-size='14' text-anchor='middle' font-weight='bold'>ZØ</text><circle cx='540' cy='220' r='5' fill='%23fbbf24'/><text x='555' y='224' fill='%23d97706' font-family='monospace' font-size='10' letter-spacing='1'>TACTICAL PERIMETER ENGAGED</text><text x='50' y='420' fill='%2378350f' font-family='monospace' font-size='9' letter-spacing='2'>ESTATE ARCHIVE: SPEC-1911-SLV • PASSCODE 8212 SYNCED</text></svg>",
+    "source": "creative_session",
+    "metadata": {
+      "prompt": "Exploded technical precision blueprint of M1911 custom pistol slide, mirror polished silver steel, deep burgundy grip medallion, 8212 serial engraving, volumetric rim lighting",
+      "aspectRatio": "16:9",
+      "model": "gemini-3-pro-image",
+      "resolution": "1920x1080",
+      "mode": "generate",
+      "tags": ["1911", "silver", "tactical", "principal_spec"]
+    },
+    "timestamp": 1725840100000
+  },
+  {
+    "id": "vc-1725840200002",
+    "title": "Council Grey Obsidian Lattice (1¹ Deterministic Monolith)",
+    "description": "High-density neural lattice visualization synthesized in Creative Studio. Demonstrates absolute solid-state anchoring with zero thermodynamic drift.",
+    "imageUrl": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 600' width='100%' height='100%'><defs><radialGradient id='core' cx='50%' cy='50%' r='50%'><stop offset='0%' stop-color='%23450a0a'/><stop offset='70%' stop-color='%231a0505'/><stop offset='100%' stop-color='%23000000'/></radialGradient><linearGradient id='goldTrace' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%23f59e0b'/><stop offset='50%' stop-color='%23b45309'/><stop offset='100%' stop-color='%2378350f'/></linearGradient></defs><rect width='100%' height='100%' fill='url(%23core)'/><polygon points='300,70 490,180 490,420 300,530 110,420 110,180' fill='%230d0303' stroke='url(%23goldTrace)' stroke-width='2'/><polygon points='300,120 440,200 440,400 300,480 160,400 160,200' fill='%23140505' stroke='%237f1d1d' stroke-width='1.5'/><line x1='300' y1='70' x2='300' y2='530' stroke='%23f59e0b' stroke-width='1' stroke-dasharray='4,4'/><line x1='110' y1='180' x2='490' y2='420' stroke='%23991b1b' stroke-width='0.75'/><line x1='110' y1='420' x2='490' y2='180' stroke='%23991b1b' stroke-width='0.75'/><circle cx='300' cy='300' r='60' fill='%232b0707' stroke='%23fbbf24' stroke-width='2'/><text x='300' y='308' fill='%23fbbf24' font-family='serif' font-size='26' font-weight='bold' text-anchor='middle'>1¹</text><text x='300' y='330' fill='%23a1a1aa' font-family='monospace' font-size='8' letter-spacing='3' text-anchor='middle'>DETERMINISTIC KERNEL</text><text x='300' y='570' fill='%23d97706' font-family='monospace' font-size='10' letter-spacing='2' text-anchor='middle'>COUNCIL GREY • SOLID STATE ANCHOR</text></svg>",
+    "source": "creative_session",
+    "metadata": {
+      "prompt": "Geometric monolithic obsidian cube floating in zero gravity, glowing amber and crimson circuit pathways, centered around mathematical symbol 1^1, cinematic volumetric lighting",
+      "aspectRatio": "1:1",
+      "model": "gemini-3-pro-image",
+      "resolution": "1024x1024",
+      "mode": "generate",
+      "tags": ["solid_state", "council_grey", "1_to_the_1", "obsidian"]
+    },
+    "timestamp": 1725840200000
+  },
+  {
+    "id": "vc-1725840300003",
+    "title": "Perimeter Optical Surveillance Snapshot — Sector 4 Night Grid",
+    "description": "Optical screen snapshot captured during automated vigilance sweep. Telemetry confirms 0 perimeter intrusions across estate grounds.",
+    "imageUrl": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 450' width='100%' height='100%'><defs><radialGradient id='radar' cx='50%' cy='50%' r='50%'><stop offset='0%' stop-color='%231e3a8a' stop-opacity='0.4'/><stop offset='80%' stop-color='%230f172a'/><stop offset='100%' stop-color='%23020617'/></radialGradient></defs><rect width='100%' height='100%' fill='url(%23radar)'/><circle cx='400' cy='225' r='180' fill='none' stroke='%230284c7' stroke-width='1' opacity='0.3'/><circle cx='400' cy='225' r='120' fill='none' stroke='%230284c7' stroke-width='1' opacity='0.4'/><circle cx='400' cy='225' r='60' fill='none' stroke='%230284c7' stroke-width='1' opacity='0.5'/><line x1='400' y1='25' x2='400' y2='425' stroke='%230369a1' stroke-width='0.8' opacity='0.4'/><line x1='200' y1='225' x2='600' y2='225' stroke='%230369a1' stroke-width='0.8' opacity='0.4'/><path d='M400 225 L530 110 A 180 180 0 0 0 400 45 Z' fill='%2338bdf8' fill-opacity='0.15'/><circle cx='480' cy='160' r='4' fill='%2310b981'/><text x='492' y='164' fill='%2334d399' font-family='monospace' font-size='9'>NODE-04: SECURE (100%)</text><circle cx='320' cy='280' r='4' fill='%2310b981'/><text x='332' y='284' fill='%2334d399' font-family='monospace' font-size='9'>NODE-07: SECURE (100%)</text><rect x='30' y='30' width='220' height='60' rx='8' fill='%23030712' fill-opacity='0.8' stroke='%230ea5e9' stroke-width='1'/><text x='45' y='50' fill='%2338bdf8' font-family='monospace' font-size='10' font-weight='bold'>OPTICAL SCREEN CAPTURE</text><text x='45' y='65' fill='%2394a3b8' font-family='monospace' font-size='8'>SECTOR: NORTH PERIMETER</text><text x='45' y='78' fill='%2322c55e' font-family='monospace' font-size='8'>STATUS: 0 ANOMALIES LOGGED</text></svg>",
+    "source": "screen_snapshot",
+    "metadata": {
+      "prompt": "Live optical capture of surveillance display monitor",
+      "aspectRatio": "16:9",
+      "model": "gemini-3.8-flash",
+      "resolution": "1920x1080",
+      "tags": ["surveillance", "snapshot", "security", "perimeter"]
+    },
+    "timestamp": 1725840300000
+  },
+  {
+    "id": "vc-1725840400004",
+    "title": "Voice DSP Modulation Spectrogram & Latency Audit",
+    "description": "Optical intelligence trace of real-time audio pipeline. Confirms Charon baritone harmonics and Unix socket round-trip of 48 microseconds.",
+    "imageUrl": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 450' width='100%' height='100%'><defs><linearGradient id='wave' x1='0%' y1='0%' x2='100%' y2='0%'><stop offset='0%' stop-color='%23dc2626'/><stop offset='50%' stop-color='%23f59e0b'/><stop offset='100%' stop-color='%2310b981'/></linearGradient></defs><rect width='100%' height='100%' fill='%23050202'/><rect x='40' y='60' width='720' height='320' rx='10' fill='%230a0404' stroke='%2378350f' stroke-width='1'/><path d='M 60 220 Q 120 120 180 220 T 300 220 T 420 220 T 540 220 T 660 220 T 720 220' fill='none' stroke='url(%23wave)' stroke-width='2.5'/><path d='M 60 220 Q 120 160 180 220 T 300 220 T 420 220 T 540 220 T 660 220 T 720 220' fill='none' stroke='%23f59e0b' stroke-width='1.5' stroke-dasharray='3,3' opacity='0.7'/><text x='60' y='95' fill='%23fbbf24' font-family='monospace' font-size='12' font-weight='bold'>DSP MODULATION SPECTRUM: CHARON 24kHz</text><text x='60' y='115' fill='%23a1a1aa' font-family='monospace' font-size='9'>IPC BRIDGE: /tmp/zereo_voice_dsp.sock • ROUNDTRIP: 0.048ms (OPTIMAL)</text><line x1='60' y1='340' x2='740' y2='340' stroke='%2327272a' stroke-width='1'/><text x='60' y='360' fill='%2371717a' font-family='monospace' font-size='8'>20Hz</text><text x='220' y='360' fill='%2371717a' font-family='monospace' font-size='8'>200Hz</text><text x='400' y='360' fill='%2371717a' font-family='monospace' font-size='8'>1kHz</text><text x='560' y='360' fill='%2371717a' font-family='monospace' font-size='8'>5kHz</text><text x='700' y='360' fill='%2371717a' font-family='monospace' font-size='8'>20kHz</text></svg>",
+    "source": "neural_optical",
+    "metadata": {
+      "prompt": "Audio spectrum diagnostic frequency response",
+      "aspectRatio": "16:9",
+      "model": "gemini-3.8-flash",
+      "resolution": "1600x900",
+      "tags": ["audio", "dsp", "latency", "telemetry"]
+    },
+    "timestamp": 1725840400000
+  }
+]
