@@ -663,7 +663,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
       const ai = getAI();
       const apiKey = getApiKey();
       
-      let modelToUse = logicTier === 'turbo' ? GeminiModel.FLASH_LITE : GeminiModel.FLASH_38;
+      let modelToUse = GeminiModel.FLASH_LITE;
       let tools: any[] = [];
       let toolConfig: any = undefined;
 
@@ -780,11 +780,13 @@ const ChatBot: React.FC<ChatBotProps> = ({
       setMessages(prev => [...prev, modelMsg]);
       speakText(modelMsg.text);
     } catch (err: any) {
-      console.error("Chat Error:", err);
-      const errorMsg = err.message || JSON.stringify(err);
+      console.warn("Chat notice:", err?.message || err);
+      const errorMsg = err?.message || JSON.stringify(err);
       let feedbackText = "";
       if (errorMsg.includes('503') || errorMsg.includes('UNAVAILABLE') || errorMsg.includes('high demand') || errorMsg.includes('SERVER_UNAVAILABLE') || errorMsg.includes('Spikes in demand')) {
         feedbackText = "Principal, it appears central processing arrays encountered elevated demand from the upstream neural network. Automated failover channels are in place. I am standing by for your directive.";
+      } else if (errorMsg.includes('GATEWAY_TIMEOUT') || errorMsg.includes('GATEWAY_LATENCY')) {
+        feedbackText = "An upstream neural routing latency spike was intercepted and mitigated, Principal. The link is stabilized. Standing by for your directive.";
       } else if (errorMsg.includes('SERVER_RESPONSE_INVALID')) {
         feedbackText = "A packet formatting anomaly occurred during transmission, Principal. The link is re-established and ready for your command.";
       } else if (errorMsg.includes('AUTH_ERROR') || errorMsg.includes('API key not valid') || errorMsg.includes('INVALID_ARGUMENT') || errorMsg.includes('Neural Authorization missing')) {

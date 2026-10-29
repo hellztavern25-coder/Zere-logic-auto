@@ -192,13 +192,14 @@ export async function generateTTS(
       })
     });
 
-    if (!res.ok) {
-      console.warn('TTS request to /api/gemini/tts failed with status:', res.status);
+    const contentType = res.headers.get('content-type') || '';
+    if (!res.ok || !contentType.includes('application/json')) {
+      console.warn('TTS response non-JSON or status:', res.status);
       return null;
     }
 
-    const data = await res.json();
-    if (!data.audioData) return null;
+    const data = await res.json().catch(() => null);
+    if (!data || !data.audioData) return null;
 
     const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
     const audioBuffer = await decodeAudioData(
@@ -209,7 +210,7 @@ export async function generateTTS(
     );
     return audioBuffer;
   } catch (error) {
-    console.error("TTS generation failed:", error);
+    console.warn("TTS generation deferred to speech synthesis fallback:", error);
     return null;
   }
 }
@@ -243,7 +244,7 @@ export const safeGenerateContent = async (params: any) => {
 
     const contentType = res.headers.get('content-type') || '';
 
-    if (!res.ok) {
+    if (!res.ok || !contentType.includes('application/json')) {
       let errorData: any = {};
       let rawText = '';
       if (contentType.includes('application/json')) {
@@ -266,13 +267,10 @@ export const safeGenerateContent = async (params: any) => {
       if (res.status === 403 || msg.includes('403') || msg.includes('PERMISSION_DENIED') || msg.includes('invalid')) {
         throw new Error("AUTH_ERROR: Principal, our neural authorization has been rejected. The current API key is invalid or has been revoked.");
       }
-      throw new Error(msg);
-    }
-
-    if (!contentType.includes('application/json')) {
-      const text = await res.text().catch(() => '');
-      console.warn("Unexpected non-JSON response from /api/gemini/generate:", text.slice(0, 150));
-      throw new Error("SERVER_RESPONSE_INVALID: Upstream server returned non-JSON data. Please retry directive.");
+      if (res.status === 504 || res.status === 502 || rawText.includes('<!doctype') || rawText.includes('<html>')) {
+        throw new Error("GATEWAY_TIMEOUT: Upstream neural bridge latency spike detected. Failover engaged.");
+      }
+      throw new Error(msg || "SERVER_RESPONSE_INVALID: Upstream server returned non-JSON data. Please retry directive.");
     }
 
     const data = await res.json();
@@ -283,7 +281,7 @@ export const safeGenerateContent = async (params: any) => {
       usageMetadata: data.usageMetadata
     };
   } catch (err: any) {
-    console.error("geminiService: generateContent error:", err?.message || err);
+    console.warn("geminiService: generateContent issue:", err?.message || err);
     throw err;
   }
 };

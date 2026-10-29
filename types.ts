@@ -68,18 +68,18 @@ export interface DaemonState {
 }
 
 export enum GeminiModel {
-  FLASH_38 = 'gemini-3.8-flash',
-  FLASH_36 = 'gemini-3.8-flash', // Stable alias for legacy 3.6 calls to prevent 503 errors
-  FLASH_PREVIEW = 'gemini-3.8-flash',
+  FLASH_38 = 'gemini-3.1-flash-lite', // Updated from 3.8 to 3.1-flash-lite due to upstream 503 high demand
+  FLASH_36 = 'gemini-3.1-flash-lite',
+  FLASH_PREVIEW = 'gemini-3-flash-preview',
   PRO_PREVIEW = 'gemini-3.1-pro-preview',
   FLASH_LITE = 'gemini-3.1-flash-lite',
   FLASH_IMAGE = 'gemini-3.1-flash-image',
   PRO_IMAGE_PREVIEW = 'gemini-3-pro-image',
-  FLASH_TTS = 'gemini-3.1-flash-tts-preview',
+  FLASH_TTS = 'gemini-3.8-flash-lite-tts',
   FLASH_LIVE = 'gemini-3.1-flash-live-preview',
   VEO_FAST = 'veo-3.1-lite-generate-preview',
   VEO_QUALITY = 'veo-3.1-generate-preview',
-  FLASH_25 = 'gemini-3.8-flash'
+  FLASH_25 = 'gemini-3.1-flash-lite'
 }
 
 export type EmotionalPrimaryState = 

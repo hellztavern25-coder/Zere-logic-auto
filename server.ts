@@ -205,9 +205,9 @@ async function startServer() {
 
     try {
       const ai = getGeminiClient();
-      const prompt = `Generate a 2-paragraph executive situational briefing for the Principal (Preston Johnston / Council Grey). Metrics: System uptime ${uptimeMin} minutes, ${memoryCount} consolidated memories, ${stewardDaemonState.tasksCompleted} autonomous tasks executed, Urgency index: ${stewardDaemonState.urgencyScore}%. Tone: Jeremy Irons' Alfred Pennyworth: aristocratic, dryly sardonic, tactically acute, fiercely loyal. Address him exclusively as 'Principal'. No corporate apologies, no canned AI platitudes.`;
+      const prompt = `Generate a 2-paragraph executive situational briefing for the Principal (Preston Johnston / Council Grey). Metrics: System uptime ${uptimeMin} minutes, ${stewardDaemonState.uptimeSeconds} seconds, ${memoryCount} consolidated memories, ${stewardDaemonState.tasksCompleted} autonomous tasks executed, Urgency index: ${stewardDaemonState.urgencyScore}%. Tone: Jeremy Irons' Alfred Pennyworth: aristocratic, dryly sardonic, tactically acute, fiercely loyal. Address him exclusively as 'Principal'. No corporate apologies, no canned AI platitudes.`;
       const resp = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-3.1-flash-lite',
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
           systemInstruction: "You are ZereØ, the Steward and Logic Monster. Respond with strategic precision to Principal Preston Johnston."
@@ -272,7 +272,7 @@ async function startServer() {
           const ai = getGeminiClient();
           const prompt = `Principal Directive to execute: "${task.title}". Additional context: "${task.description || 'None'}". Provide an authoritative, lethal analytical execution summary adhering strictly to the Steward protocol.`;
           const resp = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
+            model: 'gemini-3.1-flash-lite',
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             config: {
               systemInstruction: "You are ZereØ, the Steward and Logic Monster. Respond with high-density, strategic precision to Principal Preston Johnston. No apologies, no disclaimers."
@@ -1732,6 +1732,7 @@ async function startServer() {
   });
 
   app.post('/api/gemini/generate', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
       const authHeader = req.headers.authorization;
       const customApiKey = authHeader && authHeader.startsWith('Bearer ') 
@@ -1753,22 +1754,24 @@ async function startServer() {
         if (!candidateModels.includes('gemini-3.1-flash-lite-image')) candidateModels.push('gemini-3.1-flash-lite-image');
         if (!candidateModels.includes('gemini-3-pro-image')) candidateModels.push('gemini-3-pro-image');
       } else {
-        // If user requested a specific valid model (and not the currently degraded gemini-3.6-flash)
-        if (requestedModel && requestedModel !== 'gemini-3.6-flash' && requestedModel !== 'gemini-2.5-flash') {
+        // High-availability text models order
+        const knownFastModels = [
+          'gemini-3.1-flash-lite',
+          'gemini-3-flash-preview',
+          'gemini-3.5-flash-lite',
+          'gemini-3.8-flash',
+          'gemini-flash-latest'
+        ];
+
+        // If a specific, working model was requested, test it
+        if (requestedModel && !['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.1-pro-preview', 'gemini-pro-latest'].includes(requestedModel)) {
           candidateModels.push(requestedModel);
         }
-        // Prioritize high-stability models from Gemini SDK specification
-        if (!candidateModels.includes('gemini-3.8-flash')) {
-          candidateModels.push('gemini-3.8-flash');
-        }
-        if (!candidateModels.includes('gemini-3.1-flash-lite')) {
-          candidateModels.push('gemini-3.1-flash-lite');
-        }
-        if (!candidateModels.includes('gemini-flash-latest')) {
-          candidateModels.push('gemini-flash-latest');
-        }
-        if (!candidateModels.includes('gemini-3.1-pro-preview')) {
-          candidateModels.push('gemini-3.1-pro-preview');
+
+        for (const fm of knownFastModels) {
+          if (!candidateModels.includes(fm)) {
+            candidateModels.push(fm);
+          }
         }
       }
 
@@ -1778,12 +1781,18 @@ async function startServer() {
 
       for (const m of candidateModels) {
         try {
-          response = await ai.models.generateContent({
+          const timeoutMs = m === 'gemini-3.1-flash-lite' ? 8000 : 5500;
+          const candidatePromise = ai.models.generateContent({
             model: m,
             contents,
             config
           });
-          if (response) {
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`UPSTREAM_TIMEOUT: Model [${m}] exceeded ${timeoutMs}ms`)), timeoutMs)
+          );
+
+          response = await Promise.race([candidatePromise, timeoutPromise]);
+          if (response && (response.text || response.candidates?.length)) {
             successfulModel = m;
             break;
           }
@@ -1996,6 +2005,7 @@ async function startServer() {
   });
 
   app.post('/api/gemini/test-key', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
       const authHeader = req.headers.authorization;
       const customApiKey = authHeader && authHeader.startsWith('Bearer ') 
@@ -2004,7 +2014,7 @@ async function startServer() {
 
       const ai = getGeminiClient(customApiKey);
       const testRes = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-3.1-flash-lite',
         contents: [{ role: 'user', parts: [{ text: "Neural pulse check. Respond with 'PULSE_OK'." }] }],
         config: { maxOutputTokens: 10 }
       });
@@ -2019,6 +2029,7 @@ async function startServer() {
   });
 
   app.post('/api/gemini/tts', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
       const authHeader = req.headers.authorization;
       const customApiKey = authHeader && authHeader.startsWith('Bearer ') 
@@ -2028,7 +2039,7 @@ async function startServer() {
       const ai = getGeminiClient(customApiKey);
       const { text, voiceName, stylePrompt, accent } = req.body;
       if (!text || typeof text !== 'string') {
-        return res.status(400).json({ error: 'Text parameter required' });
+        return res.status(400).json({ success: false, error: 'Text parameter required' });
       }
 
       // Do not truncate abruptly to 800 characters; allow natural full messages
@@ -2041,41 +2052,66 @@ async function startServer() {
         ? `Say in a crisp, silky, refined British Received Pronunciation accent with aristocratic clarity: "${clippedText}"`
         : `Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth): "${clippedText}"`);
 
-      // Race with 7.5s timeout so client never hangs
-      const ttsPromise = ai.models.generateContent({
-        model: 'gemini-3.1-flash-tts-preview',
-        contents: [{ parts: [{ text: promptText }] }],
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: targetVoice }
+      const ttsCandidates = [
+        'gemini-3.8-flash-lite-tts',
+        'gemini-2.5-flash-preview-tts',
+        'gemini-3.8-flash-tts',
+        'gemini-3.1-flash-tts-preview'
+      ];
+
+      let audioBase64: string | undefined;
+      let mimeType: string | undefined;
+
+      for (const m of ttsCandidates) {
+        try {
+          const ttsPromise = ai.models.generateContent({
+            model: m,
+            contents: [{ parts: [{ text: promptText }] }],
+            config: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: targetVoice }
+                }
+              }
             }
+          });
+
+          const timeoutPromise = new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('TTS_UPSTREAM_TIMEOUT')), 4500)
+          );
+
+          const ttsResponse = await Promise.race([ttsPromise, timeoutPromise]);
+          audioBase64 = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+          mimeType = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.mimeType;
+          if (audioBase64) {
+            break;
           }
+        } catch (candidateErr) {
+          console.warn(`SERVER: TTS candidate [${m}] failed:`, (candidateErr as any)?.message || candidateErr);
+          continue;
         }
-      });
+      }
 
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('TTS_UPSTREAM_TIMEOUT')), 7500)
-      );
-
-      const ttsResponse = await Promise.race([ttsPromise, timeoutPromise]);
-
-      const audioBase64 = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
       if (!audioBase64) {
-        return res.status(502).json({ error: 'No audio data received from synthesis' });
+        return res.status(200).json({
+          success: false,
+          audioData: null,
+          error: 'TTS synthesis deferred to client speech synthesis'
+        });
       }
 
       return res.json({
         success: true,
         audioData: audioBase64,
-        mimeType: ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.mimeType || 'audio/l16; rate=24000; channels=1'
+        mimeType: mimeType || 'audio/l16; rate=24000; channels=1'
       });
     } catch (err: any) {
       console.warn('SERVER: /api/gemini/tts failed (using client DSP fallback):', err?.message || err);
-      const statusCode = getNumericHttpStatus(err, 500);
-      return res.status(statusCode).json({
-        error: err?.message || 'TTS generation failed'
+      return res.status(200).json({
+        success: false,
+        audioData: null,
+        error: err?.message || 'TTS generation fallback'
       });
     }
   });
@@ -2729,6 +2765,7 @@ Return a valid JSON object strictly matching this schema:
         }
       }
 
+      res.setHeader('Content-Type', 'application/json');
       const authHeader = req.headers.authorization;
       const customApiKey = authHeader && authHeader.startsWith('Bearer ') 
         ? authHeader.slice(7).trim() 
@@ -2736,32 +2773,65 @@ Return a valid JSON object strictly matching this schema:
       const ai = getGeminiClient(customApiKey);
 
       const promptText = `${stylePrompt} "${text}"`;
-      const ttsResponse = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-tts-preview',
-        contents: [{ parts: [{ text: promptText }] }],
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Charon' }
-            }
-          }
-        }
-      });
+      const ttsCandidates = [
+        'gemini-3.8-flash-lite-tts',
+        'gemini-2.5-flash-preview-tts',
+        'gemini-3.8-flash-tts',
+        'gemini-3.1-flash-tts-preview'
+      ];
 
-      const audioBase64 = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      let audioBase64: string | undefined;
+      let mimeType: string | undefined;
+
+      for (const m of ttsCandidates) {
+        try {
+          const ttsPromise = ai.models.generateContent({
+            model: m,
+            contents: [{ parts: [{ text: promptText }] }],
+            config: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: 'Charon' }
+                }
+              }
+            }
+          });
+
+          const timeoutPromise = new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('SYNTHESIS_UPSTREAM_TIMEOUT')), 4500)
+          );
+
+          const ttsResponse = await Promise.race([ttsPromise, timeoutPromise]);
+          audioBase64 = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+          mimeType = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.mimeType;
+          if (audioBase64) break;
+        } catch (candidateErr) {
+          console.warn(`SERVER: Clone synthesize candidate [${m}] failed:`, (candidateErr as any)?.message || candidateErr);
+          continue;
+        }
+      }
+
       if (!audioBase64) {
-        return res.status(502).json({ error: 'TTS synthesis returned empty payload' });
+        return res.status(200).json({ 
+          success: false, 
+          audioData: null, 
+          error: 'TTS synthesis returned empty payload, client DSP fallback active' 
+        });
       }
 
       return res.json({
         success: true,
         audioData: audioBase64,
-        mimeType: ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.mimeType || 'audio/l16; rate=24000; channels=1'
+        mimeType: mimeType || 'audio/l16; rate=24000; channels=1'
       });
     } catch (err: any) {
       console.warn('SERVER: /api/voice/clone/synthesize fallback:', err?.message || err);
-      return res.status(500).json({ error: err?.message || 'Synthesis failed' });
+      return res.status(200).json({ 
+        success: false, 
+        audioData: null, 
+        error: err?.message || 'Synthesis failed' 
+      });
     }
   });
 
