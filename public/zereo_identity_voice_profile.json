@@ -17,7 +17,7 @@
   "dsp_filter_pipeline": {
     "base_neural_voice": "Charon",
     "alternate_voice": "Fenrir",
-    "neural_tts_model": "gemini-3.1-flash-tts-preview",
+    "neural_tts_model": "gemini-3.8-flash-lite-tts",
     "sampling_rate_hz": 24000,
     "playback_rate": 0.90,
     "speech_rate": 0.92,

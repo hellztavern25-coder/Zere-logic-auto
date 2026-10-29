@@ -72,7 +72,7 @@ export const VoiceModulationSelector: React.FC<VoiceModulationSelectorProps> = (
       "formant_shifting_dsp_pipeline": {
         "base_neural_voice": identityProfile.config.baseVoice,
         "alternate_voice": "Fenrir",
-        "neural_tts_model": "gemini-3.1-flash-tts-preview",
+        "neural_tts_model": "gemini-3.8-flash-lite-tts",
         "sampling_rate_hz": 24000,
         "pitch_rate": identityProfile.config.pitchRate,
         "speech_rate": identityProfile.config.speechRate,
