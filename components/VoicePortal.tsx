@@ -1,6 +1,28 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Mic, MicOff, Volume2, Activity, Play, StopCircle, Loader2, BrainCircuit, ShieldCheck, ShieldAlert, Lock, AlertTriangle, Monitor } from 'lucide-react';
+import { 
+  Mic, 
+  MicOff, 
+  Volume2, 
+  Activity, 
+  Play, 
+  StopCircle, 
+  Loader2, 
+  BrainCircuit, 
+  ShieldCheck, 
+  ShieldAlert, 
+  Lock, 
+  AlertTriangle, 
+  Monitor,
+  Sparkles,
+  Award,
+  Waves,
+  CheckCircle2,
+  Sliders,
+  Radio,
+  Zap,
+  Square
+} from 'lucide-react';
 import { Socket } from 'socket.io-client';
 import { getAI, decodeBase64, encodeBase64, decodeAudioData, generateTTS, getApiKey, clearApiKey } from '../services/geminiService';
 import { GeminiModel } from '../types';
@@ -8,7 +30,14 @@ import ButlerAvatar from './ButlerAvatar';
 import VoiceStatusPanel from './VoiceStatusPanel';
 import VoiceStreamHealth from './VoiceStreamHealth';
 import PrincipalVerification from './PrincipalVerification';
-import { buildJeremyIronsDSP, jeremyIronsVoice, VoiceModulationProfile, VOICE_MODULATION_PROFILES } from '../services/jeremyIronsVoiceService';
+import { 
+  buildJeremyIronsDSP, 
+  jeremyIronsVoice, 
+  VoiceModulationProfile, 
+  VOICE_MODULATION_PROFILES,
+  JEREMY_IRONS_FORMANT_PRESETS,
+  FormantPresetDefinition
+} from '../services/jeremyIronsVoiceService';
 import ScreenShareHUD from './ScreenShareHUD';
 import VoiceModulationSelector from './VoiceModulationSelector';
 
@@ -31,10 +60,14 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
   const [isPrincipalVerified, setIsPrincipalVerified] = useState<boolean>(false);
   const [gateWarning, setGateWarning] = useState<string | null>(null);
 
-  // Voice Modulation Profile State - Defaults to Iron-Adaptive (Jeremy Irons canonical signature)
+  // Dedicated Jeremy Irons Vocal Signature Profile State (Default Output Speech Tone)
   const [selectedProfile, setSelectedProfile] = useState<VoiceModulationProfile>(() => {
-    return jeremyIronsVoice.getLegacyProfile() || 'Iron-Adaptive';
+    return jeremyIronsVoice.getLegacyProfile() || 'Jeremy-Irons-Signature';
   });
+
+  // Dedicated Formant-Shifting Presets State in DSP Core
+  const [activeFormantPreset, setActiveFormantPreset] = useState<string>('sovereign-gravitas');
+  const [isAuditioningSignature, setIsAuditioningSignature] = useState(false);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const ironsDSPRef = useRef<any>(null);
@@ -80,10 +113,27 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
 
   useEffect(() => {
     if (ironsDSPRef.current) {
-      const profileMeta = VOICE_MODULATION_PROFILES[selectedProfile] || VOICE_MODULATION_PROFILES['Iron-Adaptive'];
-      ironsDSPRef.current.updateConfig(profileMeta.config);
+      const profileMeta = VOICE_MODULATION_PROFILES[selectedProfile] || VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
+      const activePreset = JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset];
+      const mergedConfig = activePreset ? {
+        ...profileMeta.config,
+        formantPresetName: activePreset.id,
+        f1Hz: activePreset.f1Hz,
+        f1GainDb: activePreset.f1GainDb,
+        f2Hz: activePreset.f2Hz,
+        f2GainDb: activePreset.f2GainDb,
+        f3Hz: activePreset.f3Hz,
+        f3GainDb: activePreset.f3GainDb,
+        vocalTractLengthFactor: activePreset.vocalTractLengthFactor,
+        chestResonanceDb: activePreset.chestResonanceDb,
+        articulationDb: activePreset.articulationDb,
+        gravelAmount: activePreset.gravelAmount,
+        pitchRate: activePreset.pitchRate,
+        speechRate: activePreset.speechRate
+      } : profileMeta.config;
+      ironsDSPRef.current.updateConfig(mergedConfig);
     }
-  }, [selectedProfile]);
+  }, [selectedProfile, activeFormantPreset]);
 
   // Sync initial and dynamic verification state from backend
   useEffect(() => {
@@ -163,8 +213,26 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
       const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       audioContextRef.current = outputCtx;
-      const currentProfileMeta = VOICE_MODULATION_PROFILES[selectedProfile] || VOICE_MODULATION_PROFILES['Iron-Adaptive'];
-      ironsDSPRef.current = buildJeremyIronsDSP(outputCtx, outputCtx.destination, currentProfileMeta.config);
+      const currentProfileMeta = VOICE_MODULATION_PROFILES[selectedProfile] || VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
+      const activePreset = JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset];
+      const mergedConfig = activePreset ? {
+        ...currentProfileMeta.config,
+        formantPresetName: activePreset.id,
+        f1Hz: activePreset.f1Hz,
+        f1GainDb: activePreset.f1GainDb,
+        f2Hz: activePreset.f2Hz,
+        f2GainDb: activePreset.f2GainDb,
+        f3Hz: activePreset.f3Hz,
+        f3GainDb: activePreset.f3GainDb,
+        vocalTractLengthFactor: activePreset.vocalTractLengthFactor,
+        chestResonanceDb: activePreset.chestResonanceDb,
+        articulationDb: activePreset.articulationDb,
+        gravelAmount: activePreset.gravelAmount,
+        pitchRate: activePreset.pitchRate,
+        speechRate: activePreset.speechRate
+      } : currentProfileMeta.config;
+
+      ironsDSPRef.current = buildJeremyIronsDSP(outputCtx, outputCtx.destination, mergedConfig);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
       const sessionPromise = ai.live.connect({
@@ -193,8 +261,7 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
               const buffer = await decodeAudioData(decodeBase64(audioData), outputCtx);
               const source = outputCtx.createBufferSource();
               source.buffer = buffer;
-              const activeMeta = VOICE_MODULATION_PROFILES[selectedProfile] || VOICE_MODULATION_PROFILES['Iron-Adaptive'];
-              source.playbackRate.value = activeMeta.config.pitchRate;
+              source.playbackRate.value = mergedConfig.pitchRate;
               if (ironsDSPRef.current) {
                 source.connect(ironsDSPRef.current.inputNode);
               } else {
@@ -241,13 +308,107 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
     }
   };
 
+  const handleSelectFormantPreset = (presetKey: string) => {
+    const preset = JEREMY_IRONS_FORMANT_PRESETS[presetKey];
+    if (!preset) return;
+    setActiveFormantPreset(presetKey);
+    setSelectedProfile('Jeremy-Irons-Signature');
+    jeremyIronsVoice.setProfile('Jeremy-Irons-Signature');
+
+    if (ironsDSPRef.current) {
+      ironsDSPRef.current.updateConfig({
+        formantPresetName: preset.id,
+        f1Hz: preset.f1Hz,
+        f1GainDb: preset.f1GainDb,
+        f2Hz: preset.f2Hz,
+        f2GainDb: preset.f2GainDb,
+        f3Hz: preset.f3Hz,
+        f3GainDb: preset.f3GainDb,
+        vocalTractLengthFactor: preset.vocalTractLengthFactor,
+        chestResonanceDb: preset.chestResonanceDb,
+        articulationDb: preset.articulationDb,
+        gravelAmount: preset.gravelAmount,
+        pitchRate: preset.pitchRate,
+        speechRate: preset.speechRate
+      });
+    }
+  };
+
+  const handleAuditionSignature = async (customSampleText?: string) => {
+    if (isAuditioningSignature) {
+      jeremyIronsVoice.stop();
+      setIsAuditioningSignature(false);
+      setIsThinking(false);
+      return;
+    }
+
+    const signatureMeta = VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
+    const activePreset = JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset] || JEREMY_IRONS_FORMANT_PRESETS['sovereign-gravitas'];
+    const textToSpeak = customSampleText || signatureMeta.auditionSample;
+
+    setIsAuditioningSignature(true);
+    setIsThinking(true);
+
+    try {
+      await jeremyIronsVoice.speak(
+        textToSpeak,
+        {
+          ...signatureMeta.config,
+          formantPresetName: activePreset.id,
+          f1Hz: activePreset.f1Hz,
+          f1GainDb: activePreset.f1GainDb,
+          f2Hz: activePreset.f2Hz,
+          f2GainDb: activePreset.f2GainDb,
+          f3Hz: activePreset.f3Hz,
+          f3GainDb: activePreset.f3GainDb,
+          vocalTractLengthFactor: activePreset.vocalTractLengthFactor,
+          chestResonanceDb: activePreset.chestResonanceDb,
+          articulationDb: activePreset.articulationDb,
+          gravelAmount: activePreset.gravelAmount,
+          pitchRate: activePreset.pitchRate,
+          speechRate: activePreset.speechRate
+        },
+        () => {
+          setIsThinking(true);
+          setIsAuditioningSignature(true);
+        },
+        () => {
+          setIsThinking(false);
+          setIsAuditioningSignature(false);
+        }
+      );
+    } catch (err) {
+      console.warn('Signature audition failed:', err);
+      setIsThinking(false);
+      setIsAuditioningSignature(false);
+    }
+  };
+
   const handleTTS = async () => {
     if (!ttsInput.trim()) return;
     setIsSynthesizing(true);
     setIsThinking(true);
     try {
-      const profileMeta = VOICE_MODULATION_PROFILES[selectedProfile] || VOICE_MODULATION_PROFILES['Iron-Adaptive'];
-      await jeremyIronsVoice.speak(ttsInput, profileMeta.config, () => {
+      const profileMeta = VOICE_MODULATION_PROFILES[selectedProfile] || VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
+      const activePreset = JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset];
+      const mergedConfig = activePreset ? {
+        ...profileMeta.config,
+        formantPresetName: activePreset.id,
+        f1Hz: activePreset.f1Hz,
+        f1GainDb: activePreset.f1GainDb,
+        f2Hz: activePreset.f2Hz,
+        f2GainDb: activePreset.f2GainDb,
+        f3Hz: activePreset.f3Hz,
+        f3GainDb: activePreset.f3GainDb,
+        vocalTractLengthFactor: activePreset.vocalTractLengthFactor,
+        chestResonanceDb: activePreset.chestResonanceDb,
+        articulationDb: activePreset.articulationDb,
+        gravelAmount: activePreset.gravelAmount,
+        pitchRate: activePreset.pitchRate,
+        speechRate: activePreset.speechRate
+      } : profileMeta.config;
+
+      await jeremyIronsVoice.speak(ttsInput, mergedConfig, () => {
         setIsThinking(true);
       }, () => {
         setIsThinking(false);
@@ -339,6 +500,182 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
           />
         </div>
       )}
+
+      {/* Dedicated Vocal Signature Profile: Jeremy Irons (Default Output Speech Tone) */}
+      <div className="w-full max-w-4xl z-10 bg-gradient-to-b from-amber-950/30 via-zinc-950/90 to-black border border-amber-500/40 rounded-3xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl relative overflow-hidden ring-1 ring-amber-500/20">
+        <div className="absolute top-0 right-0 w-96 h-40 bg-gradient-to-bl from-amber-500/15 via-red-900/10 to-transparent pointer-events-none" />
+
+        {/* Header Row */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-amber-500/20">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <Award className="w-5 h-5 text-amber-400" />
+              <h3 className="text-base sm:text-lg font-bold uppercase tracking-[0.25em] text-zinc-100 flex items-center gap-2">
+                <span>Vocal Signature</span>
+                <span className="text-zinc-600">•</span>
+                <span className="text-amber-400">Jeremy Irons</span>
+              </h3>
+              <span className="text-[10px] uppercase font-mono font-bold tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 shadow-sm animate-pulse">
+                <Sparkles className="w-3 h-3 text-amber-400" />
+                <span>Default Output Tone</span>
+              </span>
+            </div>
+            <p className="text-xs text-zinc-300 font-serif italic">
+              Alfred Pennyworth Persona • Aristocratic Baritone with Unhurried Cadence & Lethal Intellectual Gravitas.
+            </p>
+          </div>
+
+          {/* Quick Audition Trigger */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              id="audition-jeremy-irons-signature-btn"
+              onClick={() => handleAuditionSignature()}
+              className={`px-4 py-2 rounded-xl text-xs font-mono font-bold uppercase tracking-wider flex items-center gap-2 transition-all shadow-lg border ${
+                isAuditioningSignature
+                  ? 'bg-amber-500 text-black border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.5)] animate-pulse'
+                  : 'bg-amber-950/60 text-amber-300 border-amber-500/50 hover:bg-amber-900/60 hover:border-amber-400 hover:text-amber-200'
+              }`}
+            >
+              {isAuditioningSignature ? (
+                <>
+                  <Square className="w-3.5 h-3.5 fill-current" />
+                  <span>Halting Gravitas</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>Audition Gravitas</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Formant Presets Selector */}
+        <div className="mt-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
+              <Sliders className="w-3.5 h-3.5 text-amber-400" />
+              <span>DSP Formant-Shifting Presets:</span>
+            </span>
+            <span className="text-[10px] font-mono text-amber-400/80">
+              Active: {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.name || 'Sovereign Gravitas'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            {Object.values(JEREMY_IRONS_FORMANT_PRESETS).map((preset) => {
+              const isPresetSelected = activeFormantPreset === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => handleSelectFormantPreset(preset.id)}
+                  className={`p-3 rounded-xl text-left transition-all border font-mono flex flex-col justify-between ${
+                    isPresetSelected
+                      ? 'bg-amber-950/50 border-amber-500 text-amber-200 shadow-[0_0_15px_rgba(251,191,36,0.15)] ring-1 ring-amber-500/40'
+                      : 'bg-black/40 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1 w-full">
+                    <span className="text-xs font-bold truncate">{preset.name.split(' (')[0]}</span>
+                    {isPresetSelected && (
+                      <CheckCircle2 className="w-3 h-3 text-amber-400 shrink-0" />
+                    )}
+                  </div>
+                  <span className="text-[9px] text-zinc-500 truncate mt-1">{preset.tagline.split('•')[0]}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Formant Architecture Spectrum Telemetry Grid */}
+        <div className="mt-6 pt-5 border-t border-amber-500/20">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
+              <Waves className="w-3.5 h-3.5 text-amber-400" />
+              <span>3-Pole Formant Modeling Telemetry:</span>
+            </span>
+            <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+              <span>Calibrated to Jeremy Irons Voice-Print</span>
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-xs font-mono">
+            {/* F1 */}
+            <div className="bg-black/50 p-2.5 rounded-xl border border-amber-500/20">
+              <span className="text-[9px] text-zinc-500 block uppercase">F1 Pharyngeal</span>
+              <span className="text-amber-300 font-bold text-sm">
+                {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f1Hz || 380} Hz
+              </span>
+              <span className="text-[9px] text-zinc-400 block">+{JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f1GainDb || 6.2} dB (Floor)</span>
+            </div>
+
+            {/* F2 */}
+            <div className="bg-black/50 p-2.5 rounded-xl border border-amber-500/20">
+              <span className="text-[9px] text-zinc-500 block uppercase">F2 Lingual Retract</span>
+              <span className="text-amber-300 font-bold text-sm">
+                {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f2Hz || 1350} Hz
+              </span>
+              <span className="text-[9px] text-zinc-400 block">{JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f2GainDb || -3.0} dB (RP Notch)</span>
+            </div>
+
+            {/* F3 */}
+            <div className="bg-black/50 p-2.5 rounded-xl border border-amber-500/20">
+              <span className="text-[9px] text-zinc-500 block uppercase">F3 Actor's Formant</span>
+              <span className="text-amber-300 font-bold text-sm">
+                {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f3Hz || 2680} Hz
+              </span>
+              <span className="text-[9px] text-zinc-400 block">+{JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f3GainDb || 6.5} dB (Bite)</span>
+            </div>
+
+            {/* Tract Factor */}
+            <div className="bg-black/50 p-2.5 rounded-xl border border-amber-500/20">
+              <span className="text-[9px] text-zinc-500 block uppercase">Tract Expansion</span>
+              <span className="text-zinc-200 font-bold text-sm">
+                {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.vocalTractLengthFactor || 1.14}x
+              </span>
+              <span className="text-[9px] text-zinc-400 block">Cavity Elongation</span>
+            </div>
+
+            {/* Gravel */}
+            <div className="bg-black/50 p-2.5 rounded-xl border border-amber-500/20">
+              <span className="text-[9px] text-zinc-500 block uppercase">Sigmoid Gravel</span>
+              <span className="text-zinc-200 font-bold text-sm">
+                {Math.round((JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.gravelAmount || 0.88) * 100)}%
+              </span>
+              <span className="text-[9px] text-zinc-400 block">4x Oversampled</span>
+            </div>
+
+            {/* Chest Depth */}
+            <div className="bg-black/50 p-2.5 rounded-xl border border-amber-500/20">
+              <span className="text-[9px] text-zinc-500 block uppercase">Chest Depth</span>
+              <span className="text-zinc-200 font-bold text-sm">
+                +{JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.chestResonanceDb || 6.8} dB
+              </span>
+              <span className="text-[9px] text-zinc-400 block">@ 105 Hz Sub-Shelf</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Audio Synthesis Configuration Footer */}
+        <div className="mt-4 pt-3 border-t border-zinc-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[10px] font-mono text-zinc-400">
+          <div className="flex items-center gap-2">
+            <Radio className="w-3.5 h-3.5 text-amber-400" />
+            <span>Output Speech Tone: <strong className="text-amber-300">Jeremy Irons Aristocratic Baritone (Default)</strong></span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span>Rate: {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.speechRate || 0.88}x</span>
+            <span>•</span>
+            <span>Pitch: {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.pitchRate || 0.86}x</span>
+            <span>•</span>
+            <span className="text-amber-400 font-bold">Address: Principal</span>
+          </div>
+        </div>
+      </div>
 
       {/* Voice Modulation Profile Selector */}
       <div className="w-full max-w-4xl z-10">

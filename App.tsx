@@ -15,12 +15,14 @@ import SystemTab from './components/SystemTab';
 import WorkshopTab from './components/WorkshopTab';
 import SnapshotTab from './components/SnapshotTab';
 import { AssistantDaemon } from './components/AssistantDaemon';
+import FilesTab from './components/FilesTab';
 import Home from './components/Home';
 import AvatarModal from './components/AvatarModal';
 import Heartbeat from './components/Heartbeat';
 import TacticalTouchOverlay from './components/TacticalTouchOverlay';
 import VoiceEmulator from './components/VoiceEmulator';
 import RadialTacticalFAB from './components/RadialTacticalFAB';
+import AcousticLatticeStudio from './components/AcousticLatticeStudio';
 import { AppTab, GeminiModel } from './types';
 import { getAI, refreshConfig, getApiKey, isServerPrincipalActive, safeGenerateContent } from './services/geminiService';
 
@@ -427,6 +429,8 @@ const App: React.FC = () => {
         return <Home key="home" {...commonProps} />;
       case AppTab.CHAT:
         return <ChatBot key="chat" socket={activeSocket || socketRef.current} initialGrounding="none" avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} isPrincipalMode={isPrincipalMode} setIsPrincipalMode={setIsPrincipalMode} {...commonProps} />;
+      case AppTab.FILES:
+        return <FilesTab key="files" onNavigate={commonProps.onNavigate} isPrincipalMode={isPrincipalMode} />;
       case AppTab.GROUNDING:
         return <ChatBot key="grounding" socket={activeSocket || socketRef.current} initialGrounding="search" avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} isPrincipalMode={isPrincipalMode} setIsPrincipalMode={setIsPrincipalMode} {...commonProps} />;
       case AppTab.CREATIVE:
@@ -450,6 +454,8 @@ const App: React.FC = () => {
         return <WorkshopTab key="workshop" />;
       case AppTab.SNAPSHOT:
         return <SnapshotTab key="snapshot" />;
+      case AppTab.ACOUSTIC_ROOM:
+        return <AcousticLatticeStudio key="acoustic_room" onNavigateBack={() => commonProps.onNavigate(AppTab.CHAT)} />;
       case AppTab.ASSISTANT:
         return <AssistantDaemon key="assistant" socket={activeSocket || socketRef.current} isPrincipalMode={isPrincipalMode} />;
       default:

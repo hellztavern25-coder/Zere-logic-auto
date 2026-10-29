@@ -1,10 +1,11 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Brain, Search, MapPin, Loader2, Link as LinkIcon, Trash2, Sparkles, Zap, Activity, ShieldCheck, Save, Home as HomeIcon, MessageSquare, Plus, Menu, X, Bell, Monitor, Camera, Image as GalleryIcon, Volume2, VolumeX, Palette, Share2, Crosshair, UserCheck, Sliders } from 'lucide-react';
+import { Send, Brain, Search, MapPin, Loader2, Link as LinkIcon, Trash2, Sparkles, Zap, Activity, ShieldCheck, Save, Home as HomeIcon, MessageSquare, Plus, Menu, X, Bell, Monitor, Camera, Image as GalleryIcon, Volume2, VolumeX, Palette, Share2, Crosshair, UserCheck, Sliders, FolderOpen, Download, Eye, Database, Wand2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
-import { getAI, getApiKey, clearApiKey, safeGenerateContent, generateTTS } from '../services/geminiService';
+import { getAI, getApiKey, clearApiKey, safeGenerateContent, generateTTS, generateDesiredArt } from '../services/geminiService';
+import { saveArtToVault } from '../services/fileVaultService';
 import { generateClaudeContent, getAnthropicKey } from '../services/anthropicService';
 import { GeminiModel, ChatMessage, ChatThread, EmotionalMap } from '../types';
 import ButlerAvatar from './ButlerAvatar';
@@ -76,6 +77,77 @@ const ChatBot: React.FC<ChatBotProps> = ({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+
+  // Desired Art Creation State
+  const [isArtModalOpen, setIsArtModalOpen] = useState(false);
+  const [artPrompt, setArtPrompt] = useState('');
+  const [artStyle, setArtStyle] = useState<'luxury_tactical' | 'photorealistic' | 'oil_painting' | 'cybernetic' | 'minimalist'>('luxury_tactical');
+  const [artAspectRatio, setArtAspectRatio] = useState<'1:1' | '16:9' | '9:16' | '4:3'>('1:1');
+  const [isGeneratingArt, setIsGeneratingArt] = useState(false);
+  const [zoomedImageUrl, setZoomedImageUrl] = useState<string | null>(null);
+  const [artVaultSavedNotice, setArtVaultSavedNotice] = useState<string | null>(null);
+
+  const executeArtCreation = async (desiredPrompt: string, stylePreset: any = 'luxury_tactical', aspectRatio: any = '1:1') => {
+    if (!desiredPrompt.trim()) return;
+    setIsThinking(true);
+    setIsGeneratingArt(true);
+
+    try {
+      // 1. Generate desired artwork through neural arrays
+      const artResult = await generateDesiredArt({
+        prompt: desiredPrompt,
+        stylePreset,
+        aspectRatio,
+        enhancePrompt: true
+      });
+
+      // 2. Automatically commit artwork to the Substrate Vault (IndexedDB)
+      try {
+        await saveArtToVault({
+          title: artResult.title || desiredPrompt,
+          imageUrl: artResult.imageUrl,
+          prompt: desiredPrompt,
+          classification: 'TOP SECRET / PRINCIPAL EYES ONLY',
+          tags: ['DESIRED_ART', stylePreset.toUpperCase(), 'SYNTHESIZED']
+        });
+      } catch (vaultErr) {
+        console.warn('Vault auto-archive non-blocking warning:', vaultErr);
+      }
+
+      // 3. Format Butler response
+      const stewardText = `I have manifested your desired artwork, Principal.\n\n**Directive:** *"${desiredPrompt}"*\n**Style Profile:** ${String(stylePreset).replace(/_/g, ' ').toUpperCase()}\n**Substrate Status:** Committed to Vault archives and rendered below with luxury framing.`;
+
+      const newMsg: ChatMessage = {
+        role: 'model',
+        text: stewardText,
+        timestamp: Date.now(),
+        generatedArt: {
+          prompt: desiredPrompt,
+          imageUrl: artResult.imageUrl,
+          title: artResult.title || 'Desired Art Manifest',
+          aspectRatio,
+          style: stylePreset
+        }
+      };
+
+      setMessages(prev => [...prev, newMsg]);
+      speakText(stewardText);
+    } catch (err: any) {
+      console.error('Art generation error:', err);
+      const errorText = `Principal, the neural pigment arrays encountered resistance: ${err?.message || 'Synthesis aborted.'} Should you wish, I can adjust the stylistic constraints and re-attempt.`;
+      setMessages(prev => [...prev, {
+        role: 'model',
+        text: errorText,
+        timestamp: Date.now()
+      }]);
+      speakText(errorText);
+    } finally {
+      setIsThinking(false);
+      setIsGeneratingArt(false);
+      setIsArtModalOpen(false);
+      setArtPrompt('');
+    }
+  };
 
   // Sync Jeremy Irons voice manager state
   useEffect(() => {
@@ -511,6 +583,26 @@ const ChatBot: React.FC<ChatBotProps> = ({
         speakText(signetReply);
         setInput('');
         setIsThinking(false);
+        return;
+      }
+
+      // Check for Desired Art Creation Directive
+      const isArtDirective = /(?:create|generate|make|draw|paint|render|visualize|illustrate)\s+(?:an?\s+)?(?:art|artwork|image|picture|painting|illustration|portrait|sketch|visual|scene|depiction|drawing)/i.test(input) ||
+        /^(?:paint|draw|visualize|render|illustrate)\b/i.test(cleanInput) ||
+        /(?:paint|draw|create art for|make art for|generate image of|make a picture of|draw a picture of)\b/i.test(cleanInput) ||
+        /(?:create|make|generate)\s+desired\s+art/i.test(cleanInput);
+
+      if (isArtDirective && !currentImage) {
+        let extractedPrompt = input
+          .replace(/^(?:please\s+)?(?:zereo|steward|butler)?\s*,?\s*/i, '')
+          .replace(/(?:can you|could you|would you|please)?\s*(?:create|generate|make|draw|paint|render|visualize|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:art|artwork|image|picture|painting|illustration|portrait|sketch|visual|scene|depiction|drawing)?\s*(?:of|for|about)?\s*/i, '')
+          .trim();
+
+        if (!extractedPrompt) {
+          extractedPrompt = input;
+        }
+
+        await executeArtCreation(extractedPrompt, 'luxury_tactical', '1:1');
         return;
       }
 
@@ -1024,168 +1116,57 @@ const ChatBot: React.FC<ChatBotProps> = ({
       </AnimatePresence>
 
       <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
-        {/* Imperial Header */}
-        <div className="p-3 sm:p-6 flex items-center justify-between border-b border-red-900/20 bg-black/80 backdrop-blur-2xl sticky top-0 z-30">
+        {/* Minimal Imperial Header — Maximized Full Screen Chat */}
+        <div className="px-3 py-2 sm:px-6 sm:py-2.5 flex items-center justify-between border-b border-red-900/20 bg-black/90 backdrop-blur-2xl sticky top-0 z-30 flex-shrink-0">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-             <div className="flex items-center gap-1.5 sm:gap-2">
-               {/* Menu tab at top left: Tactical Buttons (Gemini, Claude, Turbo, Strategic, Budget, Recon, HUD) */}
-               <button 
-                 onClick={() => openTopMenu('buttons')}
-                 className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-gradient-to-r from-red-950/90 to-zinc-950 hover:from-red-900 hover:to-zinc-900 border border-amber-500/50 hover:border-amber-400 rounded-xl text-amber-400 transition-all shadow-md group flex-shrink-0"
-                 title="Menu: Gemini, Claude, Strategic, Balanced/Budget, Recon & Tactical Touch HUD"
-               >
-                 <Sliders className="w-4 h-4 text-amber-400 group-hover:rotate-90 transition-transform" />
-                 <span className="text-[10px] font-black uppercase tracking-wider hidden sm:inline">Menu</span>
-                 <span className="text-[10px] font-black uppercase tracking-wider sm:hidden">Menu</span>
-               </button>
+            {/* The Sole Consolidated Menu Tab */}
+            <button 
+              onClick={() => openTopMenu('buttons')}
+              className="flex items-center gap-2 px-3 py-1.5 sm:px-3.5 sm:py-1.5 bg-gradient-to-r from-red-950/90 to-zinc-950 hover:from-red-900 hover:to-zinc-900 border border-amber-500/50 hover:border-amber-400 rounded-xl text-amber-400 transition-all shadow-lg shadow-black group flex-shrink-0 cursor-pointer active:scale-95"
+              title="Menu Tab: Access All Tabs, Danielle's Link, Threads, Affect, Models, & Tools"
+            >
+              <Menu className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+              <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-widest text-amber-300">Menu</span>
+              {threads.length > 0 && (
+                <span className="text-[8px] font-mono px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {threads.length}
+                </span>
+              )}
+            </button>
 
-               {/* Direct Danielle's Link tab top left */}
-               <button 
-                 onClick={() => openTopMenu('danielle_link')}
-                 className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 sm:py-2 bg-gradient-to-r from-red-950/80 via-rose-950/60 to-black hover:from-rose-900/60 border border-rose-500/40 hover:border-rose-400 rounded-xl text-rose-300 transition-all shadow-md flex-shrink-0"
-                 title="Danielle's Link (Pre-authorized Ally Portal & 1-Click Share)"
-               >
-                 <UserCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-400" />
-                 <span className="text-[10px] font-black uppercase tracking-wider hidden sm:inline">Danielle's Link</span>
-                 <span className="text-[10px] font-black uppercase tracking-wider sm:hidden">Danielle</span>
-               </button>
-
-               {/* Direct Different Chat Threads tab top left */}
-               <button 
-                 onClick={() => openTopMenu('threads')}
-                 className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 sm:py-2 bg-zinc-950/90 hover:bg-red-950/50 border border-amber-500/30 hover:border-amber-400 rounded-xl text-amber-400 transition-all shadow-md flex-shrink-0"
-                 title="Different Chat Threads (Persistent Dialogue Streams)"
-               >
-                 <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
-                 <span className="text-[10px] font-black uppercase tracking-wider hidden sm:inline">Threads</span>
-                 {threads.length > 0 && (
-                   <span className="text-[8px] font-mono px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                     {threads.length}
-                   </span>
-                 )}
-               </button>
-
-               {/* Direct Uses & Affect tab top left */}
-               <button 
-                 onClick={() => openTopMenu('knowledge_uses')}
-                 className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 sm:py-2 bg-gradient-to-r from-amber-950/80 to-zinc-950 hover:from-amber-900/80 border border-amber-500/40 hover:border-amber-400 rounded-xl text-amber-300 transition-all shadow-md flex-shrink-0"
-                 title="Knowledge of Uses & Real-Time Emotional Mapping Engine"
-               >
-                 <Brain className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
-                 <span className="text-[10px] font-black uppercase tracking-wider hidden sm:inline">Uses & Affect</span>
-                 <span className="text-[10px] font-black uppercase tracking-wider sm:hidden">Uses</span>
-               </button>
-             </div>
-             
-             <button 
-               onClick={() => handleNavigate('home')}
-               className="p-1.5 sm:p-2 hover:bg-red-900/20 rounded-lg text-amber-500 transition-colors hidden md:block"
-             >
-               <HomeIcon className="w-5 h-5" />
-             </button>
-             
-             <div 
-               className="relative group cursor-pointer flex-shrink-0" 
-               onClick={() => setIsAvatarModalOpen(true)} 
-               title="Customise ZereØ avatar for chat threads"
-             >
-               <ButlerAvatar size="sm" isTalking={isThinking || isSpeaking} isTurbo={logicTier === 'turbo'} src={activeAvatar} />
-               <div className="absolute -bottom-1 -right-1 p-0.5 bg-amber-500 rounded-full text-black opacity-0 group-hover:opacity-100 transition-opacity shadow-md">
-                 <Palette className="w-2 h-2" />
-               </div>
-             </div>
-             
-           <div className="min-w-0 flex-1">
-             <div className="flex items-center gap-1.5 sm:gap-3 flex-wrap">
-               <h2 className="text-xs sm:text-2xl font-bold bg-gradient-to-r from-amber-100 to-amber-500 bg-clip-text text-transparent uppercase tracking-[0.05em] sm:tracking-[0.2em] truncate">Steward</h2>
-               {isPrincipalMode && (
-                 <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-[6px] text-amber-400 font-black tracking-widest animate-pulse whitespace-nowrap">
-                   LINKED
-                 </div>
-               )}
-               <button 
-                 onClick={() => openTopMenu('buttons')}
-                 title="Configure Neural Engine in Tactical HUD"
-                 className={`flex items-center gap-1 sm:gap-2 px-1.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[6px] sm:text-[9px] font-black border transition-all duration-500 cursor-pointer hover:scale-105 ${neuralEngine === 'gemini' ? 'bg-amber-500/10 border-amber-500/40 text-amber-500' : 'bg-purple-900/20 border-purple-500/40 text-purple-400'}`}
-               >
-                  {neuralEngine === 'gemini' ? <Zap className="w-2 h-2 sm:w-3 h-3 animate-pulse" /> : <Brain className="w-2 h-2 sm:w-3 h-3" />}
-                  <span className="hidden sm:inline">{neuralEngine === 'gemini' ? 'GEMINI CORE' : 'CLAUDE BRIDGE'}</span>
-                </button>
-                <button 
-                 onClick={() => openTopMenu('buttons')}
-                 title="Configure Logic Tier in Tactical HUD"
-                 className={`flex items-center gap-1 sm:gap-2 px-1.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[6px] sm:text-[9px] font-black border transition-all duration-500 cursor-pointer hover:scale-105 ${logicTier === 'turbo' ? 'bg-amber-500/10 border-amber-500/40 text-amber-500' : 'bg-red-900/20 border-red-500/40 text-red-400'}`}
-               >
-                 {logicTier === 'turbo' ? <Zap className="w-2 h-2 sm:w-3 h-3 animate-pulse" /> : <ShieldCheck className="w-2 h-2 sm:w-3 h-3" />}
-                 <span className="hidden sm:inline">{logicTier === 'turbo' ? 'TURBO' : 'SENTINEL'}</span>
-               </button>
-             </div>
-             <p className="text-[6px] sm:text-[10px] text-zinc-600 font-mono tracking-[0.1em] sm:tracking-[0.3em] mt-0.5 uppercase truncate">Neural Steward</p>
-           </div>
-        </div>
-        
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {velocity > 0 && (
-            <div className="hidden md:flex flex-col items-end gap-1">
-               <div className="flex items-center gap-2 text-amber-600/60 font-mono text-[9px] uppercase tracking-widest">
-                  <Activity className="w-3 h-3" />
-                  Processing Velocity
-               </div>
-               <div className="text-xl font-bold font-mono text-amber-500 tabular-nums">
-                  {velocity.toLocaleString()}<span className="text-[9px] ml-1 opacity-40">T/s</span>
-               </div>
-            </div>
-          )}
-
-          {/* Screen Share Quick Trigger */}
-          <button
-            onClick={screenStream ? stopScreenShare : startScreenShare}
-            title={screenStream ? 'Screen sharing active — click to terminate' : 'Share Screen with Jeremy Irons'}
-            className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl border text-[8px] sm:text-[10px] font-black uppercase tracking-wider transition-all ${
-              screenStream
-                ? 'bg-red-950 text-amber-400 border-amber-500 shadow-[0_0_15px_rgba(251,191,36,0.3)] animate-pulse'
-                : 'bg-zinc-950/80 border-red-900/30 text-zinc-400 hover:text-amber-400 hover:border-amber-500/40'
-            }`}
-          >
-            <Monitor className="w-3.5 h-3.5 text-amber-500" />
-            <span className="hidden sm:inline">{screenStream ? 'Screen Live' : 'Share Screen'}</span>
-            <span className="sm:hidden">{screenStream ? 'Live' : 'Screen'}</span>
-          </button>
-
-          {/* Jeremy Irons Voice Control */}
-          <JeremyIronsVoiceControl ttsEnabled={ttsEnabled} onToggleTTS={toggleTTS} />
-        </div>
-      </div>
-
-      {/* Live Emotional Mapping & Reciprocation HUD Telemetry Strip */}
-      {activeEmotionalMap && (
-        <div className="bg-gradient-to-r from-zinc-950 via-[#180909] to-zinc-950 border-b border-amber-500/20 px-3 sm:px-6 py-1.5 flex items-center justify-between gap-2 text-[8px] sm:text-[9px] font-mono shadow-inner z-20">
-          <div className="flex items-center gap-2 min-w-0 overflow-x-auto no-scrollbar">
-            <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold uppercase whitespace-nowrap">
-              AFFECT: {activeEmotionalMap.primaryState.replace(/_/g, ' ')}
-            </span>
-            <span className="px-1.5 py-0.5 rounded bg-black/60 border border-red-900/40 text-zinc-300 uppercase whitespace-nowrap">
-              VECTOR: {activeEmotionalMap.reciprocationVector.replace(/_/g, ' ')}
-            </span>
-            <span className="text-zinc-500 hidden md:inline whitespace-nowrap">
-              Need: {activeEmotionalMap.needVsWant.needScore}% | Threat: {activeEmotionalMap.fearVsPain.fearScore}%
-            </span>
-            {activeEmotionalMap.stewardLogicalAffect.nudgeAndSmile && (
-              <span className="px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-500/30 text-amber-300 text-[7px] uppercase font-black whitespace-nowrap">
-                Nudge & Smile: Active
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xs sm:text-base font-bold bg-gradient-to-r from-amber-100 to-amber-500 bg-clip-text text-transparent uppercase tracking-[0.1em] sm:tracking-[0.18em] truncate">
+                Steward
               </span>
-            )}
+              {isPrincipalMode && (
+                <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-[7px] text-amber-400 font-black tracking-widest animate-pulse whitespace-nowrap">
+                  LINKED
+                </div>
+              )}
+            </div>
           </div>
 
-          <button
-            onClick={() => openTopMenu('knowledge_uses')}
-            className="text-[8px] uppercase tracking-wider text-amber-400/80 hover:text-amber-300 hover:underline flex items-center gap-1 flex-shrink-0"
-          >
-            <span>Codex & Map</span>
-            <Sliders className="w-2.5 h-2.5" />
-          </button>
+          <div className="flex items-center gap-2.5 flex-shrink-0">
+            {/* Subtle Voice Synthesis Mute/Active Toggle */}
+            <button
+              onClick={toggleTTS}
+              className={`p-1.5 rounded-lg border text-xs transition-all ${
+                ttsEnabled ? 'text-amber-400 border-amber-500/30 bg-black/40' : 'text-zinc-600 border-zinc-850 bg-black/20'
+              }`}
+              title={ttsEnabled ? 'Jeremy Irons voice synthesis online (click to mute)' : 'Voice output muted (click to unmute)'}
+            >
+              {ttsEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            </button>
+
+            <div 
+              className="relative group cursor-pointer flex-shrink-0" 
+              onClick={() => setIsAvatarModalOpen(true)} 
+              title="Customise ZereØ avatar for chat threads"
+            >
+              <ButlerAvatar size="sm" isTalking={isThinking || isSpeaking} isTurbo={logicTier === 'turbo'} src={activeAvatar} />
+            </div>
+          </div>
         </div>
-      )}
 
       {/* Personalized Protocol Greeting Banner for Ali and Danielle */}
       {activeRecipient && (
@@ -1309,6 +1290,92 @@ const ChatBot: React.FC<ChatBotProps> = ({
                         />
                       </div>
                     )}
+
+                    {msg.generatedArt && (
+                      <div className="mb-4 rounded-2xl overflow-hidden border border-amber-500/40 bg-black/90 shadow-[0_0_30px_rgba(245,158,11,0.15)] group">
+                        <div className="px-3.5 py-2.5 bg-gradient-to-r from-red-950/80 via-[#180d10] to-black border-b border-amber-500/30 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                            <span className="text-[10px] font-mono font-bold text-amber-300 uppercase tracking-widest">
+                              {msg.generatedArt.title || 'Synthesized Artwork'}
+                            </span>
+                          </div>
+                          <span className="text-[8px] font-mono px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400 uppercase">
+                            {msg.generatedArt.aspectRatio || '1:1'} • {String(msg.generatedArt.style || 'ARTWORK').replace(/_/g, ' ')}
+                          </span>
+                        </div>
+
+                        <div 
+                          className="relative overflow-hidden cursor-pointer bg-black/95 flex items-center justify-center p-1.5"
+                          onClick={() => setZoomedImageUrl(msg.generatedArt!.imageUrl)}
+                        >
+                          <img
+                            src={msg.generatedArt.imageUrl}
+                            alt={msg.generatedArt.prompt}
+                            referrerPolicy="no-referrer"
+                            className="w-full max-h-[460px] object-contain rounded-xl transition-transform duration-300 group-hover:scale-[1.01]"
+                          />
+                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                            <span className="px-3 py-1.5 rounded-full bg-black/80 border border-amber-500/50 text-amber-300 text-xs font-mono flex items-center gap-1.5 shadow-2xl backdrop-blur-sm">
+                              <Eye className="w-3.5 h-3.5" />
+                              Click to Enlarge
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Quick Action Tools */}
+                        <div className="px-3 py-2.5 bg-[#0d090b] border-t border-red-950/50 flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-[10px] text-zinc-400 font-serif italic truncate max-w-[220px] sm:max-w-md">
+                            "{msg.generatedArt.prompt}"
+                          </p>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={async () => {
+                                if (msg.generatedArt) {
+                                  await saveArtToVault({
+                                    title: msg.generatedArt.title || msg.generatedArt.prompt,
+                                    imageUrl: msg.generatedArt.imageUrl,
+                                    prompt: msg.generatedArt.prompt
+                                  });
+                                  setArtVaultSavedNotice('Archived to Vault');
+                                  setTimeout(() => setArtVaultSavedNotice(null), 2500);
+                                }
+                              }}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-amber-950/40 border border-red-950/60 text-zinc-300 hover:text-amber-300 text-[10px] font-mono transition-colors"
+                              title="Save artwork to Intel Dossier & Media Vault"
+                            >
+                              <Database className="w-3 h-3 text-amber-400" />
+                              <span>Save to Vault</span>
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                if (onAvatarChange && msg.generatedArt) {
+                                  onAvatarChange(msg.generatedArt.imageUrl, 'thread');
+                                }
+                              }}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-amber-950/40 border border-red-950/60 text-zinc-300 hover:text-amber-300 text-[10px] font-mono transition-colors"
+                              title="Set as Butler Avatar for this session"
+                            >
+                              <Palette className="w-3 h-3 text-amber-400" />
+                              <span>Set Avatar</span>
+                            </button>
+
+                            <a
+                              href={msg.generatedArt.imageUrl}
+                              download={`zereo-art-${Date.now()}.png`}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-[10px] font-mono font-bold transition-colors shadow-md"
+                              title="Download full resolution image"
+                            >
+                              <Download className="w-3 h-3" />
+                              <span>Download</span>
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="markdown-body text-sm sm:text-[17px] leading-relaxed font-sans tracking-wide">
                       <Markdown>{msg.text}</Markdown>
                     </div>
@@ -1486,46 +1553,17 @@ const ChatBot: React.FC<ChatBotProps> = ({
           <div className="relative group">
             <div className="absolute -inset-1 bg-gradient-to-r from-red-900/20 via-amber-500/10 to-red-900/20 rounded-2xl sm:rounded-[2rem] blur opacity-0 group-focus-within:opacity-100 transition-opacity duration-1000" />
             <div className="relative flex items-center bg-[#050506] border border-red-900/30 rounded-2xl sm:rounded-[2rem] overflow-hidden focus-within:border-amber-500/40 transition-all shadow-3xl">
-              {/* Visual capture buttons — left of textarea */}
-              <div className="flex flex-col items-center gap-1 pl-3 sm:pl-5 py-2 sm:py-3 border-r border-red-900/20 mr-2 sm:mr-3">
-                <button
-                  onClick={() => cameraInputRef.current?.click()}
-                  title="Camera"
-                  className="p-1.5 rounded-lg text-zinc-700 hover:text-amber-500 hover:bg-red-900/20 transition-all active:scale-90"
-                >
-                  <Camera className="w-4 h-4 sm:w-5 sm:h-5" />
-                </button>
-                <button
-                  onClick={() => photoInputRef.current?.click()}
-                  title="Photo library"
-                  className="p-1.5 rounded-lg text-zinc-700 hover:text-amber-500 hover:bg-red-900/20 transition-all active:scale-90"
-                >
-                  <GalleryIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-                </button>
-                <button
-                  onClick={screenStream ? stopScreenShare : startScreenShare}
-                  title={screenStream ? "Disconnect screen share" : "Start live screen share"}
-                  className={`p-1.5 rounded-lg transition-all active:scale-90 ${
-                    screenStream
-                      ? 'text-amber-400 bg-red-950 border border-amber-500/50 animate-pulse'
-                      : 'text-zinc-700 hover:text-amber-500 hover:bg-red-900/20'
-                  }`}
-                >
-                  <Monitor className="w-4 h-4 sm:w-5 sm:h-5" />
-                </button>
-              </div>
-
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
                 placeholder={attachedImage ? 'Add a directive or send as-is…' : 'State your directive...'}
-                className="flex-1 bg-transparent py-4 sm:py-7 px-3 sm:px-6 text-zinc-100 placeholder:text-zinc-800 focus:outline-none resize-none min-h-[60px] sm:min-h-[90px] text-base sm:text-lg font-serif italic tracking-wide"
+                className="flex-1 bg-transparent py-4 sm:py-6 pl-4 sm:pl-7 pr-3 text-zinc-100 placeholder:text-zinc-800 focus:outline-none resize-none min-h-[60px] sm:min-h-[85px] text-base sm:text-lg font-serif italic tracking-wide"
                 rows={1}
               />
 
-              {/* Voice Input & Transmit Controls */}
-              <div className="flex items-center gap-2 mr-3 sm:mr-6">
+              {/* Voice Input (Microphone) & Transmit Controls */}
+              <div className="flex items-center gap-2 mr-3 sm:mr-5 flex-shrink-0">
                 <VoiceInputButton
                   onTranscriptChange={(transcript) => {
                     setInput(transcript);
@@ -1538,9 +1576,10 @@ const ChatBot: React.FC<ChatBotProps> = ({
                 <button 
                   onClick={handleSend}
                   disabled={(!input.trim() && !attachedImage) || isThinking}
-                  className="p-3 sm:p-5 bg-gradient-to-br from-red-900 to-black text-amber-500 rounded-xl sm:rounded-2xl shadow-2xl hover:scale-105 active:scale-95 disabled:opacity-20 transition-all border border-amber-500/20"
+                  className="p-3 sm:p-4 bg-gradient-to-br from-red-900 to-black text-amber-500 rounded-xl sm:rounded-2xl shadow-2xl hover:scale-105 active:scale-95 disabled:opacity-20 transition-all border border-amber-500/20 cursor-pointer"
+                  title="Dispatch Directive"
                 >
-                  <Send className="w-5 sm:w-7 h-5 sm:h-7" />
+                  <Send className="w-5 sm:w-6 h-5 sm:h-6" />
                 </button>
               </div>
             </div>
@@ -1572,7 +1611,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
             onChange={(e) => { const f = e.target.files?.[0]; if (f) readImageFile(f); e.target.value = ''; }}
           />
 
-          {/* Top-Left Menu Drawer with Tactical HUD, Ali & Danielle Link Share + Avatar Customizer */}
+          {/* Top-Left Menu Drawer with All Tabs, Tactical HUD, Ali & Danielle Link Share + Media Tools */}
           <TopLeftMenu
             isOpen={isTopMenuOpen}
             onClose={() => setIsTopMenuOpen(false)}
@@ -1595,6 +1634,11 @@ const ChatBot: React.FC<ChatBotProps> = ({
             screenStream={screenStream}
             onToggleScreenShare={screenStream ? stopScreenShare : startScreenShare}
             initialTab={topMenuInitialTab}
+            onTriggerArtModal={() => setIsArtModalOpen(true)}
+            onTriggerCamera={() => cameraInputRef.current?.click()}
+            onTriggerPhoto={() => photoInputRef.current?.click()}
+            ttsEnabled={ttsEnabled}
+            onToggleTTS={toggleTTS}
           />
 
           {/* Advanced Avatar Customization Modal with Thread Scope */}
@@ -1605,6 +1649,231 @@ const ChatBot: React.FC<ChatBotProps> = ({
             currentUrl={activeAvatar}
             currentThreadTitle={currentThread?.title}
           />
+
+          {/* Desired Art Creation Modal */}
+          <AnimatePresence>
+            {isArtModalOpen && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6"
+                onClick={() => !isGeneratingArt && setIsArtModalOpen(false)}
+              >
+                <motion.div
+                  initial={{ scale: 0.92, y: 20 }}
+                  animate={{ scale: 1, y: 0 }}
+                  exit={{ scale: 0.92, y: 20 }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="w-full max-w-xl bg-gradient-to-b from-[#150a0d] via-[#0d090b] to-black border border-amber-500/40 rounded-3xl p-6 sm:p-8 shadow-[0_0_50px_rgba(245,158,11,0.2)] space-y-6"
+                >
+                  <div className="flex items-center justify-between border-b border-red-950/60 pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 rounded-xl bg-gradient-to-br from-amber-500/20 to-red-950/80 border border-amber-500/40 text-amber-400">
+                        <Sparkles className="w-5 h-5 animate-pulse" />
+                      </div>
+                      <div>
+                        <h2 className="text-base sm:text-lg font-bold bg-gradient-to-r from-amber-200 via-amber-400 to-amber-500 bg-clip-text text-transparent uppercase tracking-wider">
+                          Manifest Desired Art
+                        </h2>
+                        <p className="text-[10px] sm:text-xs text-zinc-500 font-mono">
+                          ZereØ Neural Pigment Synthesis • Principal Aesthetic
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => !isGeneratingArt && setIsArtModalOpen(false)}
+                      disabled={isGeneratingArt}
+                      className="p-2 rounded-xl text-zinc-500 hover:text-white hover:bg-red-900/20 transition-colors"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {/* Quick Inspiration Presets */}
+                  <div className="space-y-1.5">
+                    <span className="text-[9px] font-mono font-bold text-amber-400 uppercase tracking-widest block">
+                      Tactical Presets
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        'Silver 1911 on deep burgundy velvet with gold filigree',
+                        'Council Grey sovereign fortress at dusk, dramatic lighting',
+                        'Tactical cybernetic hawk perched on an obsidian obelisk',
+                        'Victorian butler study with vintage radio & tactical blueprints'
+                      ].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setArtPrompt(preset)}
+                          className="px-2.5 py-1 rounded-lg bg-zinc-900/80 hover:bg-amber-950/40 border border-red-950/50 hover:border-amber-500/40 text-[9px] font-serif text-zinc-400 hover:text-amber-300 transition-colors text-left truncate max-w-xs"
+                        >
+                          "{preset}"
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Prompt Textarea */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider block">
+                      Art Directive / Visual Description
+                    </label>
+                    <textarea
+                      value={artPrompt}
+                      onChange={(e) => setArtPrompt(e.target.value)}
+                      placeholder="Principal, describe the artwork you desire me to manifest..."
+                      rows={3}
+                      className="w-full bg-black/70 border border-red-950/60 rounded-2xl p-4 text-sm text-zinc-100 placeholder:text-zinc-700 focus:outline-none focus:border-amber-500/50 font-serif italic tracking-wide"
+                    />
+                  </div>
+
+                  {/* Style Presets */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider block">
+                      Style Profile
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {[
+                        { id: 'luxury_tactical', label: '🏰 Luxury Tactical' },
+                        { id: 'photorealistic', label: '📸 4K Photoreal' },
+                        { id: 'oil_painting', label: '🎨 Classical Oil' },
+                        { id: 'cybernetic', label: '⚡ Cybernetic' },
+                        { id: 'minimalist', label: '🌌 Concept Art' }
+                      ].map((st) => (
+                        <button
+                          key={st.id}
+                          type="button"
+                          onClick={() => setArtStyle(st.id as any)}
+                          className={`p-2.5 rounded-xl border text-xs font-mono font-bold text-center transition-all ${
+                            artStyle === st.id
+                              ? 'bg-amber-500/20 border-amber-500/60 text-amber-300 shadow-md'
+                              : 'bg-zinc-900/60 border-red-950/40 text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          {st.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Aspect Ratio Selector */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider block">
+                      Aspect Ratio
+                    </label>
+                    <div className="flex gap-2">
+                      {[
+                        { id: '1:1', label: '1:1 (Square)' },
+                        { id: '16:9', label: '16:9 (Landscape)' },
+                        { id: '9:16', label: '9:16 (Portrait)' },
+                        { id: '4:3', label: '4:3 (Standard)' }
+                      ].map((r) => (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => setArtAspectRatio(r.id as any)}
+                          className={`flex-1 py-1.5 rounded-xl border text-[10px] font-mono font-bold transition-all ${
+                            artAspectRatio === r.id
+                              ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                              : 'bg-zinc-900/60 border-red-950/40 text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          {r.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="pt-2 flex items-center justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsArtModalOpen(false)}
+                      disabled={isGeneratingArt}
+                      className="px-4 py-2 rounded-xl text-xs font-mono text-zinc-400 hover:text-white"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => executeArtCreation(artPrompt, artStyle, artAspectRatio)}
+                      disabled={!artPrompt.trim() || isGeneratingArt}
+                      className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-red-900 via-amber-600 to-amber-500 text-white font-bold text-xs uppercase tracking-wider hover:brightness-110 disabled:opacity-40 transition-all shadow-lg shadow-amber-950/40 cursor-pointer"
+                    >
+                      {isGeneratingArt ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
+                          <span>Manifesting Art...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          <span>Manifest Artwork</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Fullscreen Zoomed Artwork Modal */}
+          <AnimatePresence>
+            {zoomedImageUrl && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[150] bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center p-4 sm:p-8"
+                onClick={() => setZoomedImageUrl(null)}
+              >
+                <div className="relative max-w-5xl max-h-[85vh] w-full flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+                  <div className="w-full flex items-center justify-between pb-3 text-xs font-mono text-amber-400">
+                    <span className="uppercase tracking-widest font-bold">Artwork Inspection Mode</span>
+                    <div className="flex items-center gap-3">
+                      <a
+                        href={zoomedImageUrl}
+                        download={`zereo-artwork-${Date.now()}.png`}
+                        className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-bold flex items-center gap-1.5 transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Download Full Res</span>
+                      </a>
+                      <button
+                        onClick={() => setZoomedImageUrl(null)}
+                        className="p-1.5 rounded-lg bg-zinc-900 text-zinc-400 hover:text-white"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+                  <img
+                    src={zoomedImageUrl}
+                    alt="Zoomed art"
+                    referrerPolicy="no-referrer"
+                    className="max-h-[80vh] w-auto max-w-full object-contain rounded-2xl border border-amber-500/40 shadow-2xl"
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Toast Notification when Saved to Vault */}
+          <AnimatePresence>
+            {artVaultSavedNotice && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                className="fixed bottom-24 right-6 z-[130] px-4 py-2.5 rounded-xl bg-amber-950/90 border border-amber-500/60 text-amber-300 text-xs font-mono flex items-center gap-2 shadow-2xl backdrop-blur-md"
+              >
+                <Database className="w-4 h-4 text-amber-400" />
+                <span>{artVaultSavedNotice}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>

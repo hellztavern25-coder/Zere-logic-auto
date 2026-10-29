@@ -24,7 +24,7 @@ export const JeremyIronsVoiceControl: React.FC<JeremyIronsVoiceControlProps> = (
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [currentText, setCurrentText] = useState('');
   const [activeProfile, setActiveProfile] = useState<VoiceModulationProfile>(() => {
-    return jeremyIronsVoice.getLegacyProfile() || 'Iron-Adaptive';
+    return jeremyIronsVoice.getLegacyProfile() || 'Jeremy-Irons-Signature';
   });
   const [config, setConfig] = useState<JeremyIronsConfig>(() => {
     try {
@@ -154,19 +154,21 @@ export const JeremyIronsVoiceControl: React.FC<JeremyIronsVoiceControlProps> = (
                       Voice Modulation Profile
                     </label>
                     <span className="text-[8px] font-mono text-amber-400 uppercase font-bold">
-                      {activeProfile === 'Iron-Adaptive' ? '★ Identity' : activeProfile}
+                      {activeProfile === 'Jeremy-Irons-Signature' ? '★ Signature Default' : activeProfile}
                     </span>
                   </div>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {(['Iron-Adaptive', 'Clinical-Analytical', 'Subtle-Steward'] as VoiceModulationProfile[]).map((pKey) => {
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(['Jeremy-Irons-Signature', 'Iron-Adaptive', 'Clinical-Analytical', 'Subtle-Steward'] as VoiceModulationProfile[]).map((pKey) => {
                       const isCur = activeProfile === pKey;
+                      const label = pKey === 'Jeremy-Irons-Signature' ? 'Signature' : pKey === 'Iron-Adaptive' ? 'Canonical' : pKey === 'Clinical-Analytical' ? 'Clinical' : 'Subtle';
+                      const sub = pKey === 'Jeremy-Irons-Signature' ? 'Gravitas ★' : pKey === 'Iron-Adaptive' ? 'Adaptive' : pKey === 'Clinical-Analytical' ? 'Analytical' : 'Intimate';
                       return (
                         <button
                           key={pKey}
                           onClick={() => handleProfileSelect(pKey)}
                           className={`p-1.5 rounded-lg border text-[9px] font-mono font-bold uppercase transition-all flex flex-col items-center text-center ${
                             isCur
-                              ? pKey === 'Iron-Adaptive'
+                              ? pKey === 'Jeremy-Irons-Signature' || pKey === 'Iron-Adaptive'
                                 ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 ring-1 ring-amber-500/30'
                                 : pKey === 'Clinical-Analytical'
                                 ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/60 ring-1 ring-cyan-500/30'
@@ -174,8 +176,7 @@ export const JeremyIronsVoiceControl: React.FC<JeremyIronsVoiceControlProps> = (
                               : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:border-zinc-700'
                           }`}
                         >
-                          <span className="truncate w-full">{pKey === 'Iron-Adaptive' ? 'Iron' : pKey === 'Clinical-Analytical' ? 'Clinical' : 'Subtle'}</span>
-                          <span className="text-[7px] text-zinc-500 font-normal">{pKey === 'Iron-Adaptive' ? 'Identity' : pKey === 'Clinical-Analytical' ? 'Analytical' : 'Intimate'}</span>
+                          <span className="truncate w-full">{label}</span>
                         </button>
                       );
                     })}

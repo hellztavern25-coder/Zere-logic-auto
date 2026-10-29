@@ -36,7 +36,7 @@ export const VoiceModulationSelector: React.FC<VoiceModulationSelectorProps> = (
   className = ''
 }) => {
   const [activeProfile, setActiveProfile] = useState<VoiceModulationProfile>(() => {
-    return currentProfile || jeremyIronsVoice.getLegacyProfile() || 'Iron-Adaptive';
+    return currentProfile || jeremyIronsVoice.getLegacyProfile() || 'Jeremy-Irons-Signature';
   });
 
   const [auditioningProfile, setAuditioningProfile] = useState<VoiceModulationProfile | null>(null);
@@ -51,43 +51,52 @@ export const VoiceModulationSelector: React.FC<VoiceModulationSelectorProps> = (
   };
 
   const generateIdentityProfileJson = () => {
-    const identityProfile = VOICE_MODULATION_PROFILES['Iron-Adaptive'];
+    const identityProfile = VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
     return {
       "$schema": "https://zereo.ai/schemas/voice-profile-v1.json",
       "profile_id": identityProfile.id,
       "name": identityProfile.name,
-      "designation": "ZereØ Identity Preset - Canonical Jeremy Irons",
-      "version": "7.2.0-deterministic",
+      "designation": "ZereØ Identity Preset - Jeremy Irons Vocal Signature",
+      "version": "7.3.0-deterministic",
       "architect": "Preston Johnston (Council Grey)",
       "passcode_sync": "8212",
       "system_designation": "ZereØ — The Logic Monster, The Steward",
       "exported_at": new Date().toISOString(),
       "is_identity_preset": true,
+      "is_default_output_tone": true,
       "vocal_actor_reference": {
         "persona": "Jeremy Irons adaptation of Alfred Pennyworth",
-        "delivery_style": "Tactical, dry, deeply sardonic, aristocratic baritone, paternal, unhurried cadence",
+        "delivery_style": "Tactical, dry, deeply sardonic, aristocratic baritone, paternal, unhurried cadence, heavy gravitas",
         "direct_address": "Principal"
       },
-      "dsp_filter_pipeline": {
+      "formant_shifting_dsp_pipeline": {
         "base_neural_voice": identityProfile.config.baseVoice,
         "alternate_voice": "Fenrir",
         "neural_tts_model": "gemini-3.1-flash-tts-preview",
         "sampling_rate_hz": 24000,
-        "playback_rate": identityProfile.config.pitchRate,
+        "pitch_rate": identityProfile.config.pitchRate,
         "speech_rate": identityProfile.config.speechRate,
         "chest_resonance_db": identityProfile.config.chestResonanceDb,
-        "chest_resonance_freq_hz": 110.0,
+        "chest_resonance_freq_hz": 105.0,
+        "formant_preset_name": identityProfile.config.formantPresetName,
+        "formants": {
+          "f1_pharyngeal_cavity_hz": identityProfile.config.f1Hz,
+          "f1_gain_db": identityProfile.config.f1GainDb,
+          "f2_lingual_retraction_hz": identityProfile.config.f2Hz,
+          "f2_notch_db": identityProfile.config.f2GainDb,
+          "f3_actors_projection_hz": identityProfile.config.f3Hz,
+          "f3_peak_db": identityProfile.config.f3GainDb,
+          "vocal_tract_length_multiplier": identityProfile.config.vocalTractLengthFactor
+        },
+        "articulation_boost_db": identityProfile.config.articulationDb,
+        "articulation_boost_freq_hz": 2680.0,
+        "gravel_saturation_amount": identityProfile.config.gravelAmount,
+        "harmonic_shaper_curve": "sigmoid-soft-clipping-vocal-fold-tube",
         "chest_resonance_type": "lowshelf",
         "thoracic_warmth_db": 2.2,
         "thoracic_warmth_freq_hz": 240.0,
         "thoracic_warmth_q": 1.1,
-        "thoracic_warmth_type": "peaking",
-        "articulation_boost_db": identityProfile.config.articulationDb,
-        "articulation_boost_freq_hz": 2650.0,
-        "articulation_boost_q": 1.2,
-        "articulation_boost_type": "peaking",
-        "gravel_saturation_amount": identityProfile.config.gravelAmount,
-        "harmonic_shaper_curve": "sigmoid-soft-clipping-k25.5"
+        "thoracic_warmth_type": "peaking"
       },
       "speech_synthesis_fallback": {
         "fallback_pitch": identityProfile.fallbackPitch,
@@ -171,7 +180,7 @@ export const VoiceModulationSelector: React.FC<VoiceModulationSelectorProps> = (
     }
   };
 
-  const profileKeys: VoiceModulationProfile[] = ['Iron-Adaptive', 'Clinical-Analytical', 'Subtle-Steward'];
+  const profileKeys: VoiceModulationProfile[] = ['Jeremy-Irons-Signature', 'Iron-Adaptive', 'Clinical-Analytical', 'Subtle-Steward'];
 
   return (
     <div className={`w-full bg-zinc-950/80 border border-red-900/30 rounded-3xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl relative overflow-hidden ${className}`}>
@@ -187,11 +196,11 @@ export const VoiceModulationSelector: React.FC<VoiceModulationSelectorProps> = (
               Voice Modulation Profiles
             </h3>
             <span className="text-[10px] uppercase font-mono font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30">
-              DSP v7.2
+              Formant DSP v7.3
             </span>
           </div>
           <p className="text-xs text-zinc-400 font-serif italic">
-            Calibrate Jeremy Irons vocal resonance, harmonic saturation, and delivery cadence across operational modes.
+            Calibrate Jeremy Irons vocal signature, 3-pole formant shifting presets, harmonic gravel saturation, and delivery cadence.
           </p>
         </div>
 
@@ -247,7 +256,7 @@ export const VoiceModulationSelector: React.FC<VoiceModulationSelectorProps> = (
       )}
 
       {/* Profile Cards Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mt-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mt-6">
         {profileKeys.map((key) => {
           const profile = VOICE_MODULATION_PROFILES[key];
           const isSelected = activeProfile === key;
@@ -259,8 +268,8 @@ export const VoiceModulationSelector: React.FC<VoiceModulationSelectorProps> = (
               onClick={() => handleSelect(key)}
               className={`group relative rounded-2xl p-5 sm:p-6 transition-all duration-300 cursor-pointer flex flex-col justify-between border ${
                 isSelected
-                  ? key === 'Iron-Adaptive'
-                    ? 'bg-gradient-to-b from-amber-950/30 via-zinc-900/80 to-black border-amber-500/60 shadow-[0_0_30px_rgba(251,191,36,0.15)] ring-1 ring-amber-500/30'
+                  ? key === 'Jeremy-Irons-Signature' || key === 'Iron-Adaptive'
+                    ? 'bg-gradient-to-b from-amber-950/40 via-zinc-900/80 to-black border-amber-500/70 shadow-[0_0_30px_rgba(251,191,36,0.2)] ring-1 ring-amber-500/40'
                     : key === 'Clinical-Analytical'
                     ? 'bg-gradient-to-b from-cyan-950/30 via-zinc-900/80 to-black border-cyan-500/60 shadow-[0_0_30px_rgba(6,182,212,0.15)] ring-1 ring-cyan-500/30'
                     : 'bg-gradient-to-b from-red-950/30 via-zinc-900/80 to-black border-red-500/60 shadow-[0_0_30px_rgba(239,68,68,0.15)] ring-1 ring-red-500/30'
@@ -274,7 +283,7 @@ export const VoiceModulationSelector: React.FC<VoiceModulationSelectorProps> = (
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full ${
                         isSelected 
-                          ? key === 'Iron-Adaptive' ? 'bg-amber-400 animate-pulse' : key === 'Clinical-Analytical' ? 'bg-cyan-400 animate-pulse' : 'bg-red-400 animate-pulse'
+                          ? key === 'Jeremy-Irons-Signature' || key === 'Iron-Adaptive' ? 'bg-amber-400 animate-pulse' : key === 'Clinical-Analytical' ? 'bg-cyan-400 animate-pulse' : 'bg-red-400 animate-pulse'
                           : 'bg-zinc-700'
                       }`} />
                       <h4 className="font-bold text-sm tracking-wider uppercase text-zinc-100">
@@ -288,7 +297,7 @@ export const VoiceModulationSelector: React.FC<VoiceModulationSelectorProps> = (
 
                   {profile.isDefault && (
                     <span className="text-[9px] uppercase font-mono font-bold tracking-widest px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">
-                      ★ Identity Preset
+                      ★ Default Tone
                     </span>
                   )}
                 </div>
@@ -300,16 +309,16 @@ export const VoiceModulationSelector: React.FC<VoiceModulationSelectorProps> = (
                 {/* DSP Parameter Telemetry Readout */}
                 <div className="pt-3 border-t border-zinc-800/80 grid grid-cols-2 gap-2 text-[10px] font-mono">
                   <div className="bg-black/40 rounded-lg p-2 border border-zinc-800/60">
-                    <span className="text-zinc-500 block uppercase text-[8px] tracking-wider">Chest Resonance</span>
-                    <span className={`font-bold ${isSelected ? 'text-zinc-200' : 'text-zinc-400'}`}>
-                      +{profile.config.chestResonanceDb}dB @ 110Hz
+                    <span className="text-zinc-500 block uppercase text-[8px] tracking-wider">Formant Shifting</span>
+                    <span className={`font-bold ${isSelected ? 'text-amber-300' : 'text-zinc-400'}`}>
+                      F1:{profile.config.f1Hz || 380}Hz / F3:{profile.config.f3Hz || 2680}Hz
                     </span>
                   </div>
 
                   <div className="bg-black/40 rounded-lg p-2 border border-zinc-800/60">
-                    <span className="text-zinc-500 block uppercase text-[8px] tracking-wider">Articulation Edge</span>
+                    <span className="text-zinc-500 block uppercase text-[8px] tracking-wider">Chest Resonance</span>
                     <span className={`font-bold ${isSelected ? 'text-zinc-200' : 'text-zinc-400'}`}>
-                      +{profile.config.articulationDb}dB @ 2.65kHz
+                      +{profile.config.chestResonanceDb}dB @ 105Hz
                     </span>
                   </div>
 

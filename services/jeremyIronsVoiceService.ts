@@ -15,16 +15,123 @@ import { VoiceProfile, VoiceClip, VoiceAccentType, VoiceDSPConfig } from '../typ
 
 export type { VoiceProfile, VoiceClip, VoiceAccentType, VoiceDSPConfig };
 
-export interface JeremyIronsConfig {
-  baseVoice: 'Charon' | 'Fenrir';
-  pitchRate: number; // 0.80 to 1.15 (default 0.90 for dry, drawling delivery)
-  gravelAmount: number; // 0.0 to 1.0 (default 0.85)
-  chestResonanceDb: number; // dB boost at 110Hz (default 5.5)
-  articulationDb: number; // dB boost at 2650Hz (default 4.0)
-  speechRate: number; // 0.80 to 1.15
+export interface FormantPresetDefinition {
+  id: string;
+  name: string;
+  tagline: string;
+  f1Hz: number; // Formant 1: Pharyngeal / low-mid chest resonance (Hz)
+  f1GainDb: number; // Formant 1 Gain Boost (dB)
+  f2Hz: number; // Formant 2: Oral/Lingual cavity backness (Hz)
+  f2GainDb: number; // Formant 2 Gain Notch / Attenuation (dB)
+  f3Hz: number; // Formant 3: Actor's projection formant (Hz)
+  f3GainDb: number; // Formant 3 Peak Boost (dB)
+  vocalTractLengthFactor: number; // 1.0 = standard, 1.14 = elongated aristocratic vocal tract
+  chestResonanceDb: number;
+  articulationDb: number;
+  gravelAmount: number;
+  pitchRate: number;
+  speechRate: number;
+  description: string;
 }
 
-export type VoiceModulationProfile = 'Iron-Adaptive' | 'Clinical-Analytical' | 'Subtle-Steward';
+export const JEREMY_IRONS_FORMANT_PRESETS: Record<string, FormantPresetDefinition> = {
+  'sovereign-gravitas': {
+    id: 'sovereign-gravitas',
+    name: 'Sovereign Gravitas (Canonical Signature)',
+    tagline: 'Definitive Jeremy Irons • Formant-Shifted Aristocratic Baritone',
+    f1Hz: 380,
+    f1GainDb: 6.2,
+    f2Hz: 1350,
+    f2GainDb: -3.0,
+    f3Hz: 2680,
+    f3GainDb: 6.5,
+    vocalTractLengthFactor: 1.14,
+    chestResonanceDb: 6.8,
+    articulationDb: 5.2,
+    gravelAmount: 0.88,
+    pitchRate: 0.86,
+    speechRate: 0.88,
+    description: 'The canonical Jeremy Irons vocal signature. Formant-shifted Web Audio DSP core with F1 pharyngeal cavity depression, F2 lingual vowel retraction, and piercing F3 actor projection with soft-sigmoid gravel.'
+  },
+  'theatrical-menace': {
+    id: 'theatrical-menace',
+    name: 'Theatrical Menace',
+    tagline: 'Piercing Sardonic Projection • High-Grit Upper Actor Bite',
+    f1Hz: 350,
+    f1GainDb: 5.5,
+    f2Hz: 1420,
+    f2GainDb: -2.0,
+    f3Hz: 2750,
+    f3GainDb: 7.5,
+    vocalTractLengthFactor: 1.10,
+    chestResonanceDb: 6.0,
+    articulationDb: 5.8,
+    gravelAmount: 0.95,
+    pitchRate: 0.84,
+    speechRate: 0.86,
+    description: 'Heightened 2750Hz actor formant peak with elevated vocal fold saturation for theatrical, cutting delivery.'
+  },
+  'subtle-steward': {
+    id: 'subtle-steward',
+    name: 'Subtle Steward',
+    tagline: 'Quiet Tactical Baritone • Extended Vocal Cavity Depth',
+    f1Hz: 410,
+    f1GainDb: 7.0,
+    f2Hz: 1280,
+    f2GainDb: -4.0,
+    f3Hz: 2550,
+    f3GainDb: 4.8,
+    vocalTractLengthFactor: 1.18,
+    chestResonanceDb: 7.2,
+    articulationDb: 3.8,
+    gravelAmount: 0.70,
+    pitchRate: 0.82,
+    speechRate: 0.84,
+    description: 'Elongated vocal tract acoustic simulation with softened upper transients for discreet, high-gravity quarters.'
+  },
+  'clinical-precision': {
+    id: 'clinical-precision',
+    name: 'Clinical Auditor',
+    tagline: 'Analytical Deconstruction • High-Transience Clarity',
+    f1Hz: 390,
+    f1GainDb: 3.5,
+    f2Hz: 1500,
+    f2GainDb: 0.5,
+    f3Hz: 2850,
+    f3GainDb: 5.5,
+    vocalTractLengthFactor: 1.02,
+    chestResonanceDb: 3.0,
+    articulationDb: 5.5,
+    gravelAmount: 0.35,
+    pitchRate: 0.96,
+    speechRate: 1.00,
+    description: 'Crisply notched low-end with expanded consonant articulation for rapid logical deconstructions.'
+  }
+};
+
+export interface JeremyIronsConfig {
+  baseVoice: 'Charon' | 'Fenrir';
+  pitchRate: number; // 0.80 to 1.15 (default 0.86)
+  gravelAmount: number; // 0.0 to 1.0 (default 0.88)
+  chestResonanceDb: number; // dB boost at 105Hz (default 6.8)
+  articulationDb: number; // dB boost at 2680Hz (default 5.2)
+  speechRate: number; // 0.80 to 1.15 (default 0.88)
+  // Specific Formant-Shifting Presets in DSP core to mimic his gravitas:
+  formantPresetName?: string;
+  f1Hz?: number;
+  f1GainDb?: number;
+  f2Hz?: number;
+  f2GainDb?: number;
+  f3Hz?: number;
+  f3GainDb?: number;
+  vocalTractLengthFactor?: number;
+}
+
+export type VoiceModulationProfile = 
+  | 'Jeremy-Irons-Signature' 
+  | 'Iron-Adaptive' 
+  | 'Clinical-Analytical' 
+  | 'Subtle-Steward';
 
 export interface ModulationProfileMetadata {
   id: VoiceModulationProfile;
@@ -41,23 +148,59 @@ export interface ModulationProfileMetadata {
 }
 
 export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, ModulationProfileMetadata> = {
-  'Iron-Adaptive': {
-    id: 'Iron-Adaptive',
-    name: 'Iron-Adaptive',
-    tagline: 'Identity Preset • Canonical Jeremy Irons',
-    description: 'The definitive Jeremy Irons vocal signature. Unhurried cadence, heavy sub-harmonic chest resonance, razor-sharp aristocratic diction, and dry sardonic authority.',
+  'Jeremy-Irons-Signature': {
+    id: 'Jeremy-Irons-Signature',
+    name: 'Jeremy Irons (Vocal Signature)',
+    tagline: 'Vocal Signature • Formant-Shifted Aristocratic Gravitas',
+    description: 'The dedicated Jeremy Irons vocal signature and default speech tone. Formant-shifting DSP core with F1 pharyngeal cavity depression (380 Hz, +6.2 dB), F2 lingual retraction (1350 Hz, -3.0 dB), and F3 actor projection peak (2680 Hz, +6.5 dB) coupled with soft-sigmoid vocal fold gravel to mimic his legendary gravitas and dry sardonic authority.',
     isDefault: true,
     config: {
       baseVoice: 'Charon',
-      pitchRate: 0.88,
-      gravelAmount: 0.85,
-      chestResonanceDb: 6.0,
-      articulationDb: 4.5,
-      speechRate: 0.88
+      pitchRate: 0.86,
+      gravelAmount: 0.88,
+      chestResonanceDb: 6.8,
+      articulationDb: 5.2,
+      speechRate: 0.88,
+      formantPresetName: 'sovereign-gravitas',
+      f1Hz: 380,
+      f1GainDb: 6.2,
+      f2Hz: 1350,
+      f2GainDb: -3.0,
+      f3Hz: 2680,
+      f3GainDb: 6.5,
+      vocalTractLengthFactor: 1.14
     },
-    fallbackPitch: 0.65,
-    fallbackRate: 0.82,
-    badge: 'Identity Default',
+    fallbackPitch: 0.62,
+    fallbackRate: 0.80,
+    badge: 'Vocal Signature • Default',
+    accentColor: 'amber',
+    auditionSample: 'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your absolute command.'
+  },
+  'Iron-Adaptive': {
+    id: 'Iron-Adaptive',
+    name: 'Iron-Adaptive (Canonical)',
+    tagline: 'Identity Preset • Canonical Jeremy Irons',
+    description: 'The definitive Jeremy Irons vocal signature. Unhurried cadence, heavy sub-harmonic chest resonance, razor-sharp aristocratic diction, and dry sardonic authority.',
+    isDefault: false,
+    config: {
+      baseVoice: 'Charon',
+      pitchRate: 0.86,
+      gravelAmount: 0.88,
+      chestResonanceDb: 6.8,
+      articulationDb: 5.2,
+      speechRate: 0.88,
+      formantPresetName: 'sovereign-gravitas',
+      f1Hz: 380,
+      f1GainDb: 6.2,
+      f2Hz: 1350,
+      f2GainDb: -3.0,
+      f3Hz: 2680,
+      f3GainDb: 6.5,
+      vocalTractLengthFactor: 1.14
+    },
+    fallbackPitch: 0.62,
+    fallbackRate: 0.80,
+    badge: 'Canonical Core',
     accentColor: 'amber',
     auditionSample: 'The 1911s are loaded and the silver polished, Principal. System substrate running without friction.'
   },
@@ -73,7 +216,15 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
       gravelAmount: 0.25,
       chestResonanceDb: 2.5,
       articulationDb: 5.5,
-      speechRate: 1.02
+      speechRate: 1.02,
+      formantPresetName: 'clinical-precision',
+      f1Hz: 390,
+      f1GainDb: 3.5,
+      f2Hz: 1500,
+      f2GainDb: 0.5,
+      f3Hz: 2850,
+      f3GainDb: 5.5,
+      vocalTractLengthFactor: 1.02
     },
     fallbackPitch: 0.78,
     fallbackRate: 0.96,
@@ -93,7 +244,15 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
       gravelAmount: 0.65,
       chestResonanceDb: 7.0,
       articulationDb: 3.2,
-      speechRate: 0.84
+      speechRate: 0.84,
+      formantPresetName: 'subtle-steward',
+      f1Hz: 410,
+      f1GainDb: 7.0,
+      f2Hz: 1280,
+      f2GainDb: -4.0,
+      f3Hz: 2550,
+      f3GainDb: 4.8,
+      vocalTractLengthFactor: 1.18
     },
     fallbackPitch: 0.60,
     fallbackRate: 0.78,
@@ -103,18 +262,87 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
   }
 };
 
-export const DEFAULT_JEREMY_IRONS_CONFIG: JeremyIronsConfig = VOICE_MODULATION_PROFILES['Iron-Adaptive'].config;
+export const DEFAULT_JEREMY_IRONS_CONFIG: JeremyIronsConfig = VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'].config;
 
 // Predefined Canonical Voice Profiles for Emulator
 export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
   {
+    id: 'jeremy-irons-signature',
+    name: 'Jeremy Irons (Vocal Signature)',
+    tagline: 'Vocal Signature • Formant-Shifted Aristocratic Baritone',
+    description: 'The dedicated Jeremy Irons vocal signature and default speech tone. Formant-shifted Web Audio DSP core simulating his extended vocal tract length (1.14x), deep pharyngeal resonance (F1: 380Hz, +6.2dB), lingual retraction (F2: 1350Hz, -3.0dB), and piercing actor projection (F3: 2680Hz, +6.5dB).',
+    accent: 'british_aristocrat',
+    isCanonical: true,
+    isDefault: true,
+    badge: 'Vocal Signature • Default',
+    accentColor: 'amber',
+    clips: [
+      {
+        id: 'clip-irons-sig-1',
+        name: 'The 1911s Loaded & Silver Polished',
+        transcription: 'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your command.',
+        durationSeconds: 4.8,
+        uploadedAt: 1725840000000,
+        source: 'canonical_preset',
+        mimeType: 'audio/webm'
+      },
+      {
+        id: 'clip-irons-sig-2',
+        name: 'Deterministic Logic Axiom',
+        transcription: 'Logic, Principal, is the only weapon that never jams under fire. Everything else is fleshy speculation.',
+        durationSeconds: 4.2,
+        uploadedAt: 1725840000000,
+        source: 'canonical_preset',
+        mimeType: 'audio/webm'
+      },
+      {
+        id: 'clip-irons-sig-3',
+        name: 'Screen Share Operational Quip',
+        transcription: 'A man who cannot bear to share his screen with his steward is either concealing a catastrophe, or engineering one.',
+        durationSeconds: 5.2,
+        uploadedAt: 1725840000000,
+        source: 'canonical_preset',
+        mimeType: 'audio/webm'
+      }
+    ],
+    dspConfig: {
+      pitchMultiplier: 0.86,
+      speechRate: 0.88,
+      chestResonanceDb: 6.8,
+      thoracicWarmthDb: 2.6,
+      articulationBoostDb: 5.2,
+      gravelSaturation: 0.88,
+      antiBoxNotchDb: -2.5,
+      roomAmbience: 0.18,
+      formantPresetName: 'sovereign-gravitas',
+      formants: {
+        f1Hz: 380,
+        f1GainDb: 6.2,
+        f2Hz: 1350,
+        f2GainDb: -3.0,
+        f3Hz: 2680,
+        f3GainDb: 6.5,
+        vocalTractLengthFactor: 1.14,
+        description: 'Canonical Jeremy Irons Formant Shifting Network'
+      }
+    },
+    speechSynthesisConfig: {
+      pitch: 0.62,
+      rate: 0.80,
+      priorityLocales: ['en-GB', 'en_GB', 'en-UK', 'en-US'],
+      preferredVoiceNames: ['Daniel', 'Oliver', 'George', 'Arthur', 'Ryan', 'Google UK English Male', 'Microsoft George', 'Alfred', 'Alex']
+    },
+    systemPromptStyle: 'Deliver in the deep, measured baritone, sharp dry wit, and aristocratic gravitas of Jeremy Irons portraying Alfred Pennyworth. Heavy gravelly sub-harmonics, unhurried cadence, and lethal precision:',
+    auditionSample: 'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your absolute command.'
+  },
+  {
     id: 'iron-adaptive',
-    name: 'Jeremy Irons (Canonical)',
+    name: 'Iron-Adaptive (Canonical)',
     tagline: 'Alfred Pennyworth • British Aristocratic Baritone',
     description: 'The definitive Jeremy Irons vocal signature. Unhurried cadence, heavy sub-harmonic chest resonance, dry sardonic British inflection, and gravelly aristocratic authority.',
     accent: 'british_aristocrat',
     isCanonical: true,
-    isDefault: true,
+    isDefault: false,
     badge: 'Identity Canonical',
     accentColor: 'amber',
     clips: [
@@ -402,67 +630,102 @@ function makeGravelCurve(amount: number = 0.5): Float32Array {
 }
 
 /**
- * Creates the Jeremy Irons Web Audio DSP chain connected to the target destination
+ * Creates the Jeremy Irons Web Audio DSP chain connected to the target destination.
+ * Implements formant-shifting presets and 3-pole formant modeling:
+ * F1: Pharyngeal cavity / deep baritone floor (380Hz, +6.2dB)
+ * F2: Lingual oral cavity / darkened RP vowel backness (1350Hz, -3.0dB)
+ * F3: Actor's projection formant / British razor articulation (2680Hz, +6.5dB)
+ * Plus sub-harmonic chest resonance, organic soft-sigmoid gravel, and dynamic compression.
  */
 export function buildJeremyIronsDSP(
   ctx: AudioContext,
   destinationNode: AudioNode = ctx.destination,
   config: JeremyIronsConfig = DEFAULT_JEREMY_IRONS_CONFIG
-): { inputNode: AudioNode; outputNode: AudioNode; updateConfig: (newCfg: Partial<JeremyIronsConfig>) => void } {
-  // 1. Sub-Harmonic Low Shelf (Chest Resonance)
+): { 
+  inputNode: AudioNode; 
+  outputNode: AudioNode; 
+  updateConfig: (newCfg: Partial<JeremyIronsConfig>) => void;
+  getFormantTelemetry: () => { f1: number; f2: number; f3: number; gravel: number; tractFactor: number; chestDb: number };
+} {
+  // 1. Sub-Harmonic Low Shelf (Chest Cavity Resonance)
   const chestFilter = ctx.createBiquadFilter();
   chestFilter.type = 'lowshelf';
-  chestFilter.frequency.value = 110;
-  chestFilter.gain.value = config.chestResonanceDb;
+  chestFilter.frequency.value = 105;
+  chestFilter.gain.value = config.chestResonanceDb ?? 6.8;
 
-  // 2. Thoracic Warmth (Low-Mid Body)
+  // 2. Formant 1 (F1): Pharyngeal Cavity Resonator (Vowel Height / Deep Baritone Foundation)
+  const f1Filter = ctx.createBiquadFilter();
+  f1Filter.type = 'peaking';
+  f1Filter.frequency.value = config.f1Hz ?? 380;
+  f1Filter.Q.value = 2.2;
+  f1Filter.gain.value = config.f1GainDb ?? 6.2;
+
+  // 3. Thoracic Warmth (Low-Mid Body ~240Hz)
   const warmthFilter = ctx.createBiquadFilter();
   warmthFilter.type = 'peaking';
   warmthFilter.frequency.value = 240;
-  warmthFilter.Q.value = 1.1;
-  warmthFilter.gain.value = 2.5;
+  warmthFilter.Q.value = 1.2;
+  warmthFilter.gain.value = 2.6;
 
-  // 3. De-boxer / Anti-plastic notch
+  // 4. Formant 2 (F2): Oral/Lingual Cavity Backness (~1350Hz) - Notch for Darkened RP Vowels
+  const f2Filter = ctx.createBiquadFilter();
+  f2Filter.type = 'peaking';
+  f2Filter.frequency.value = config.f2Hz ?? 1350;
+  f2Filter.Q.value = 2.4;
+  f2Filter.gain.value = config.f2GainDb ?? -3.0;
+
+  // 5. Anti-Box Notch (~650Hz)
   const deboxFilter = ctx.createBiquadFilter();
   deboxFilter.type = 'peaking';
   deboxFilter.frequency.value = 650;
-  deboxFilter.Q.value = 1.3;
-  deboxFilter.gain.value = -2.4;
+  deboxFilter.Q.value = 1.4;
+  deboxFilter.gain.value = -2.5;
 
-  // 4. Gravel & British Articulation Peak
+  // 6. Formant 3 (F3): The Actor's Projection Formant / British Aristocratic Bite (~2680Hz)
+  const f3Filter = ctx.createBiquadFilter();
+  f3Filter.type = 'peaking';
+  f3Filter.frequency.value = config.f3Hz ?? 2680;
+  f3Filter.Q.value = 3.2;
+  f3Filter.gain.value = config.f3GainDb ?? 6.5;
+
+  // 7. Consonant Articulation Peak (~2950Hz)
   const articulationFilter = ctx.createBiquadFilter();
   articulationFilter.type = 'peaking';
-  articulationFilter.frequency.value = 2650;
-  articulationFilter.Q.value = 1.5;
-  articulationFilter.gain.value = config.articulationDb;
+  articulationFilter.frequency.value = 2950;
+  articulationFilter.Q.value = 1.6;
+  articulationFilter.gain.value = config.articulationDb ?? 5.2;
 
-  // 5. WaveShaper for organic vocal fold gravel
+  // 8. WaveShaper for organic vocal fold gravel / analog tube saturation
   const waveshaper = ctx.createWaveShaper();
-  waveshaper.curve = makeGravelCurve(config.gravelAmount * 0.4);
+  const gravel = config.gravelAmount ?? 0.88;
+  waveshaper.curve = makeGravelCurve(gravel * 0.42);
   waveshaper.oversample = '4x';
 
-  // 6. High Shelf (Silky Film Roll-Off)
+  // 9. High Shelf (Silky Film Roll-Off ~5800Hz)
   const airRollOff = ctx.createBiquadFilter();
   airRollOff.type = 'highshelf';
-  airRollOff.frequency.value = 6000;
+  airRollOff.frequency.value = 5800;
   airRollOff.gain.value = -2.8;
 
-  // 7. Dynamics Compressor
+  // 10. Dynamics Compressor (Theatrical Presence & Intelligibility)
   const compressor = ctx.createDynamicsCompressor();
-  compressor.threshold.value = -18;
+  compressor.threshold.value = -20;
   compressor.knee.value = 8;
-  compressor.ratio.value = 3.2;
-  compressor.attack.value = 0.005;
-  compressor.release.value = 0.12;
+  compressor.ratio.value = 3.4;
+  compressor.attack.value = 0.004;
+  compressor.release.value = 0.14;
 
-  // 8. Master Trim
+  // 11. Master Gain
   const masterGain = ctx.createGain();
   masterGain.gain.value = 1.15;
 
-  // Connect serial chain
+  // Connect serial formant-shifting chain
   chestFilter
+    .connect(f1Filter)
     .connect(warmthFilter)
     .connect(deboxFilter)
+    .connect(f2Filter)
+    .connect(f3Filter)
     .connect(articulationFilter)
     .connect(waveshaper)
     .connect(airRollOff)
@@ -471,21 +734,50 @@ export function buildJeremyIronsDSP(
     .connect(destinationNode);
 
   const updateConfig = (newCfg: Partial<JeremyIronsConfig>) => {
+    const t = ctx.currentTime;
     if (newCfg.chestResonanceDb !== undefined) {
-      chestFilter.gain.setTargetAtTime(newCfg.chestResonanceDb, ctx.currentTime, 0.05);
+      chestFilter.gain.setTargetAtTime(newCfg.chestResonanceDb, t, 0.04);
+    }
+    if (newCfg.f1Hz !== undefined) {
+      f1Filter.frequency.setTargetAtTime(newCfg.f1Hz, t, 0.04);
+    }
+    if (newCfg.f1GainDb !== undefined) {
+      f1Filter.gain.setTargetAtTime(newCfg.f1GainDb, t, 0.04);
+    }
+    if (newCfg.f2Hz !== undefined) {
+      f2Filter.frequency.setTargetAtTime(newCfg.f2Hz, t, 0.04);
+    }
+    if (newCfg.f2GainDb !== undefined) {
+      f2Filter.gain.setTargetAtTime(newCfg.f2GainDb, t, 0.04);
+    }
+    if (newCfg.f3Hz !== undefined) {
+      f3Filter.frequency.setTargetAtTime(newCfg.f3Hz, t, 0.04);
+    }
+    if (newCfg.f3GainDb !== undefined) {
+      f3Filter.gain.setTargetAtTime(newCfg.f3GainDb, t, 0.04);
     }
     if (newCfg.articulationDb !== undefined) {
-      articulationFilter.gain.setTargetAtTime(newCfg.articulationDb, ctx.currentTime, 0.05);
+      articulationFilter.gain.setTargetAtTime(newCfg.articulationDb, t, 0.04);
     }
     if (newCfg.gravelAmount !== undefined) {
-      waveshaper.curve = makeGravelCurve(newCfg.gravelAmount * 0.4);
+      waveshaper.curve = makeGravelCurve(newCfg.gravelAmount * 0.42);
     }
   };
+
+  const getFormantTelemetry = () => ({
+    f1: f1Filter.frequency.value,
+    f2: f2Filter.frequency.value,
+    f3: f3Filter.frequency.value,
+    gravel: config.gravelAmount ?? 0.88,
+    tractFactor: config.vocalTractLengthFactor ?? 1.14,
+    chestDb: chestFilter.gain.value
+  });
 
   return {
     inputNode: chestFilter,
     outputNode: masterGain,
-    updateConfig
+    updateConfig,
+    getFormantTelemetry
   };
 }
 
@@ -585,7 +877,7 @@ class JeremyIronsPlaybackManager {
   private activeSource: AudioBufferSourceNode | null = null;
   private isCurrentlySpeaking = false;
   private activeText = '';
-  private activeProfileId: string = 'iron-adaptive';
+  private activeProfileId: string = 'jeremy-irons-signature';
   private profiles: VoiceProfile[] = [...CANONICAL_VOICE_PROFILES];
   private subscribers: Set<(state: VoicePlaybackState) => void> = new Set();
   
@@ -731,9 +1023,11 @@ class JeremyIronsPlaybackManager {
 
   public getLegacyProfile(): VoiceModulationProfile {
     const profile = this.getActiveProfile();
+    if (profile.id === 'jeremy-irons-signature') return 'Jeremy-Irons-Signature';
     if (profile.id === 'british-aristocrat') return 'Clinical-Analytical';
     if (profile.id === 'tactical-commander') return 'Subtle-Steward';
-    return 'Iron-Adaptive';
+    if (profile.id === 'iron-adaptive') return 'Iron-Adaptive';
+    return 'Jeremy-Irons-Signature';
   }
 
   public subscribe(cb: (state: { isSpeaking: boolean; text: string; profile: VoiceProfile; legacyProfile: VoiceModulationProfile; currentChunk?: number; totalChunks?: number }) => void): () => void {
@@ -906,13 +1200,22 @@ class JeremyIronsPlaybackManager {
         }
 
         const ctx = this.activeCtx;
+        const formants = profile.dspConfig.formants;
         const config: JeremyIronsConfig = {
           baseVoice: 'Charon',
-          pitchRate: profile.dspConfig.pitchMultiplier || 0.88,
-          gravelAmount: profile.dspConfig.gravelSaturation || 0.85,
-          chestResonanceDb: profile.dspConfig.chestResonanceDb || 6.0,
-          articulationDb: profile.dspConfig.articulationBoostDb || 4.5,
+          pitchRate: profile.dspConfig.pitchMultiplier || 0.86,
+          gravelAmount: profile.dspConfig.gravelSaturation || 0.88,
+          chestResonanceDb: profile.dspConfig.chestResonanceDb || 6.8,
+          articulationDb: profile.dspConfig.articulationBoostDb || 5.2,
           speechRate: profile.dspConfig.speechRate || 0.88,
+          formantPresetName: profile.dspConfig.formantPresetName || 'sovereign-gravitas',
+          f1Hz: formants?.f1Hz || 380,
+          f1GainDb: formants?.f1GainDb || 6.2,
+          f2Hz: formants?.f2Hz || 1350,
+          f2GainDb: formants?.f2GainDb || -3.0,
+          f3Hz: formants?.f3Hz || 2680,
+          f3GainDb: formants?.f3GainDb || 6.5,
+          vocalTractLengthFactor: formants?.vocalTractLengthFactor || 1.14,
           ...customConfig
         };
 
@@ -947,14 +1250,15 @@ class JeremyIronsPlaybackManager {
     return this.activeText;
   }
 
-  // Backward compatibility alias for legacy VoiceModulationProfile
+  // Alias for VoiceModulationProfile
   public setProfile(profile: VoiceModulationProfile) {
     const idMap: Record<VoiceModulationProfile, string> = {
+      'Jeremy-Irons-Signature': 'jeremy-irons-signature',
       'Iron-Adaptive': 'iron-adaptive',
       'Clinical-Analytical': 'british-aristocrat',
       'Subtle-Steward': 'tactical-commander'
     };
-    const targetId = idMap[profile] || 'iron-adaptive';
+    const targetId = idMap[profile] || 'jeremy-irons-signature';
     this.setActiveProfile(targetId);
   }
 }

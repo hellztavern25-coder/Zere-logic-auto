@@ -2,6 +2,7 @@
 export enum AppTab {
   HOME = 'Home',
   CHAT = 'Chat',
+  FILES = 'Files',
   ASSISTANT = 'Assistant',
   CREATIVE = 'Creative',
   VOICE = 'Voice',
@@ -13,7 +14,8 @@ export enum AppTab {
   SHARE = 'Share',
   SYSTEM = 'System',
   WORKSHOP = 'Workshop',
-  SNAPSHOT = 'Snapshot'
+  SNAPSHOT = 'Snapshot',
+  ACOUSTIC_ROOM = 'AcousticRoom'
 }
 
 export type DaemonStatus = 'RUNNING' | 'PAUSED' | 'SWEEPING' | 'DISPATCHING' | 'IDLE';
@@ -153,6 +155,13 @@ export interface ChatMessage {
   isDoorman?: boolean;
   imageData?: string;
   imageMime?: string;
+  generatedArt?: {
+    prompt: string;
+    imageUrl: string;
+    title?: string;
+    aspectRatio?: string;
+    style?: string;
+  };
   emotionalMap?: EmotionalMap;
 }
 
@@ -211,6 +220,17 @@ export interface VoiceClip {
   mimeType?: string;
 }
 
+export interface FormantShiftPreset {
+  f1Hz: number;
+  f1GainDb: number;
+  f2Hz: number;
+  f2GainDb: number;
+  f3Hz: number;
+  f3GainDb: number;
+  vocalTractLengthFactor: number;
+  description?: string;
+}
+
 export interface VoiceDSPConfig {
   pitchMultiplier: number;
   speechRate: number;
@@ -220,6 +240,8 @@ export interface VoiceDSPConfig {
   gravelSaturation: number;
   antiBoxNotchDb: number;
   roomAmbience: number;
+  formantPresetName?: string;
+  formants?: FormantShiftPreset;
 }
 
 export interface VoiceProfile {
@@ -349,3 +371,204 @@ export interface VoiceTonalPreset {
     customNotes?: string;
   };
 }
+
+export type VaultFileType = 'word' | 'audio' | 'video' | 'image' | 'pdf' | 'text' | 'archive' | 'other';
+
+export interface VaultFileItem {
+  id: string;
+  name: string;
+  size: number;
+  type: VaultFileType;
+  mimeType: string;
+  dataUrl?: string;
+  blob?: Blob;
+  textContent?: string;
+  htmlContent?: string;
+  wordCount?: number;
+  duration?: number;
+  resolution?: { width: number; height: number };
+  createdAt: number;
+  updatedAt: number;
+  tags: string[];
+  isPreloaded?: boolean;
+  analysisNotes?: string;
+  classification?: 'TOP SECRET / PRINCIPAL EYES ONLY' | 'OPERATIONAL INTEL' | 'ACOUSTIC INTERCEPT' | 'SURVEILLANCE TELEMETRY' | 'RESTRICTED';
+}
+
+// -------------------------------------------------------------
+// TONAL SCALE ROOM, INVARIANT FLASHCARDS & 60-BIT RECIPE TYPES
+// -------------------------------------------------------------
+
+export type ScaleSyllable = 'Do' | 'Re' | 'Mi' | 'Fa' | 'So' | 'La' | 'Ti';
+
+export interface RoomCoordinate {
+  note: string; // e.g. 'F4', 'A4', 'E4'
+  pitchClass: 'C' | 'C#' | 'D' | 'D#' | 'E' | 'F' | 'F#' | 'G' | 'G#' | 'A' | 'A#' | 'B';
+  octave: number;
+  fundamentalHz: number; // e.g. 349.23 for F4, 440.00 for A4
+  syllable: ScaleSyllable; // 'Fa', 'La', 'Mi', etc.
+  ratioFromA4: number; // e.g. 1.0 for A4, 1.5 for E4 (3:2)
+  pythagoreanSteps: number; // fifths from reference
+  isAnchor: boolean; // true for A and E (or F)
+}
+
+export interface AcousticTimbreFingerprint {
+  instrumentName: string;
+  sourceRecord: string;
+  artistOrEnsemble: string;
+  recordingYear?: number;
+  genre: string;
+  harmonicAmplitudes: number[]; // relative strength of H1, H2, H3, ... H8
+  spectralCentroidHz: number;
+  formants: {
+    f1: number;
+    f2: number;
+    f3: number;
+  };
+  attackTimeMs: number;
+  decayTimeMs: number;
+  sustainLevel: number;
+  releaseTimeMs: number;
+  gravelOrAirNoise: number; // 0.0 - 1.0
+  description: string;
+}
+
+export interface NoteFlashcard {
+  id: string;
+  targetPitch: string; // e.g. 'F4' or 'F3'
+  invariantHz: number; // e.g. 349.23
+  sourceRecord: string;
+  sourceArtist: string;
+  genre: string;
+  year?: number;
+  timbreProfile: AcousticTimbreFingerprint;
+  isolatedInvariantConfidence: number; // e.g. 99.8%
+  status: 'MASTERED' | 'TRAINING' | 'INVARIANT_LOCKED';
+  timesAudited: number;
+  notes: string;
+}
+
+export interface SixtyBitScoreToken {
+  pitchClassIdx: number; // 0-11 (4 bits)
+  octave: number; // 1-7 (3 bits)
+  durationMs: number; // 10ms - 4000ms (10 bits)
+  velocity: number; // 0-31 (5 bits)
+  timbrePresetId: number; // 0-63 (6 bits)
+  formantShapeIdx: number; // 0-15 (4 bits)
+  transientBite: number; // 0-7 (3 bits)
+  lyricPhoneme?: string; // compressed phonetic token
+  calculatedBits: number; // ~60 bits total
+}
+
+export interface RecipePerformancePiece {
+  id: string;
+  title: string;
+  composerOrOrigin: string;
+  totalTokens: number;
+  rawPcmSizeKb: number; // Size if stored as uncompressed WAV
+  pinPrickRecipeSizeBits: number; // Size stored as 60-bit recipe
+  compressionRatio: number; // e.g. 21,500 : 1
+  tokens: SixtyBitScoreToken[];
+}
+
+export interface ClosedLoopEarAudit {
+  isListening: boolean;
+  detectedPitchHz: number | null;
+  nearestNote: string | null;
+  centsCentsOffset: number | null;
+  confidence: number;
+  timbreMatchScore: number; // 0 - 100% match with Jeremy Irons target
+  targetFormants: { f1: number; f2: number; f3: number };
+  detectedFormants: { f1: number; f2: number; f3: number };
+  auditStatus: 'CALIBRATING' | 'LOCK_OPTIMAL' | 'DEVIATION_HIGH' | 'IDLE';
+}
+
+// -------------------------------------------------------------
+// 6. ANCHOR ENGINE & PITCH FIELD INTERPOLATION
+// -------------------------------------------------------------
+
+export interface AnchorOctaveValue {
+  note: string; // e.g. 'A0' to 'A8', 'E0' to 'E8'
+  pitchClass: 'A' | 'E';
+  octave: number; // 0 to 8
+  justIntonationHz: number; // Pure 3:2 ratio from A4
+  equalTemperamentHz: number; // Standard 12-TET
+  centsDeviation: number; // Difference in cents (Pythagorean comma)
+  wavelengthMeters: number; // Speed of sound (343 m/s) / frequency
+  periodMs: number; // 1000 / frequency
+  ratioFromA4: number; // Frequency / A4
+}
+
+export interface PitchFieldInterpolationResult {
+  targetInput: string | number;
+  targetFrequencyHz: number;
+  nearestNote: string;
+  lowerAnchor: AnchorOctaveValue;
+  upperAnchor: AnchorOctaveValue;
+  interpolationWeight: number; // t in [0, 1] logarithmic
+  octaveSpan: number;
+  centsFromLower: number;
+  centsFromUpper: number;
+  pythagoreanGenerator: {
+    alphaFifths: number;
+    betaOctaves: number;
+    derivedHz: number;
+    deviationCents: number;
+  };
+  derivationFormula: string;
+}
+
+export interface InstrumentArchetype {
+  id: string;
+  name: string;
+  category: string;
+  sourceOrigin: string;
+  harmonicAmplitudes: number[]; // 8 harmonics relative to fundamental
+  formants: { f1: number; f2: number; f3: number };
+  envelope: {
+    attackMs: number;
+    decayMs: number;
+    sustainLevel: number;
+    releaseMs: number;
+  };
+  airGravelNoise: number;
+  description: string;
+}
+
+export interface DerivedInstrumentTone {
+  archetypeId: string;
+  archetypeName: string;
+  category: string;
+  targetFrequencyHz: number;
+  targetNote: string;
+  interpolationCoordinates: PitchFieldInterpolationResult;
+  harmonicSeries: Array<{
+    harmonic: number;
+    frequencyHz: number;
+    relativeAmplitude: number;
+  }>;
+  formants: { f1: number; f2: number; f3: number };
+  envelope: {
+    attackMs: number;
+    decayMs: number;
+    sustainLevel: number;
+    releaseMs: number;
+  };
+  airGravelNoise: number;
+  recipeBits: number;
+  acousticDescription: string;
+}
+
+export interface AnchorEngineLedger {
+  version: string;
+  timestamp: number;
+  baseA4Hz: number;
+  justFifthRatio: number;
+  aOctaves: AnchorOctaveValue[];
+  eOctaves: AnchorOctaveValue[];
+  interleavedSequence: AnchorOctaveValue[];
+  lastAuditTimestamp: number;
+  status: 'CALIBRATED' | 'SYNCHRONIZED';
+}
+
+

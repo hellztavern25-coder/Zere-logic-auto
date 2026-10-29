@@ -37,16 +37,22 @@ import {
   Compass,
   HeartPulse,
   Smile,
-  Bell
+  Bell,
+  FolderOpen,
+  Camera,
+  Wrench,
+  Cpu,
+  Music
 } from 'lucide-react';
 import { ChatThread, AppTab, EmotionalMap, KnowledgeOfUseItem, KnowledgeCategory } from '../types';
 import ButlerAvatar from './ButlerAvatar';
 import { ZEREO_AVATAR_PRESETS } from './AvatarModal';
 import VoiceEmulator from './VoiceEmulator';
+import AcousticLatticeStudio from './AcousticLatticeStudio';
 import { tacticalTouchService, TacticalTouchState } from '../services/tacticalTouchService';
 import { KNOWLEDGE_OF_USES_REGISTRY, analyzeEmotionalState } from '../services/emotionalMappingService';
 
-export type TopLeftMenuTab = 'buttons' | 'knowledge_uses' | 'danielle_link' | 'threads' | 'avatar' | 'voice_emulator';
+export type TopLeftMenuTab = 'buttons' | 'navigation' | 'acoustic_room' | 'knowledge_uses' | 'danielle_link' | 'threads' | 'avatar' | 'voice_emulator';
 
 interface TopLeftMenuProps {
   isOpen: boolean;
@@ -71,10 +77,19 @@ interface TopLeftMenuProps {
   onToggleGrounding?: () => void;
   screenStream?: MediaStream | null;
   onToggleScreenShare?: () => void;
-  initialTab?: TopLeftMenuTab | 'tactical_hud' | 'share';
+  initialTab?: TopLeftMenuTab | 'tactical_hud' | 'share' | 'navigation';
+
+  // Consolidated Tools & Actions
+  onTriggerArtModal?: () => void;
+  onTriggerCamera?: () => void;
+  onTriggerPhoto?: () => void;
+  ttsEnabled?: boolean;
+  onToggleTTS?: () => void;
 }
 
 const resolveTab = (tab?: string): TopLeftMenuTab => {
+  if (tab === 'navigation' || tab === 'tabs' || tab === 'all_tabs') return 'navigation';
+  if (tab === 'acoustic_room' || tab === 'acoustic' || tab === 'flashcards') return 'acoustic_room';
   if (tab === 'knowledge_uses' || tab === 'uses' || tab === 'affect') return 'knowledge_uses';
   if (tab === 'share' || tab === 'danielle_link') return 'danielle_link';
   if (tab === 'tactical_hud' || tab === 'buttons') return 'buttons';
@@ -105,7 +120,12 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
   onToggleGrounding,
   screenStream = null,
   onToggleScreenShare,
-  initialTab = 'buttons'
+  initialTab = 'buttons',
+  onTriggerArtModal,
+  onTriggerCamera,
+  onTriggerPhoto,
+  ttsEnabled = true,
+  onToggleTTS
 }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TopLeftMenuTab>(() => resolveTab(initialTab));
@@ -228,7 +248,7 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
             <div className="flex p-1.5 sm:p-2 bg-black/70 border-b border-red-900/30 flex-shrink-0 overflow-x-auto custom-scrollbar gap-1">
               <button
                 onClick={() => setActiveTab('buttons')}
-                className={`flex-1 min-w-[100px] flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                className={`flex-1 min-w-[95px] flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
                   activeTab === 'buttons'
                     ? 'bg-gradient-to-r from-red-900/90 to-amber-950/80 text-amber-300 border border-amber-500/60 shadow-lg'
                     : 'text-zinc-500 hover:text-zinc-300'
@@ -239,8 +259,32 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
               </button>
 
               <button
+                onClick={() => setActiveTab('navigation')}
+                className={`flex-1 min-w-[95px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                  activeTab === 'navigation'
+                    ? 'bg-gradient-to-r from-red-900/90 to-amber-950/80 text-amber-300 border border-amber-500/60 shadow-lg'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                <Compass className="w-3.5 h-3.5 text-amber-400" />
+                <span>All Tabs</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('acoustic_room')}
+                className={`flex-1 min-w-[125px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                  activeTab === 'acoustic_room'
+                    ? 'bg-gradient-to-r from-amber-950 via-red-950 to-amber-950 text-amber-300 border border-amber-500/60 shadow-lg'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                <Music className="w-3.5 h-3.5 text-amber-400" />
+                <span>Acoustic Room</span>
+              </button>
+
+              <button
                 onClick={() => setActiveTab('knowledge_uses')}
-                className={`flex-1 min-w-[115px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                className={`flex-1 min-w-[110px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
                   activeTab === 'knowledge_uses'
                     ? 'bg-gradient-to-r from-amber-950 via-red-950 to-amber-950 text-amber-300 border border-amber-500/60 shadow-lg'
                     : 'text-zinc-500 hover:text-zinc-300'
@@ -252,7 +296,7 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
 
               <button
                 onClick={() => setActiveTab('danielle_link')}
-                className={`flex-1 min-w-[115px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                className={`flex-1 min-w-[110px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
                   activeTab === 'danielle_link'
                     ? 'bg-gradient-to-r from-red-950 via-rose-950/80 to-amber-950/80 text-amber-300 border border-amber-500/60 shadow-lg'
                     : 'text-zinc-500 hover:text-zinc-300'
@@ -379,6 +423,58 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                   </button>
                 </div>
 
+                {/* Intel Files & Media Vault Trigger */}
+                <button
+                  onClick={() => {
+                    if (onNavigate) onNavigate(AppTab.FILES);
+                    onClose();
+                  }}
+                  className="w-full flex items-center justify-between p-3 rounded-2xl bg-gradient-to-r from-amber-950/40 via-[#140f0c] to-black border border-amber-500/30 hover:border-amber-400 text-left group transition-all shadow-lg hover:shadow-amber-500/10 cursor-pointer"
+                  title="Open Add Files & Media Vault: Word, Audio, Video"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-500/20 to-red-950/60 border border-amber-500/40 flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <FolderOpen className="w-4 h-4 text-amber-400" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-amber-300 uppercase tracking-wider">Add Files & Media Vault</p>
+                      <p className="text-[8px] text-zinc-400 font-mono">Word docs, audio intercepts, video surveillance</p>
+                    </div>
+                  </div>
+                  <span className="text-[9px] font-mono font-bold px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-wider group-hover:bg-amber-500/30 flex items-center gap-1">
+                    Open Vault
+                    <ChevronRight className="w-3 h-3" />
+                  </span>
+                </button>
+
+                {/* Acoustic Lattice & Flashcard Engine (Oct 20 Blueprint) */}
+                <button
+                  onClick={() => {
+                    setActiveTab('acoustic_room');
+                  }}
+                  className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-r from-red-950/70 via-amber-950/40 to-black border-2 border-amber-500/50 hover:border-amber-400 text-left group transition-all shadow-xl hover:shadow-amber-500/20 cursor-pointer"
+                  title="Open Acoustic Lattice: The Room of Tonal Scales, F Flashcards & 60-Bit Recipe"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500/30 to-red-950/80 border border-amber-400/60 flex items-center justify-center group-hover:scale-110 transition-transform shadow-md">
+                      <Music className="w-5 h-5 text-amber-300 animate-pulse" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-black text-amber-300 uppercase tracking-wider">Acoustic Lattice & F-Deck</p>
+                        <span className="text-[7px] font-black uppercase px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                          Oct 20 Blueprint
+                        </span>
+                      </div>
+                      <p className="text-[8px] text-zinc-400 font-mono">The Room • One F per record • A/E 3:2 engine • 60-bit recipe</p>
+                    </div>
+                  </div>
+                  <span className="text-[9px] font-mono font-black px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-black uppercase tracking-wider group-hover:from-amber-400 group-hover:to-amber-500 flex items-center gap-1 shadow-md shadow-amber-500/25">
+                    Launch Studio
+                    <ChevronRight className="w-3 h-3" />
+                  </span>
+                </button>
+
                 {/* Gatekeeper Doorbell Quick Chime Action */}
                 <button
                   onClick={() => {
@@ -404,6 +500,87 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                     Ring Chime
                   </span>
                 </button>
+
+                {/* Section 0: Quick Tools & Media (Consolidated from Screen) */}
+                <div className="space-y-3 pt-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-amber-500 flex items-center gap-1.5">
+                    <Sliders className="w-3.5 h-3.5" />
+                    Quick Output & Media Tools
+                  </span>
+
+                  {/* Jeremy Irons Speech Output Toggle */}
+                  <div className="p-3 bg-black/60 border border-red-900/30 rounded-2xl flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
+                        {ttsEnabled ? <Volume2 className="w-4 h-4 text-amber-400" /> : <VolumeX className="w-4 h-4 text-zinc-600" />}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-zinc-200">
+                          Jeremy Irons Voice: <span className={ttsEnabled ? 'text-amber-400 font-black' : 'text-zinc-500'}>{ttsEnabled ? 'ONLINE' : 'MUTED'}</span>
+                        </div>
+                        <p className="text-[9px] text-zinc-500 font-mono">
+                          {ttsEnabled ? 'British aristocratic baritone audio synthesis active' : 'Silent transmission mode'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={onToggleTTS}
+                      className={`px-3 py-1.5 rounded-xl text-[9px] font-mono font-bold uppercase transition-all ${
+                        ttsEnabled
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
+                          : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-zinc-200'
+                      }`}
+                    >
+                      {ttsEnabled ? 'Mute Voice' : 'Enable Voice'}
+                    </button>
+                  </div>
+
+                  {/* Manifest Desired Art Action */}
+                  <button
+                    onClick={() => {
+                      if (onTriggerArtModal) onTriggerArtModal();
+                      onClose();
+                    }}
+                    className="w-full flex items-center justify-between p-3 rounded-2xl bg-gradient-to-r from-red-950/40 via-amber-950/30 to-black border border-amber-500/40 hover:border-amber-400 text-left group transition-all shadow-lg hover:shadow-amber-500/10 cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-500/20 to-red-950/60 border border-amber-500/40 flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <Sparkles className="w-4 h-4 text-amber-400" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-black text-amber-300 uppercase tracking-wider">Manifest Desired Art</p>
+                        <p className="text-[8px] text-zinc-400 font-mono">Neural pigment synthesis & artwork generation</p>
+                      </div>
+                    </div>
+                    <span className="text-[9px] font-mono font-bold px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-wider group-hover:bg-amber-500/30">
+                      Open Studio
+                    </span>
+                  </button>
+
+                  {/* Take Photo & Photo Library Actions */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => {
+                        if (onTriggerCamera) onTriggerCamera();
+                        onClose();
+                      }}
+                      className="flex items-center justify-center gap-2 p-2.5 rounded-2xl bg-black/60 hover:bg-red-950/40 border border-red-900/30 hover:border-amber-500/40 text-zinc-300 hover:text-amber-300 transition-all text-xs font-mono font-bold cursor-pointer"
+                    >
+                      <Camera className="w-4 h-4 text-amber-400" />
+                      <span>Take Photo</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (onTriggerPhoto) onTriggerPhoto();
+                        onClose();
+                      }}
+                      className="flex items-center justify-center gap-2 p-2.5 rounded-2xl bg-black/60 hover:bg-red-950/40 border border-red-900/30 hover:border-amber-500/40 text-zinc-300 hover:text-amber-300 transition-all text-xs font-mono font-bold cursor-pointer"
+                    >
+                      <ImageIcon className="w-4 h-4 text-amber-400" />
+                      <span>Photo Library</span>
+                    </button>
+                  </div>
+                </div>
 
                 {/* Section 1: Neural Engine (Gemini vs Claude) */}
                 <div className="space-y-3">
@@ -676,6 +853,174 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                       </button>
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tab: Fullscreen All Tabs Navigation (Consolidated from Screen) */}
+            {activeTab === 'navigation' && (
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 custom-scrollbar">
+                <div className="bg-gradient-to-br from-[#160b0b] to-[#0a0a0b] border border-amber-500/30 rounded-3xl p-5 space-y-2 shadow-xl">
+                  <div className="flex items-center gap-2">
+                    <Compass className="w-4 h-4 text-amber-400" />
+                    <h3 className="text-xs font-black text-amber-300 uppercase tracking-widest">
+                      Protocol All Tabs
+                    </h3>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 font-serif italic">
+                    "Every auxiliary module consolidated into your menu, Principal. The chat dialogue retains full-screen supremacy."
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {[
+                    {
+                      id: AppTab.CHAT,
+                      name: 'Dialogue Core',
+                      tagline: 'Fullscreen chat dialogue & reasoning stream',
+                      icon: MessageSquare,
+                      color: 'from-amber-950/60 to-black',
+                      border: 'border-amber-500/40',
+                      textColor: 'text-amber-300'
+                    },
+                    {
+                      id: AppTab.FILES,
+                      name: 'Add Files / Vault',
+                      tagline: 'Word docs, audio intercepts, video footage',
+                      icon: FolderOpen,
+                      color: 'from-amber-950/40 to-black',
+                      border: 'border-amber-500/30',
+                      textColor: 'text-amber-300'
+                    },
+                    {
+                      id: AppTab.ACOUSTIC_ROOM,
+                      name: 'Acoustic Lattice & Room',
+                      tagline: 'The Room of Tonal Scales • F-Flashcards • A/E 3:2 Engine • 60-Bit Recipe',
+                      icon: Music,
+                      color: 'from-amber-950/60 to-black',
+                      border: 'border-amber-500/50',
+                      textColor: 'text-amber-300'
+                    },
+                    {
+                      id: AppTab.VOICE,
+                      name: 'Voice Portal',
+                      tagline: 'Jeremy Irons Vocal Signature & 3-pole DSP',
+                      icon: Mic,
+                      color: 'from-red-950/50 to-black',
+                      border: 'border-red-900/40',
+                      textColor: 'text-zinc-200'
+                    },
+                    {
+                      id: AppTab.VOICE_EMULATOR,
+                      name: 'Voice Emulator',
+                      tagline: 'Multi-voice cloning & formant modulation',
+                      icon: Headphones,
+                      color: 'from-red-950/40 to-black',
+                      border: 'border-red-900/40',
+                      textColor: 'text-zinc-200'
+                    },
+                    {
+                      id: AppTab.CREATIVE,
+                      name: 'Creative Studio',
+                      tagline: 'Manifest desired art & neural canvas',
+                      icon: Sparkles,
+                      color: 'from-amber-950/50 to-black',
+                      border: 'border-amber-500/30',
+                      textColor: 'text-amber-300'
+                    },
+                    {
+                      id: AppTab.ASSISTANT,
+                      name: 'Assistant Daemon',
+                      tagline: 'Autonomous background tasks & vigilance',
+                      icon: Cpu,
+                      color: 'from-zinc-900/60 to-black',
+                      border: 'border-red-900/30',
+                      textColor: 'text-zinc-200'
+                    },
+                    {
+                      id: AppTab.MEMORY,
+                      name: 'Memory Core',
+                      tagline: 'Permanent episodic vault & reasoning audit',
+                      icon: Database,
+                      color: 'from-zinc-900/60 to-black',
+                      border: 'border-red-900/30',
+                      textColor: 'text-zinc-200'
+                    },
+                    {
+                      id: AppTab.NEXUS,
+                      name: 'Neural Nexus',
+                      tagline: 'Multi-agent mesh network & synchronization',
+                      icon: Share2,
+                      color: 'from-zinc-900/60 to-black',
+                      border: 'border-red-900/30',
+                      textColor: 'text-zinc-200'
+                    },
+                    {
+                      id: AppTab.WORKSHOP,
+                      name: 'Neural Forge',
+                      tagline: 'Diagnostics, structural stress tests & repairs',
+                      icon: Wrench,
+                      color: 'from-red-950/60 to-black',
+                      border: 'border-red-900/40',
+                      textColor: 'text-red-300'
+                    },
+                    {
+                      id: AppTab.SYSTEM,
+                      name: 'System Control',
+                      tagline: 'Security signets, API keys & environment',
+                      icon: Settings,
+                      color: 'from-zinc-900/60 to-black',
+                      border: 'border-red-900/30',
+                      textColor: 'text-zinc-200'
+                    },
+                    {
+                      id: AppTab.ANALYTICS,
+                      name: 'Logic Analytics',
+                      tagline: 'Processing velocity & thermodynamic metrics',
+                      icon: LineChart,
+                      color: 'from-zinc-900/60 to-black',
+                      border: 'border-red-900/30',
+                      textColor: 'text-zinc-200'
+                    },
+                    {
+                      id: AppTab.SNAPSHOT,
+                      name: 'Optical Intel',
+                      tagline: 'Vision frame analysis & snapshot ingestion',
+                      icon: Eye,
+                      color: 'from-zinc-900/60 to-black',
+                      border: 'border-red-900/30',
+                      textColor: 'text-zinc-200'
+                    }
+                  ].map((tab) => {
+                    const IconComp = tab.icon;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => {
+                          if (onNavigate) onNavigate(tab.id);
+                          onClose();
+                        }}
+                        className={`p-3.5 rounded-2xl bg-gradient-to-br ${tab.color} border ${tab.border} hover:border-amber-400 text-left transition-all group flex flex-col justify-between gap-2 shadow-lg hover:shadow-amber-500/10 cursor-pointer`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="w-8 h-8 rounded-xl bg-black/60 border border-amber-500/20 flex items-center justify-center group-hover:scale-110 transition-transform">
+                            <IconComp className="w-4 h-4 text-amber-400" />
+                          </div>
+                          <span className="text-[8px] font-mono font-bold text-zinc-500 group-hover:text-amber-300 uppercase tracking-wider flex items-center gap-1">
+                            Launch <ChevronRight className="w-2.5 h-2.5" />
+                          </span>
+                        </div>
+                        <div>
+                          <p className={`text-xs font-black ${tab.textColor} uppercase tracking-wider`}>
+                            {tab.name}
+                          </p>
+                          <p className="text-[9px] text-zinc-400 font-mono leading-tight mt-0.5 line-clamp-1">
+                            {tab.tagline}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1427,6 +1772,35 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
               </div>
             )}
 
+            {/* Tab 5: Acoustic Lattice & Invariant Flashcards Studio */}
+            {activeTab === 'acoustic_room' && (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="p-3 bg-red-950/30 border-b border-red-900/30 flex items-center justify-between flex-shrink-0">
+                  <div className="flex items-center gap-2">
+                    <Music className="w-4 h-4 text-amber-400" />
+                    <span className="text-[10px] font-black uppercase text-amber-400 tracking-wider">
+                      Acoustic Lattice • Flashcards & The Room
+                    </span>
+                  </div>
+                  {onNavigate && (
+                    <button
+                      onClick={() => {
+                        onNavigate(AppTab.ACOUSTIC_ROOM);
+                        onClose();
+                      }}
+                      className="px-2.5 py-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-black uppercase tracking-wider flex items-center gap-1 transition-all"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Fullscreen Studio</span>
+                    </button>
+                  )}
+                </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                  <AcousticLatticeStudio className="h-full" />
+                </div>
+              </div>
+            )}
+
             {/* Bottom Quick Navigation Bar */}
             <div className="p-4 border-t border-red-900/20 bg-black/60 flex items-center justify-between text-[8px] font-black uppercase tracking-widest text-zinc-500 flex-shrink-0">
               <button
@@ -1442,6 +1816,17 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
 
               <button
                 onClick={() => {
+                  if (onNavigate) onNavigate(AppTab.FILES);
+                  onClose();
+                }}
+                className="hover:text-amber-400 text-amber-300/80 transition-colors flex items-center gap-1"
+              >
+                <FolderOpen className="w-3 h-3 text-amber-400" />
+                <span>Files</span>
+              </button>
+
+              <button
+                onClick={() => {
                   if (onNavigate) onNavigate(AppTab.VOICE);
                   onClose();
                 }}
@@ -1449,6 +1834,17 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
               >
                 <Mic className="w-3 h-3" />
                 <span>Voice</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  if (onNavigate) onNavigate(AppTab.ACOUSTIC_ROOM);
+                  onClose();
+                }}
+                className="hover:text-amber-400 text-amber-300 transition-colors flex items-center gap-1 font-bold"
+              >
+                <Music className="w-3 h-3 text-amber-400" />
+                <span>Lattice</span>
               </button>
 
               <button

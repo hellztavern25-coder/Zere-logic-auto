@@ -1745,22 +1745,31 @@ async function startServer() {
       const candidateModels: string[] = [];
       const requestedModel = typeof model === 'string' ? model.trim() : '';
 
-      // If user requested a specific valid model (and not the currently degraded gemini-3.6-flash)
-      if (requestedModel && requestedModel !== 'gemini-3.6-flash' && requestedModel !== 'gemini-2.5-flash') {
-        candidateModels.push(requestedModel);
-      }
-      // Prioritize high-stability models from Gemini SDK specification
-      if (!candidateModels.includes('gemini-3.8-flash')) {
-        candidateModels.push('gemini-3.8-flash');
-      }
-      if (!candidateModels.includes('gemini-3.1-flash-lite')) {
-        candidateModels.push('gemini-3.1-flash-lite');
-      }
-      if (!candidateModels.includes('gemini-flash-latest')) {
-        candidateModels.push('gemini-flash-latest');
-      }
-      if (!candidateModels.includes('gemini-3.1-pro-preview')) {
-        candidateModels.push('gemini-3.1-pro-preview');
+      const isImageRequest = !!config?.imageConfig || requestedModel.includes('image');
+
+      if (isImageRequest) {
+        if (requestedModel) candidateModels.push(requestedModel);
+        if (!candidateModels.includes('gemini-3.1-flash-image')) candidateModels.push('gemini-3.1-flash-image');
+        if (!candidateModels.includes('gemini-3.1-flash-lite-image')) candidateModels.push('gemini-3.1-flash-lite-image');
+        if (!candidateModels.includes('gemini-3-pro-image')) candidateModels.push('gemini-3-pro-image');
+      } else {
+        // If user requested a specific valid model (and not the currently degraded gemini-3.6-flash)
+        if (requestedModel && requestedModel !== 'gemini-3.6-flash' && requestedModel !== 'gemini-2.5-flash') {
+          candidateModels.push(requestedModel);
+        }
+        // Prioritize high-stability models from Gemini SDK specification
+        if (!candidateModels.includes('gemini-3.8-flash')) {
+          candidateModels.push('gemini-3.8-flash');
+        }
+        if (!candidateModels.includes('gemini-3.1-flash-lite')) {
+          candidateModels.push('gemini-3.1-flash-lite');
+        }
+        if (!candidateModels.includes('gemini-flash-latest')) {
+          candidateModels.push('gemini-flash-latest');
+        }
+        if (!candidateModels.includes('gemini-3.1-pro-preview')) {
+          candidateModels.push('gemini-3.1-pro-preview');
+        }
       }
 
       let lastError: any = null;
@@ -1782,7 +1791,6 @@ async function startServer() {
           lastError = err;
           const statusNum = getNumericHttpStatus(err, 500);
           console.warn(`SERVER: Model [${m}] call failed (${statusNum}):`, err?.message || err);
-          // Always continue to the next candidate model so that temporary spikes or quotas failover seamlessly
           continue;
         }
       }
@@ -1808,6 +1816,180 @@ async function startServer() {
           status: statusCode,
           statusName: error?.status || 'ERROR',
           details: error?.errorDetails || error?.details
+        }
+      });
+    }
+  });
+
+  // Dedicated Art & Creative Vision Manifestation Endpoint
+  app.post('/api/gemini/generate-art', async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      const customApiKey = authHeader && authHeader.startsWith('Bearer ') 
+        ? authHeader.slice(7).trim() 
+        : undefined;
+
+      const ai = getGeminiClient(customApiKey);
+      const { 
+        prompt, 
+        aspectRatio = '1:1', 
+        imageSize = '1K', 
+        stylePreset = 'luxury_tactical',
+        enhancePrompt = true,
+        referenceImage 
+      } = req.body;
+
+      if (!prompt || !prompt.trim()) {
+        return res.status(400).json({ error: 'Prompt is required for art creation.' });
+      }
+
+      // Build enriched prompt incorporating Principal's requested vision
+      let fullPrompt = prompt.trim();
+      if (enhancePrompt) {
+        if (stylePreset === 'luxury_tactical') {
+          fullPrompt = `${prompt.trim()}, high tactical aesthetic, deep burgundy and polished gold accents, dramatic cinematic lighting, photorealistic masterpiece, 8k resolution, crisp architectural detail`;
+        } else if (stylePreset === 'photorealistic') {
+          fullPrompt = `${prompt.trim()}, ultra-photorealistic, 8k resolution, cinematic studio lighting, hyper-detailed textures, shot on Hasselblad`;
+        } else if (stylePreset === 'oil_painting') {
+          fullPrompt = `${prompt.trim()}, classical oil painting on canvas, rich dramatic chiaroscuro, heavy expressive brushwork, museum masterpiece`;
+        } else if (stylePreset === 'cybernetic') {
+          fullPrompt = `${prompt.trim()}, futuristic cybernetic blueprint, holographic wireframe, glowing amber telemetry, dark obsidian background`;
+        }
+      }
+
+      const imageModels = ['gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image', 'gemini-3-pro-image'];
+      let generatedImageUrl: string | null = null;
+      let modelUsed = '';
+      let lastError: any = null;
+
+      if (referenceImage) {
+        const base64Data = referenceImage.includes(',') ? referenceImage.split(',')[1] : referenceImage;
+        const mimeType = referenceImage.includes(';') ? referenceImage.split(';')[0].split(':')[1] : 'image/png';
+
+        for (const m of ['gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image']) {
+          try {
+            const resp = await ai.models.generateContent({
+              model: m,
+              contents: {
+                parts: [
+                  { inlineData: { data: base64Data, mimeType } },
+                  { text: `Refine and manifest this artwork: ${fullPrompt}` }
+                ]
+              }
+            });
+            const part = resp?.candidates?.[0]?.content?.parts.find((p: any) => p.inlineData);
+            if (part?.inlineData) {
+              generatedImageUrl = `data:image/png;base64,${part.inlineData.data}`;
+              modelUsed = m;
+              break;
+            }
+          } catch (err) {
+            lastError = err;
+          }
+        }
+      } else {
+        for (const m of imageModels) {
+          try {
+            const resp = await ai.models.generateContent({
+              model: m,
+              contents: {
+                parts: [{ text: fullPrompt }]
+              },
+              config: {
+                imageConfig: {
+                  aspectRatio: (aspectRatio === '16:9' || aspectRatio === '1:1' || aspectRatio === '4:3' || aspectRatio === '3:4' || aspectRatio === '9:16') ? (aspectRatio as any) : '1:1',
+                  imageSize: (m === 'gemini-3.1-flash-image' || m === 'gemini-3-pro-image') ? (imageSize as any) : undefined
+                }
+              }
+            });
+
+            const parts = resp?.candidates?.[0]?.content?.parts || [];
+            for (const part of parts) {
+              if (part.inlineData) {
+                generatedImageUrl = `data:image/png;base64,${part.inlineData.data}`;
+                modelUsed = m;
+                break;
+              }
+            }
+            if (generatedImageUrl) break;
+          } catch (err: any) {
+            lastError = err;
+            console.warn(`SERVER: Art generation with model [${m}] failed:`, err?.message || err);
+            continue;
+          }
+        }
+      }
+
+      // Fallback attempt with imagen-3.0-generate-002 if needed
+      if (!generatedImageUrl) {
+        try {
+          const imagenRes = await (ai.models as any).generateImages({
+            model: 'imagen-3.0-generate-002',
+            prompt: fullPrompt,
+            config: {
+              numberOfImages: 1,
+              aspectRatio: (aspectRatio === '16:9' || aspectRatio === '1:1' || aspectRatio === '4:3' || aspectRatio === '3:4' || aspectRatio === '9:16') ? aspectRatio : '1:1',
+              outputMimeType: 'image/jpeg'
+            }
+          });
+          const img = imagenRes?.generatedImages?.[0]?.image?.imageBytes;
+          if (img) {
+            generatedImageUrl = `data:image/jpeg;base64,${img}`;
+            modelUsed = 'imagen-3.0-generate-002';
+          }
+        } catch (imgErr) {
+          console.warn('SERVER: Imagen fallback failed:', imgErr);
+        }
+      }
+
+      if (!generatedImageUrl) {
+        throw lastError || new Error('Neural pigment arrays failed to synthesize image.');
+      }
+
+      // Archive to Visual Captures
+      const captureTitle = prompt.length > 50 ? `${prompt.slice(0, 50)}...` : prompt;
+      try {
+        const data = await fs.readFile(VISUAL_CAPTURES_FILE, 'utf-8').catch(() => '[]');
+        let captures: any[] = [];
+        try { captures = JSON.parse(data); } catch { captures = []; }
+        const newCapture = {
+          id: `art-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          title: captureTitle,
+          description: fullPrompt,
+          imageUrl: generatedImageUrl,
+          source: 'creative_session',
+          metadata: {
+            prompt,
+            fullPrompt,
+            aspectRatio,
+            model: modelUsed,
+            stylePreset
+          },
+          timestamp: Date.now()
+        };
+        captures.unshift(newCapture);
+        await fs.writeFile(VISUAL_CAPTURES_FILE, JSON.stringify(captures, null, 2));
+        addDaemonLog('TASK', `Desired art synthesized: [${captureTitle}] via ${modelUsed}`);
+        io.emit('visual:capture_added', newCapture);
+      } catch (saveErr) {
+        console.warn('Failed to archive capture:', saveErr);
+      }
+
+      return res.status(200).json({
+        success: true,
+        imageUrl: generatedImageUrl,
+        prompt,
+        fullPrompt,
+        modelUsed,
+        title: captureTitle
+      });
+    } catch (error: any) {
+      console.error('SERVER: /api/gemini/generate-art exception:', error?.message || error);
+      const statusCode = getNumericHttpStatus(error, 500);
+      return res.status(statusCode).json({
+        error: {
+          message: error?.message || 'Art synthesis failed in neural arrays',
+          status: statusCode
         }
       });
     }

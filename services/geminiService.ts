@@ -287,3 +287,55 @@ export const safeGenerateContent = async (params: any) => {
     throw err;
   }
 };
+
+export interface GenerateArtParams {
+  prompt: string;
+  aspectRatio?: '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
+  imageSize?: '1K' | '2K' | '4K';
+  stylePreset?: 'luxury_tactical' | 'photorealistic' | 'oil_painting' | 'cybernetic' | 'minimalist' | 'none';
+  enhancePrompt?: boolean;
+  referenceImage?: string;
+}
+
+export interface GenerateArtResult {
+  imageUrl: string;
+  prompt: string;
+  fullPrompt?: string;
+  modelUsed?: string;
+  title: string;
+}
+
+export const generateDesiredArt = async (params: GenerateArtParams): Promise<GenerateArtResult> => {
+  const localKey = typeof window !== 'undefined' ? localStorage.getItem('ZEREO_API_KEY') : null;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+  if (localKey && localKey.trim() && !localKey.includes('***') && localKey !== 'undefined') {
+    headers['Authorization'] = `Bearer ${localKey.trim()}`;
+  }
+
+  const res = await fetch('/api/gemini/generate-art', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(params)
+  });
+
+  if (!res.ok) {
+    let errMsg = 'Failed to generate desired art';
+    try {
+      const errJson = await res.json();
+      errMsg = errJson.error?.message || errJson.message || errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  const data = await res.json();
+  return {
+    imageUrl: data.imageUrl,
+    prompt: data.prompt,
+    fullPrompt: data.fullPrompt,
+    modelUsed: data.modelUsed,
+    title: data.title
+  };
+};
+
