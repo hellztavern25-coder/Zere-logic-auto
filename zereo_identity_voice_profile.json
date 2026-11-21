@@ -15,7 +15,7 @@
     "direct_address": "Principal"
   },
   "dsp_filter_pipeline": {
-    "base_neural_voice": "Charon",
+    "base_neural_voice": "Algenib",
     "alternate_voice": "Fenrir",
     "neural_tts_model": "gemini-3.8-flash-lite-tts",
     "sampling_rate_hz": 24000,

@@ -74,6 +74,7 @@ const AvatarModal: React.FC<AvatarModalProps> = ({
       const dataUrl = `data:${file.type};base64,${base64}`;
       setPreviewUrl(dataUrl);
     }
+    e.target.value = '';
   };
 
   const activeAvatarSrc = 
@@ -256,7 +257,7 @@ const AvatarModal: React.FC<AvatarModalProps> = ({
                     <p className="text-xs font-bold text-zinc-300 uppercase tracking-wider">Choose Image from Device</p>
                     <p className="text-[9px] text-zinc-600 uppercase mt-1">PNG, JPG, WebP supported</p>
                   </div>
-                  <input type="file" ref={fileInputRef} onChange={handleFileUpload} hidden accept="image/*" />
+                  <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="sr-only" accept="image/*" />
                 </div>
               )}
 

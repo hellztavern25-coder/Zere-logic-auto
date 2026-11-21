@@ -4,6 +4,7 @@ import {
   FileText, 
   Music, 
   Video, 
+  Image as ImageIcon,
   Upload, 
   Trash2, 
   Play, 
@@ -95,6 +96,7 @@ export const FilesTab: React.FC<FilesTabProps> = ({ onNavigate, isPrincipalMode 
 
   // File Input Refs
   const wordInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const anyFileInputRef = useRef<HTMLInputElement>(null);
@@ -317,12 +319,20 @@ export const FilesTab: React.FC<FilesTabProps> = ({ onNavigate, isPrincipalMode 
         wordCount = parsed.wordCount;
       }
 
-      if (fileType === 'audio' || fileType === 'video') {
+      if (fileType === 'image') {
+        dataUrl = await new Promise<string | undefined>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : undefined);
+          reader.onerror = () => resolve(undefined);
+          reader.readAsDataURL(file);
+        });
+      } else if (fileType === 'audio' || fileType === 'video') {
         dataUrl = URL.createObjectURL(file);
       }
 
       let classification: VaultFileItem['classification'] = 'OPERATIONAL INTEL';
       if (fileType === 'word') classification = 'TOP SECRET / PRINCIPAL EYES ONLY';
+      if (fileType === 'image') classification = 'SURVEILLANCE TELEMETRY';
       if (fileType === 'audio') classification = 'ACOUSTIC INTERCEPT';
       if (fileType === 'video') classification = 'SURVEILLANCE TELEMETRY';
 
@@ -423,11 +433,20 @@ DIRECTIVE FROM PRINCIPAL: "${promptToUse}"`;
 
   const handleDispatchToDialogueCore = () => {
     if (!selectedFile) return;
-    const summary = `Principal, I have routed intel from [${selectedFile.name}] into our active dialogue session.\nType: ${selectedFile.type.toUpperCase()}\n\n${
-      selectedFile.textContent ? `Excerpt:\n${selectedFile.textContent.slice(0, 800)}...` : 'Media intercept ready for multi-modal cross-examination.'
-    }`;
+    const bridgePayload = {
+      name: selectedFile.name,
+      type: selectedFile.type,
+      mimeType: selectedFile.mimeType,
+      size: selectedFile.size,
+      textContent: selectedFile.textContent || '',
+      dataUrl: selectedFile.dataUrl || '',
+    };
 
-    // Dispatch event to ChatBot
+    try {
+      sessionStorage.setItem('ZEREO_PENDING_CHAT_FILE', JSON.stringify(bridgePayload));
+    } catch {}
+
+    window.dispatchEvent(new CustomEvent('vault:bridge_file_to_chat', { detail: bridgePayload }));
     window.dispatchEvent(new CustomEvent('nav:change', { detail: AppTab.CHAT }));
     if (onNavigate) {
       onNavigate(AppTab.CHAT);
@@ -475,37 +494,45 @@ DIRECTIVE FROM PRINCIPAL: "${promptToUse}"`;
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#0a0a0b] text-zinc-300 overflow-hidden font-sans">
-      {/* Hidden File Inputs for Device Access */}
+      {/* Visually-hidden File Inputs for Reliable Device Access */}
       <input 
         ref={wordInputRef}
         type="file"
         multiple
-        accept=".docx,.doc,.txt,.rtf,.pdf,.md,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf,text/*"
-        className="hidden"
-        onChange={(e) => e.target.files && handleIngestFiles(e.target.files)}
+        accept=".docx,.doc,.txt,.rtf,.pdf,.md,.csv,.json,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf,text/*"
+        className="sr-only"
+        onChange={(e) => { if (e.target.files) void handleIngestFiles(e.target.files); e.target.value = ''; }}
+      />
+      <input 
+        ref={imageInputRef}
+        type="file"
+        multiple
+        accept="image/*"
+        className="sr-only"
+        onChange={(e) => { if (e.target.files) void handleIngestFiles(e.target.files); e.target.value = ''; }}
       />
       <input 
         ref={audioInputRef}
         type="file"
         multiple
         accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus"
-        className="hidden"
-        onChange={(e) => e.target.files && handleIngestFiles(e.target.files)}
+        className="sr-only"
+        onChange={(e) => { if (e.target.files) void handleIngestFiles(e.target.files); e.target.value = ''; }}
       />
       <input 
         ref={videoInputRef}
         type="file"
         multiple
         accept="video/*,.mp4,.webm,.mov,.mkv,.avi"
-        className="hidden"
-        onChange={(e) => e.target.files && handleIngestFiles(e.target.files)}
+        className="sr-only"
+        onChange={(e) => { if (e.target.files) void handleIngestFiles(e.target.files); e.target.value = ''; }}
       />
       <input 
         ref={anyFileInputRef}
         type="file"
         multiple
-        className="hidden"
-        onChange={(e) => e.target.files && handleIngestFiles(e.target.files)}
+        className="sr-only"
+        onChange={(e) => { if (e.target.files) void handleIngestFiles(e.target.files); e.target.value = ''; }}
       />
 
       {/* Vault Master Header */}
@@ -577,7 +604,7 @@ DIRECTIVE FROM PRINCIPAL: "${promptToUse}"`;
             <span className="text-[9px] font-mono font-bold text-amber-500 uppercase tracking-widest block mb-2">
               Direct Device Connect
             </span>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <button
                 onClick={() => wordInputRef.current?.click()}
                 className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-gradient-to-b from-zinc-900 to-black hover:from-amber-950/30 border border-red-950/60 hover:border-amber-500/40 transition-all text-center group cursor-pointer"
@@ -585,6 +612,15 @@ DIRECTIVE FROM PRINCIPAL: "${promptToUse}"`;
                 <FileText className="w-4 h-4 text-amber-400 mb-1 group-hover:scale-110 transition-transform" />
                 <span className="text-[10px] font-bold text-zinc-200">Word / Doc</span>
                 <span className="text-[8px] text-zinc-600 font-mono">.docx, .pdf, .txt</span>
+              </button>
+
+              <button
+                onClick={() => imageInputRef.current?.click()}
+                className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-gradient-to-b from-zinc-900 to-black hover:from-amber-950/30 border border-red-950/60 hover:border-amber-500/40 transition-all text-center group cursor-pointer"
+              >
+                <ImageIcon className="w-4 h-4 text-amber-400 mb-1 group-hover:scale-110 transition-transform" />
+                <span className="text-[10px] font-bold text-zinc-200">Photos / Img</span>
+                <span className="text-[8px] text-zinc-600 font-mono">.png, .jpg, .webp</span>
               </button>
 
               <button

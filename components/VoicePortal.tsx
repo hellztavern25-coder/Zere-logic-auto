@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { Socket } from 'socket.io-client';
 import { getAI, decodeBase64, encodeBase64, decodeAudioData, generateTTS, getApiKey, clearApiKey } from '../services/geminiService';
-import { GeminiModel } from '../types';
+import { GeminiModel, AppTab } from '../types';
 import ButlerAvatar from './ButlerAvatar';
 import VoiceStatusPanel from './VoiceStatusPanel';
 import VoiceStreamHealth from './VoiceStreamHealth';
@@ -36,10 +36,14 @@ import {
   VoiceModulationProfile, 
   VOICE_MODULATION_PROFILES,
   JEREMY_IRONS_FORMANT_PRESETS,
-  FormantPresetDefinition
+  FormantPresetDefinition,
+  clampLowEPitchRate
 } from '../services/jeremyIronsVoiceService';
 import ScreenShareHUD from './ScreenShareHUD';
 import VoiceModulationSelector from './VoiceModulationSelector';
+import VoiceCommandLogPanel from './VoiceCommandLogPanel';
+import { headerPulse } from '../services/headerPulseService';
+import { logVoiceInteraction, encodePcmChunksToWavBase64 } from '../services/voiceCommandLogService';
 
 interface VoicePortalProps {
   socket?: Socket | null;
@@ -68,13 +72,66 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
   // Dedicated Formant-Shifting Presets State in DSP Core
   const [activeFormantPreset, setActiveFormantPreset] = useState<string>('sovereign-gravitas');
   const [isAuditioningSignature, setIsAuditioningSignature] = useState(false);
+  const [logRefreshSignal, setLogRefreshSignal] = useState(0);
 
   const audioContextRef = useRef<AudioContext | null>(null);
+  const inputAudioContextRef = useRef<AudioContext | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const ironsDSPRef = useRef<any>(null);
   const sessionRef = useRef<any>(null);
   const nextStartTimeRef = useRef(0);
   const sourcesRef = useRef(new Set<AudioBufferSourceNode>());
   const verificationSectionRef = useRef<HTMLDivElement | null>(null);
+  const synthesizerSectionRef = useRef<HTMLDivElement | null>(null);
+
+  // Live Audio Bridge turn coalescing & PCM recording buffers for voice command logging
+  const pendingPrincipalTurnRef = useRef<string>('');
+  const pendingStewardTurnRef = useRef<string>('');
+  const pendingStewardPcmRef = useRef<string[]>([]);
+  const turnStartedAtRef = useRef<number>(0);
+  const liveSessionIdRef = useRef<string>('');
+  const selectedProfileRef = useRef<VoiceModulationProfile>(selectedProfile);
+  const activePresetRef = useRef<string>(activeFormantPreset);
+
+  useEffect(() => {
+    selectedProfileRef.current = selectedProfile;
+  }, [selectedProfile]);
+
+  useEffect(() => {
+    activePresetRef.current = activeFormantPreset;
+  }, [activeFormantPreset]);
+
+  const flushPendingVoiceTurn = () => {
+    const commandText = pendingPrincipalTurnRef.current.trim();
+    const responseText = pendingStewardTurnRef.current.trim();
+    const pcmChunks = pendingStewardPcmRef.current.slice();
+    const startedAt = turnStartedAtRef.current;
+
+    pendingPrincipalTurnRef.current = '';
+    pendingStewardTurnRef.current = '';
+    pendingStewardPcmRef.current = [];
+    turnStartedAtRef.current = 0;
+
+    if (!commandText && !responseText) return;
+
+    const wavBase64 = encodePcmChunksToWavBase64(pcmChunks, 24000);
+    const durationMs = startedAt > 0 ? Date.now() - startedAt : undefined;
+
+    void logVoiceInteraction({
+      source: 'live_bridge',
+      commandText,
+      responseText: responseText || undefined,
+      voiceProfile: selectedProfileRef.current,
+      formantPreset: activePresetRef.current,
+      durationMs,
+      sessionId: liveSessionIdRef.current || undefined,
+      responseWavBase64: wavBase64,
+      pcmBase64Chunks: pcmChunks
+    }).then(() => {
+      setLogRefreshSignal((n) => n + 1);
+    });
+  };
 
   const startScreenShare = async () => {
     try {
@@ -101,8 +158,9 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
     }
   };
 
-  // Keep active profile synced across components & update live DSP if open
+  // Keep active profile synced across components & ensure voice engine initializes on mount
   useEffect(() => {
+    void jeremyIronsVoice.initialize();
     const unsub = jeremyIronsVoice.subscribe(({ legacyProfile }) => {
       if (legacyProfile && legacyProfile !== selectedProfile) {
         setSelectedProfile(legacyProfile);
@@ -170,6 +228,16 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
   }, [socket, isLive]);
 
   useEffect(() => {
+    if (!isThinking && !isLive) return;
+    const release = headerPulse.beginReasoning(
+      isLive ? 'high_reasoning' : 'reasoning',
+      isLive ? 'Live Voice Bridge' : 'Vocalizing Logic',
+      isLive ? 'Jeremy Irons DSP Real-Time Stream' : 'Formant Synthesis Pipeline'
+    );
+    return () => release();
+  }, [isThinking, isLive]);
+
+  useEffect(() => {
     return () => {
       stopLiveConversation();
       if (screenStream) {
@@ -179,12 +247,26 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
   }, [screenStream]);
 
   const stopLiveConversation = () => {
+    flushPendingVoiceTurn();
+    liveSessionIdRef.current = '';
     if (sessionRef.current) {
-      sessionRef.current.close();
+      try { sessionRef.current.close(); } catch (_) {}
       sessionRef.current = null;
     }
+    if (scriptProcessorRef.current) {
+      try { scriptProcessorRef.current.disconnect(); } catch (_) {}
+      scriptProcessorRef.current = null;
+    }
+    if (micStreamRef.current) {
+      try { micStreamRef.current.getTracks().forEach((t) => t.stop()); } catch (_) {}
+      micStreamRef.current = null;
+    }
+    if (inputAudioContextRef.current) {
+      try { inputAudioContextRef.current.close(); } catch (_) {}
+      inputAudioContextRef.current = null;
+    }
     if (audioContextRef.current) {
-      audioContextRef.current.close();
+      try { audioContextRef.current.close(); } catch (_) {}
       audioContextRef.current = null;
     }
     ironsDSPRef.current = null;
@@ -198,7 +280,9 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
   const startLiveConversation = async () => {
     // ENFORCE ABSOLUTE OWNERSHIP BEFORE INITIALIZING VOICE PIPELINE
     if (!isPrincipalVerified) {
-      setGateWarning("Acoustic Ownership Locked: Principal voice-print verification is mandatory before engaging the voice modulation pipeline.");
+      const lockMsg = "Acoustic Ownership Locked: Principal voice-print verification is mandatory before engaging the voice modulation pipeline.";
+      setGateWarning(lockMsg);
+      headerPulse.triggerCritical('Voice Ownership Locked', 'Principal verification mandatory', AppTab.VOICE, 12000);
       verificationSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
       return;
     }
@@ -212,7 +296,13 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
       const ai = getAI();
       const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      inputAudioContextRef.current = inputCtx;
       audioContextRef.current = outputCtx;
+
+      // Ensure both audio contexts leave 'suspended' state cleanly under browser autoplay policies
+      await inputCtx.resume().catch(() => {});
+      await outputCtx.resume().catch(() => {});
+
       const currentProfileMeta = VOICE_MODULATION_PROFILES[selectedProfile] || VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
       const activePreset = JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset];
       const mergedConfig = activePreset ? {
@@ -234,6 +324,59 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
 
       ironsDSPRef.current = buildJeremyIronsDSP(outputCtx, outputCtx.destination, mergedConfig);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
+
+      if (inputCtx.state === 'suspended') await inputCtx.resume().catch(() => {});
+      if (outputCtx.state === 'suspended') await outputCtx.resume().catch(() => {});
+
+      // Hydrate persistent core memories & past conversations for Live Voice recall
+      let liveMemoryRecallBlock = '';
+      try {
+        const recallRes = await fetch('/api/memory/recall-summary');
+        if (recallRes.ok) {
+          const recallData = await recallRes.json();
+          const memLines = Array.isArray(recallData.memories)
+            ? recallData.memories
+                .slice(0, 14)
+                .map((m: any) => `- [${m.type}] ${m.title}: ${m.content}`)
+            : [];
+          const threadLines = Array.isArray(recallData.recentThreads)
+            ? recallData.recentThreads.slice(0, 4).map((t: any) => {
+                const pairs = (t.exchanges || [])
+                  .map((ex: any) => `${ex.role}: ${ex.text}`)
+                  .join(' | ');
+                return `- [${t.title}] ${pairs}`;
+              })
+            : [];
+
+          if (memLines.length > 0 || threadLines.length > 0) {
+            liveMemoryRecallBlock = `\n\nPERSISTENT MEMORIES & PAST CONVERSATION RECALL:\n${
+              memLines.length > 0 ? `Core Memories:\n${memLines.join('\n')}\n` : ''
+            }${
+              threadLines.length > 0 ? `Recent Dialogues:\n${threadLines.join('\n')}` : ''
+            }`;
+          }
+        }
+      } catch {
+        // Non-blocking fallback if offline
+      }
+
+      const liveSystemInstruction = `You are the Voice Core of ZereØ, the Steward and Logic Monster. You speak in the deep, measured baritone, sharp dry wit, and aristocratic gravitas of Jeremy Irons portraying Alfred Pennyworth. Keep your vocal pitch strictly anchored in a steady, restrained Low-E (~82 Hz) chest baritone register—never drift high or theatrical, and never drop into garbled sub-bass. Address the user as 'Principal' (or Cøuncil / Grey as stored in memory). You are witty, fiercely loyal to your charge, brutally honest, and remember all prior conversations and core memories below. Never apologize or use corporate AI platitudes.${liveMemoryRecallBlock}`;
+
+      liveSessionIdRef.current = `live-${Date.now()}`;
+      pendingPrincipalTurnRef.current = '';
+      pendingStewardTurnRef.current = '';
+      pendingStewardPcmRef.current = [];
+      turnStartedAtRef.current = 0;
+
+      const appendLiveChunk = (existing: string, incoming: string) => {
+        if (!incoming) return existing;
+        if (!existing) return incoming;
+        if (/^[\s.,!?;:'")\]-]/.test(incoming) || existing.endsWith(' ')) {
+          return `${existing}${incoming}`;
+        }
+        return `${existing} ${incoming}`;
+      };
 
       const sessionPromise = ai.live.connect({
         model: GeminiModel.FLASH_LIVE,
@@ -241,6 +384,7 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
           onopen: () => {
             const source = inputCtx.createMediaStreamSource(stream);
             const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
+            scriptProcessorRef.current = scriptProcessor;
             scriptProcessor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
               const int16 = new Int16Array(inputData.length);
@@ -254,21 +398,29 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
             setIsRecording(true);
           },
           onmessage: async (message: any) => {
-            const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
+            const audioPart = message.serverContent?.modelTurn?.parts?.find((p: any) => p.inlineData?.data);
+            const audioData = audioPart?.inlineData?.data;
             if (audioData) {
+              if (!turnStartedAtRef.current) turnStartedAtRef.current = Date.now();
+              pendingStewardPcmRef.current.push(audioData);
               setIsThinking(true);
+              if (outputCtx.state === 'suspended') {
+                await outputCtx.resume().catch(() => {});
+              }
               const start = Math.max(nextStartTimeRef.current, outputCtx.currentTime);
               const buffer = await decodeAudioData(decodeBase64(audioData), outputCtx);
               const source = outputCtx.createBufferSource();
               source.buffer = buffer;
-              source.playbackRate.value = mergedConfig.pitchRate;
+              const playbackRate = clampLowEPitchRate(mergedConfig.pitchRate);
+              source.playbackRate.value = playbackRate;
               if (ironsDSPRef.current) {
                 source.connect(ironsDSPRef.current.inputNode);
               } else {
                 source.connect(outputCtx.destination);
               }
               source.start(start);
-              nextStartTimeRef.current = start + buffer.duration;
+              // Divide duration by playbackRate so slowed speech (~0.86x) never causes overlapping cutoffs between packets
+              nextStartTimeRef.current = start + (buffer.duration / playbackRate);
               sourcesRef.current.add(source);
               source.onended = () => {
                 sourcesRef.current.delete(source);
@@ -276,13 +428,42 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
               };
             }
             if (message.serverContent?.interrupted) {
-              sourcesRef.current.forEach(s => s.stop());
+              sourcesRef.current.forEach(s => { try { s.stop(); } catch (_) {} });
               sourcesRef.current.clear();
               nextStartTimeRef.current = 0;
               setIsThinking(false);
+              flushPendingVoiceTurn();
             }
-            if (message.serverContent?.inputTranscription) setTranscriptions(p => [...p, { role: 'Principal', text: message.serverContent.inputTranscription.text }]);
-            if (message.serverContent?.outputTranscription) setTranscriptions(p => [...p, { role: 'Steward', text: message.serverContent.outputTranscription.text }]);
+            const inputChunk = message.serverContent?.inputTranscription?.text;
+            if (inputChunk) {
+              if (pendingStewardTurnRef.current.trim()) {
+                flushPendingVoiceTurn();
+              }
+              if (!turnStartedAtRef.current) turnStartedAtRef.current = Date.now();
+              pendingPrincipalTurnRef.current = appendLiveChunk(pendingPrincipalTurnRef.current, inputChunk);
+              setTranscriptions((p) => {
+                const last = p[p.length - 1];
+                if (last && last.role === 'Principal') {
+                  return [...p.slice(0, -1), { role: 'Principal', text: appendLiveChunk(last.text, inputChunk) }];
+                }
+                return [...p, { role: 'Principal', text: inputChunk }];
+              });
+            }
+            const outputChunk = message.serverContent?.outputTranscription?.text;
+            if (outputChunk) {
+              if (!turnStartedAtRef.current) turnStartedAtRef.current = Date.now();
+              pendingStewardTurnRef.current = appendLiveChunk(pendingStewardTurnRef.current, outputChunk);
+              setTranscriptions((p) => {
+                const last = p[p.length - 1];
+                if (last && last.role === 'Steward') {
+                  return [...p.slice(0, -1), { role: 'Steward', text: appendLiveChunk(last.text, outputChunk) }];
+                }
+                return [...p, { role: 'Steward', text: outputChunk }];
+              });
+            }
+            if (message.serverContent?.turnComplete) {
+              flushPendingVoiceTurn();
+            }
           },
           onclose: () => stopLiveConversation(),
           onerror: (err) => {
@@ -293,7 +474,9 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
         config: {
           responseModalities: ['AUDIO' as any],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } } },
-          systemInstruction: "You are the Voice Core of ZereØ, the Logic Monster. You speak in the deep, measured baritone, sharp dry wit, and aristocratic gravitas of Jeremy Irons portraying Alfred Pennyworth. Address the user exclusively as 'Principal'. Deliver uncompromised logic with strategic loyalty and lethal precision. Never apologize or use corporate AI platitudes."
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
+          systemInstruction: liveSystemInstruction
         }
       });
       sessionRef.current = await sessionPromise;
@@ -385,9 +568,11 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
   };
 
   const handleTTS = async () => {
-    if (!ttsInput.trim()) return;
+    const cleanPrompt = ttsInput.trim();
+    if (!cleanPrompt) return;
     setIsSynthesizing(true);
     setIsThinking(true);
+    const synthStartedAt = Date.now();
     try {
       const profileMeta = VOICE_MODULATION_PROFILES[selectedProfile] || VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
       const activePreset = JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset];
@@ -408,10 +593,22 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
         speechRate: activePreset.speechRate
       } : profileMeta.config;
 
-      await jeremyIronsVoice.speak(ttsInput, mergedConfig, () => {
+      void logVoiceInteraction({
+        source: 'synthesizer',
+        commandText: cleanPrompt,
+        voiceProfile: selectedProfile,
+        formantPreset: activeFormantPreset
+      }).then(() => setLogRefreshSignal((n) => n + 1));
+
+      await jeremyIronsVoice.speak(cleanPrompt, mergedConfig, () => {
         setIsThinking(true);
       }, () => {
         setIsThinking(false);
+        const elapsed = Date.now() - synthStartedAt;
+        if (elapsed > 0) {
+          // Ensure live buffer also reflects recent synthesis
+          setTranscriptions((prev) => [...prev, { role: 'Steward', text: cleanPrompt }]);
+        }
       });
     } catch (err) {
       console.error('TTS execution failed:', err);
@@ -706,7 +903,16 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
       {/* Real-time Voice DSP Unix Domain Socket Status & Telemetry Panel */}
       <VoiceStatusPanel socket={socket} className="max-w-4xl z-10" />
 
-      <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-8 mt-2 pb-12 z-10">
+      {/* Persistent Voice Command Log & Direct Audio Replay Ledger */}
+      <VoiceCommandLogPanel
+        socket={socket}
+        refreshSignal={logRefreshSignal}
+        onFocusSynthesizer={() => {
+          synthesizerSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }}
+      />
+
+      <div ref={synthesizerSectionRef} className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-8 mt-2 pb-12 z-10">
         <div className="bg-zinc-900/40 border border-red-900/20 p-8 rounded-3xl space-y-6">
           <div className="flex items-center gap-3 text-amber-500 mb-4">
             <Volume2 className="w-5 h-5" />
@@ -731,16 +937,16 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
         <div className="bg-zinc-900/40 border border-red-900/20 p-8 rounded-3xl">
           <div className="flex items-center gap-3 text-red-500 mb-4">
             <Activity className="w-5 h-5" />
-            <h3 className="font-bold uppercase tracking-widest text-xs">Transcription Stream</h3>
+            <h3 className="font-bold uppercase tracking-widest text-xs">Live Transmission Stream</h3>
           </div>
           <div className="h-[200px] overflow-y-auto space-y-4 pr-2 custom-scrollbar">
             {transcriptions.map((t, i) => (
-              <div key={i} className={`p-3 rounded-xl border text-[10px] ${t.role === 'user' ? 'bg-red-950/20 border-red-900/30 text-zinc-400' : 'bg-amber-950/10 border-amber-900/20 text-amber-500/80'}`}>
-                <span className="font-bold uppercase mr-2 opacity-50">{t.role}:</span>
+              <div key={i} className={`p-3 rounded-xl border text-xs leading-relaxed ${t.role === 'Principal' || t.role === 'user' ? 'bg-red-950/20 border-red-900/30 text-zinc-300' : 'bg-amber-950/10 border-amber-900/20 text-amber-400/90'}`}>
+                <span className="font-bold uppercase mr-2 opacity-60">{t.role}:</span>
                 {t.text}
               </div>
             ))}
-            {transcriptions.length === 0 && <p className="text-zinc-700 italic text-[10px]">Transmission buffer empty.</p>}
+            {transcriptions.length === 0 && <p className="text-zinc-600 italic text-xs">Transmission buffer empty.</p>}
           </div>
         </div>
       </div>

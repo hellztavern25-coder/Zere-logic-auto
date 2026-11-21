@@ -1,4 +1,3 @@
-
 import Anthropic from '@anthropic-ai/sdk';
 
 export const getAnthropicKey = () => {
@@ -17,20 +16,32 @@ export const getAnthropic = () => {
   });
 };
 
-export const generateClaudeContent = async (prompt: string, systemInstruction: string) => {
+export interface ClaudeTurnMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export const generateClaudeContent = async (
+  prompt: string,
+  systemInstruction: string,
+  history?: ClaudeTurnMessage[]
+) => {
   const anthropic = getAnthropic();
   if (!anthropic) {
     throw new Error("AUTH_ERROR: Principal, the Anthropic neural bridge is not anchored. Please provide a key in System Control.");
   }
+
+  const messages: ClaudeTurnMessage[] =
+    history && history.length > 0
+      ? history
+      : [{ role: 'user', content: prompt }];
 
   try {
     const message = await anthropic.messages.create({
       model: "claude-3-5-sonnet-20240620",
       max_tokens: 4096,
       system: systemInstruction,
-      messages: [
-        { role: "user", content: prompt }
-      ],
+      messages,
     });
 
     // Extract text content

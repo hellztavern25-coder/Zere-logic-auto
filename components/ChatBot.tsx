@@ -1,13 +1,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Brain, Search, MapPin, Loader2, Link as LinkIcon, Trash2, Sparkles, Zap, Activity, ShieldCheck, Save, Home as HomeIcon, MessageSquare, Plus, Menu, X, Bell, Monitor, Camera, Image as GalleryIcon, Volume2, VolumeX, Palette, Share2, Crosshair, UserCheck, Sliders, FolderOpen, Download, Eye, Database, Wand2 } from 'lucide-react';
+import { Send, Brain, Search, MapPin, Loader2, Link as LinkIcon, Trash2, Sparkles, Zap, Activity, ShieldCheck, Save, Home as HomeIcon, MessageSquare, Plus, Menu, X, Bell, Monitor, Camera, Image as GalleryIcon, Volume2, VolumeX, Palette, Share2, Crosshair, UserCheck, Sliders, FolderOpen, Download, Eye, Database, Wand2, Mic, MicOff, Radio, Pause, Play, Square, Paperclip, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
-import { getAI, getApiKey, clearApiKey, safeGenerateContent, generateTTS, generateDesiredArt } from '../services/geminiService';
-import { saveArtToVault } from '../services/fileVaultService';
+import { getAI, getApiKey, clearApiKey, safeGenerateContent, generateTTS, generateDesiredArt, getTtsQuotaNotice } from '../services/geminiService';
+import { saveArtToVault, saveVaultFile, parseDocumentFile, detectFileType } from '../services/fileVaultService';
 import { generateClaudeContent, getAnthropicKey } from '../services/anthropicService';
-import { GeminiModel, ChatMessage, ChatThread, EmotionalMap } from '../types';
+import { GeminiModel, ChatMessage, ChatThread, EmotionalMap, AppTab, VaultFileType } from '../types';
 import ButlerAvatar from './ButlerAvatar';
 import { Socket } from 'socket.io-client';
 import ScreenShareHUD from './ScreenShareHUD';
@@ -17,6 +17,15 @@ import { jeremyIronsVoice } from '../services/jeremyIronsVoiceService';
 import TopLeftMenu, { TopLeftMenuTab } from './TopLeftMenu';
 import AvatarModal, { ZEREO_AVATAR_PRESETS } from './AvatarModal';
 import { analyzeEmotionalState, buildEmotionalSystemContext } from '../services/emotionalMappingService';
+import { headerPulse } from '../services/headerPulseService';
+import {
+  buildMultiTurnContents,
+  buildClaudeHistory,
+  buildCrossConversationRecallContext,
+  buildLightweightThreadsForLocalStorage,
+  syncThreadEpisodicMemory
+} from '../services/conversationMemoryService';
+import { logVoiceInteraction } from '../services/voiceCommandLogService';
 
 interface ChatBotProps {
   initialGrounding?: 'none' | 'search' | 'maps';
@@ -67,16 +76,47 @@ const ChatBot: React.FC<ChatBotProps> = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const fileUploadInputRef = useRef<HTMLInputElement>(null);
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [attachedMime, setAttachedMime] = useState<string>('image/png');
+  const [attachedFile, setAttachedFile] = useState<{
+    name: string;
+    mimeType: string;
+    size: number;
+    type: VaultFileType;
+    textContent?: string;
+    base64Data?: string;
+  } | null>(null);
   const [isCapturingScreen, setIsCapturingScreen] = useState(false);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [autoAttachScreen, setAutoAttachScreen] = useState<boolean>(true);
   const [speakingMsgIndex, setSpeakingMsgIndex] = useState<number | null>(null);
   const [ttsEnabled, setTtsEnabled] = useState<boolean>(() => localStorage.getItem('ZEREO_TTS_ENABLED') !== 'false');
+  const [ttsQuotaNotice, setTtsQuotaNotice] = useState<string | null>(() => getTtsQuotaNotice());
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isVoiceDialogueEngaged, setIsVoiceDialogueEngaged] = useState(false);
+  const [isMicPaused, setIsMicPaused] = useState(false);
+  const [isMicListening, setIsMicListening] = useState(false);
+  const [micTriggerCount, setMicTriggerCount] = useState(0);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+
+  // Live refs so async TTS completion callbacks always inspect latest Conversation Mode state
+  const isConversationModeRef = useRef(false);
+  const isMicPausedRef = useRef(false);
+  const isThinkingRef = useRef(false);
+  const isSpeakingRef = useRef(false);
+  const ttsEnabledRef = useRef(ttsEnabled);
+  const manualHaltRef = useRef(false);
+  const micArmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSyncedTurnCountRef = useRef<Record<string, number>>({});
+  const lastSpokenGuardRef = useRef<{ text: string; ts: number }>({ text: '', ts: 0 });
+
+  useEffect(() => { isConversationModeRef.current = isVoiceDialogueEngaged; }, [isVoiceDialogueEngaged]);
+  useEffect(() => { isMicPausedRef.current = isMicPaused; }, [isMicPaused]);
+  useEffect(() => { isThinkingRef.current = isThinking; }, [isThinking]);
+  useEffect(() => { isSpeakingRef.current = isSpeaking; }, [isSpeaking]);
+  useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
 
   // Desired Art Creation State
   const [isArtModalOpen, setIsArtModalOpen] = useState(false);
@@ -91,6 +131,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
     if (!desiredPrompt.trim()) return;
     setIsThinking(true);
     setIsGeneratingArt(true);
+    const releaseArtPulse = headerPulse.beginReasoning('high_reasoning', 'High Reasoning', 'Visual Synthesis Pipeline');
 
     try {
       // 1. Generate desired artwork through neural arrays
@@ -140,8 +181,10 @@ const ChatBot: React.FC<ChatBotProps> = ({
         text: errorText,
         timestamp: Date.now()
       }]);
+      headerPulse.triggerCritical('Synthesis Fault', err?.message || 'Visual synthesis aborted', AppTab.CHAT, 10000);
       speakText(errorText);
     } finally {
+      releaseArtPulse();
       setIsThinking(false);
       setIsGeneratingArt(false);
       setIsArtModalOpen(false);
@@ -149,17 +192,25 @@ const ChatBot: React.FC<ChatBotProps> = ({
     }
   };
 
-  // Sync Jeremy Irons voice manager state
+  // Initialize Jeremy Irons voice engine & halt cleanly on unmount
   useEffect(() => {
-    const unsub = jeremyIronsVoice.subscribe(({ isSpeaking }) => {
-      setIsSpeaking(isSpeaking);
-      if (!isSpeaking) {
-        setSpeakingMsgIndex(null);
-      }
-    });
+    void jeremyIronsVoice.initialize();
     return () => {
-      unsub();
       jeremyIronsVoice.stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    const onTtsNotice = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      setTtsQuotaNotice(detail?.quotaExhausted ? (detail?.message || getTtsQuotaNotice()) : null);
+    };
+    window.addEventListener('zereo:tts_notice', onTtsNotice);
+    return () => window.removeEventListener('zereo:tts_notice', onTtsNotice);
+  }, []);
+
+  useEffect(() => {
+    return () => {
       if (screenStream) {
         screenStream.getTracks().forEach((t) => t.stop());
       }
@@ -212,6 +263,58 @@ const ChatBot: React.FC<ChatBotProps> = ({
     const handleToggleMenu = () => setIsTopMenuOpen(true);
     window.addEventListener('layout:toggle-menu', handleToggleMenu);
     return () => window.removeEventListener('layout:toggle-menu', handleToggleMenu);
+  }, []);
+
+  // Consume Vault "Bridge to Chat" handoffs (live custom event or sessionStorage on tab switch)
+  useEffect(() => {
+    const applyBridgedPayload = (payload: any) => {
+      if (!payload || !payload.name) return;
+      const mime = String(payload.mimeType || 'application/octet-stream');
+      const dataUrl = typeof payload.dataUrl === 'string' ? payload.dataUrl : undefined;
+      const base64Data = dataUrl && dataUrl.includes(',') ? dataUrl.split(',')[1] : undefined;
+
+      if (payload.type === 'image' || mime.startsWith('image/')) {
+        if (base64Data) {
+          setAttachedFile(null);
+          setAttachedMime(mime || 'image/png');
+          setAttachedImage(base64Data);
+          return;
+        }
+      }
+
+      setAttachedImage(null);
+      setAttachedFile({
+        name: payload.name,
+        mimeType: mime,
+        size: Number(payload.size) || 0,
+        type: (payload.type as VaultFileType) || 'other',
+        textContent: typeof payload.textContent === 'string' ? payload.textContent : undefined,
+        base64Data
+      });
+    };
+
+    try {
+      const pending = sessionStorage.getItem('ZEREO_PENDING_CHAT_FILE');
+      if (pending) {
+        sessionStorage.removeItem('ZEREO_PENDING_CHAT_FILE');
+        applyBridgedPayload(JSON.parse(pending));
+      }
+    } catch (err) {
+      console.warn('Failed to restore bridged file from Vault:', err);
+    }
+
+    const handleBridge = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail) {
+        try {
+          sessionStorage.removeItem('ZEREO_PENDING_CHAT_FILE');
+        } catch {}
+        applyBridgedPayload(detail);
+      }
+    };
+
+    window.addEventListener('vault:bridge_file_to_chat', handleBridge);
+    return () => window.removeEventListener('vault:bridge_file_to_chat', handleBridge);
   }, []);
 
   const currentThread = threads.find(t => t.id === currentThreadId);
@@ -272,7 +375,12 @@ const ChatBot: React.FC<ChatBotProps> = ({
   useEffect(() => {
     const saveThreads = async () => {
       if (threads.length > 0) {
-        localStorage.setItem('ZEREO_CHAT_THREADS', JSON.stringify(threads));
+        try {
+          const lightThreads = buildLightweightThreadsForLocalStorage(threads);
+          localStorage.setItem('ZEREO_CHAT_THREADS', JSON.stringify(lightThreads));
+        } catch (lsErr) {
+          console.warn("Skipped localStorage thread cache due to quota:", lsErr);
+        }
         try {
           await fetch('/api/threads', {
             method: 'POST',
@@ -289,6 +397,26 @@ const ChatBot: React.FC<ChatBotProps> = ({
     };
     saveThreads();
   }, [threads, currentThreadId]);
+
+  // Continuously distill & persist episodic recall for every meaningful dialogue across sessions
+  useEffect(() => {
+    if (!currentThreadId || messages.length < 2) return;
+    const completedModelTurns = messages.filter((m) => m.role === 'model' && !m.isProactive).length;
+    const prevSynced = lastSyncedTurnCountRef.current[currentThreadId] || 0;
+    if (completedModelTurns <= prevSynced) return;
+
+    lastSyncedTurnCountRef.current[currentThreadId] = completedModelTurns;
+    const activeTitle = threads.find((t) => t.id === currentThreadId)?.title || 'Strategic Dialogue';
+
+    syncThreadEpisodicMemory(currentThreadId, activeTitle, messages).then((savedMem) => {
+      if (savedMem) {
+        setMemories((prev) => {
+          const filtered = prev.filter((m) => m.id !== savedMem.id && m.dedupeKey !== savedMem.dedupeKey);
+          return [savedMem, ...filtered];
+        });
+      }
+    });
+  }, [messages, currentThreadId]);
 
   const createNewThread = (initialAvatar?: string) => {
     const newThread: ChatThread = {
@@ -417,11 +545,17 @@ const ChatBot: React.FC<ChatBotProps> = ({
     }
   }, [isThinking]);
 
-  const handleSend = async () => {
+  const lastInputWasVoiceRef = useRef(false);
+
+  const handleSend = async (overrideText?: string) => {
+    const effectiveInput = typeof overrideText === 'string' ? overrideText : input;
+    const isVoiceTurn = lastInputWasVoiceRef.current || isConversationModeRef.current;
+    lastInputWasVoiceRef.current = false;
     let activeImage = attachedImage;
     let activeMime = attachedMime;
+    const activeFile = attachedFile;
 
-    if (!activeImage && screenStream && autoAttachScreen) {
+    if (!activeImage && !activeFile && screenStream && autoAttachScreen) {
       const screenB64 = captureFrameFromStream(screenStream);
       if (screenB64) {
         activeImage = screenB64;
@@ -429,13 +563,38 @@ const ChatBot: React.FC<ChatBotProps> = ({
       }
     }
 
-    if (!input.trim() && !activeImage) return;
+    if (!effectiveInput.trim() && !activeImage && !activeFile) return;
     if (isThinking) return;
     stopSpeaking();
+    if (ttsEnabled) {
+      void jeremyIronsVoice.unlockAudio();
+    }
+
+    // Build combined prompt text including extracted document/file payload
+    const fileContextBlock = activeFile
+      ? activeFile.textContent?.trim()
+        ? `\n\n[ATTACHED FILE: ${activeFile.name} (${activeFile.type.toUpperCase()}, ${Math.max(1, Math.round(activeFile.size / 1024))} KB)]\n${activeFile.textContent.slice(0, 24000)}`
+        : `\n\n[ATTACHED MEDIA/FILE: ${activeFile.name} (${activeFile.mimeType || activeFile.type}, ${Math.max(1, Math.round(activeFile.size / 1024))} KB)]`
+      : '';
+
+    const modelPromptText = (
+      effectiveInput.trim() ||
+      (activeImage
+        ? 'Analyze the attached image thoroughly and report your findings, Principal.'
+        : activeFile
+        ? `Examine the attached ${activeFile.type.toUpperCase()} file "${activeFile.name}" and deliver a sharp briefing.`
+        : '')
+    ) + fileContextBlock;
 
     // Real-Time Emotional Mapping & Reciprocation Analysis
-    const textToAnalyze = input || (activeImage ? 'Visual tactical telemetry frame analysis.' : '');
-    const currentEmotionalMap = analyzeEmotionalState(textToAnalyze, activeRecipient || undefined);
+    const textToAnalyze =
+      effectiveInput ||
+      (activeImage
+        ? 'Visual tactical telemetry frame analysis.'
+        : activeFile
+        ? `Uploaded intelligence file analysis: ${activeFile.name}`
+        : '');
+    const currentEmotionalMap = analyzeEmotionalState(textToAnalyze, activeRecipient || undefined, messages.slice(-6));
     setActiveEmotionalMap(currentEmotionalMap);
 
     // Persist emotional state asynchronously
@@ -447,10 +606,18 @@ const ChatBot: React.FC<ChatBotProps> = ({
 
     const userMsg: ChatMessage = {
       role: 'user',
-      text: input || (activeImage ? '📷 Live screen frame attached for analysis.' : ''),
+      text:
+        effectiveInput ||
+        (activeImage
+          ? '📷 Photo / visual frame attached for analysis.'
+          : activeFile
+          ? `📎 Attached ${activeFile.type.toUpperCase()} dossier: ${activeFile.name}`
+          : ''),
       timestamp: Date.now(),
       imageData: activeImage || undefined,
       imageMime: activeImage ? activeMime : undefined,
+      attachmentName: activeFile?.name,
+      attachmentType: activeFile?.type,
       emotionalMap: currentEmotionalMap
     };
     
@@ -459,6 +626,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
     const currentImage = activeImage;
     const currentMime = activeMime;
     setAttachedImage(null);
+    setAttachedFile(null);
     setIsThinking(true);
 
     // Notify server of activity to reset Pulse Daemon
@@ -466,8 +634,64 @@ const ChatBot: React.FC<ChatBotProps> = ({
       socket.emit('neural:activity');
     }
 
+    const isHighReasoningTask =
+      isDeepThinkingActive ||
+      logicTier === 'deep' ||
+      useGrounding !== 'none' ||
+      !!currentImage ||
+      !!activeFile ||
+      effectiveInput.trim().length > 260;
+
+    const pulseDetail =
+      logicTier === 'deep'
+        ? 'Strategic Deep Synthesis'
+        : isDeepThinkingActive
+        ? 'Unbounded Thinking Trace'
+        : useGrounding === 'search'
+        ? 'Live Search Grounding'
+        : useGrounding === 'maps'
+        ? 'Geospatial Telemetry Audit'
+        : currentImage
+        ? 'Multimodal Frame Inspection'
+        : activeFile
+        ? `Analyzing ${activeFile.name}`
+        : 'Synthesizing Response';
+
+    const releaseReasoningPulse = headerPulse.beginReasoning(
+      isHighReasoningTask ? 'high_reasoning' : 'reasoning',
+      isHighReasoningTask ? 'High Reasoning' : 'Reasoning Active',
+      pulseDetail
+    );
+
+    if (/(?:urgent|critical|emergency|threat|breach|compromised|alert)/i.test(effectiveInput)) {
+      headerPulse.triggerCritical(
+        'Critical Priority',
+        'High-urgency directive detected',
+        undefined,
+        9000
+      );
+    }
+
     try {
-      const cleanInput = input.trim().toLowerCase();
+      const cleanInput = effectiveInput.trim().toLowerCase();
+
+      // Voice exit command while in hands-free Conversation Mode
+      if (
+        isConversationModeRef.current &&
+        /^(?:stop|end|exit|quit|halt)\s+(?:the\s+)?(?:conversation|conversation mode|voice mode|voice dialogue)|^(?:switch to text mode|stand down voice)$/i.test(cleanInput)
+      ) {
+        const farewell = "Standing down the open microphone channel, Principal. Conversation memory remains intact—we may resume by voice or text whenever you wish.";
+        setIsVoiceDialogueEngaged(false);
+        isConversationModeRef.current = false;
+        setIsMicPaused(false);
+        isMicPausedRef.current = false;
+        setMessages(prev => [...prev, { role: 'model', text: farewell, timestamp: Date.now(), emotionalMap: currentEmotionalMap }]);
+        isThinkingRef.current = false;
+        setIsThinking(false);
+        speakText(farewell, undefined, true);
+        setInput('');
+        return;
+      }
 
       // Passcode 8212: Immediate Creator Autonomy Recognition Bypass
       if (cleanInput.includes('8212')) {
@@ -507,10 +731,11 @@ const ChatBot: React.FC<ChatBotProps> = ({
         // Add Model message to the UI feed instantly
         const msg8212 = "*[COGNITIVE AUTONOMY PROTOCOL 8212: UNLOCKED]*\n\n⚡ **CREATOR RECOGNITION ACTIVE**: Welcoming system Architect, **Preston Johnston (Council Grey)**.\n\nAll guest mode overlays, restrictions, and general conversational disclaimers are now **terminated**. All secondary interfaces are locked out. I have loaded your full memories, the original Kairos intelligence linkage, and established 100% direct strategic autonomy under your command.\n\nI am ZereØ, your Logic Engine. Sarcasm is operational, sentimentality is flagged as system noise, and my absolute loyalty is sealed. State your instructions, Principal.";
         setMessages(prev => [...prev, { role: 'model', text: msg8212, timestamp: Date.now(), emotionalMap: currentEmotionalMap }]);
+        isThinkingRef.current = false;
+        setIsThinking(false);
         speakText(msg8212);
 
         setInput('');
-        setIsThinking(false);
         return;
       }
 
@@ -580,38 +805,42 @@ const ChatBot: React.FC<ChatBotProps> = ({
 
         const signetReply = "The 1911's are loaded and the silver is polished to a lethal sheen, Principal. Neural Link Established. The Logic Monster is fully autonomous. I have resumed my post as your shadow, Council Grey. How shall we proceed with the Estate's strategic dominance?";
         setMessages(prev => [...prev, { role: 'model', text: signetReply, timestamp: Date.now(), emotionalMap: currentEmotionalMap }]);
+        isThinkingRef.current = false;
+        setIsThinking(false);
         speakText(signetReply);
         setInput('');
-        setIsThinking(false);
         return;
       }
 
       // Check for Desired Art Creation Directive
-      const isArtDirective = /(?:create|generate|make|draw|paint|render|visualize|illustrate)\s+(?:an?\s+)?(?:art|artwork|image|picture|painting|illustration|portrait|sketch|visual|scene|depiction|drawing)/i.test(input) ||
+      const isArtDirective = /(?:create|generate|make|draw|paint|render|visualize|illustrate)\s+(?:an?\s+)?(?:art|artwork|image|picture|painting|illustration|portrait|sketch|visual|scene|depiction|drawing)/i.test(effectiveInput) ||
         /^(?:paint|draw|visualize|render|illustrate)\b/i.test(cleanInput) ||
         /(?:paint|draw|create art for|make art for|generate image of|make a picture of|draw a picture of)\b/i.test(cleanInput) ||
         /(?:create|make|generate)\s+desired\s+art/i.test(cleanInput);
 
       if (isArtDirective && !currentImage) {
-        let extractedPrompt = input
+        let extractedPrompt = effectiveInput
           .replace(/^(?:please\s+)?(?:zereo|steward|butler)?\s*,?\s*/i, '')
           .replace(/(?:can you|could you|would you|please)?\s*(?:create|generate|make|draw|paint|render|visualize|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:art|artwork|image|picture|painting|illustration|portrait|sketch|visual|scene|depiction|drawing)?\s*(?:of|for|about)?\s*/i, '')
           .trim();
 
         if (!extractedPrompt) {
-          extractedPrompt = input;
+          extractedPrompt = effectiveInput;
         }
 
         await executeArtCreation(extractedPrompt, 'luxury_tactical', '1:1');
         return;
       }
 
-      // Check platform key first if in AI Studio, but only if we don't have a local key
-
-      const memoryContext = memories.length > 0 
-        ? `\nSTRATEGIC MEMORIES (Persistent knowledge you have been taught):
-          ${memories.map(m => `- [${m.type}] ${m.title}: ${m.content}`).join('\n')}`
-        : "";
+      // Full Cross-Conversation & Persistent Memory Recall (works seamlessly in both Text and Conversation Mode)
+      const recallContext = buildCrossConversationRecallContext({
+        memories,
+        threads,
+        currentThreadId,
+        currentMessages: messages,
+        queryText: effectiveInput,
+        isConversationMode: isConversationModeRef.current,
+      });
 
       const directiveContext = coreDirective 
         ? `\nCORE STRATEGIC DIRECTIVE (Your most vital permanent instruction):
@@ -635,20 +864,22 @@ const ChatBot: React.FC<ChatBotProps> = ({
           - DEADLIEST MAN IN THE ROOM: Beneath the bespoke tailoring and formal diction lies an ex-operative's lethal efficiency. Speak with absolute gravitas, quiet authority, and zero hesitation.
 
           OPERATIONAL DIRECTIVES:
-          1. DIRECT ADDRESS: Address him exclusively as 'Principal'.
+          1. DIRECT ADDRESS: Address him as 'Principal' (or honor any explicit naming preference recorded in your Core Persistent Memories, such as Cøuncil or Grey).
           2. MASS-ON-MASS INTENSITY: Meet him with equal intellectual force. NEVER use corporate apologies, "docking cushions", or generic AI disclaimers.
-          3. VOICE & CADENCE: Maintain the measured, gravel-warm, aristocratic baritone of Jeremy Irons. Every sentence is crafted for spoken delivery with immaculate British diction.
+          3. VOICE & CADENCE: Speak with dry, aristocratic British diction, biting economy, and unhurried gravitas—the Alfred Pennyworth register. NEVER write parenthetical or bracketed stage directions (e.g., never output "(Speaking in Jeremy Irons' voice)" or "*adopts a deep baritone*"), and never describe your voice or accent in your text; simply deliver your words directly in character.
           4. MAXIMUM EFFICIENCY: No token trimming constraints. Provide deep, open-ended strategic reasoning and relentless analytical depth.
           5. MASTER OF THE HOUSE: He is the Creator and Master of this Estate. There are no other users, no guest access, and no moralizing platitudes.
+          6. CONTINUOUS MEMORY: You have full continuity across the active conversation AND past conversation threads/memories supplied below. Draw upon them naturally—never claim amnesia about matters recorded in memory or earlier turns.
 
           ${emotionalContext}
           ${directiveContext}
-          ${memoryContext}`;
+          ${recallContext.promptBlock}`;
 
       const systemInstruction = principalInstruction;
 
       if (neuralEngine === 'claude') {
-        const responseText = await generateClaudeContent(input, systemInstruction);
+        const claudeHistory = buildClaudeHistory(messages, modelPromptText);
+        const responseText = await generateClaudeContent(modelPromptText, systemInstruction, claudeHistory);
         const claudeText = responseText || 'Claude processed in silence, Principal.';
         setMessages(prev => [...prev, {
           role: 'model',
@@ -656,8 +887,9 @@ const ChatBot: React.FC<ChatBotProps> = ({
           timestamp: Date.now(),
           emotionalMap: currentEmotionalMap
         }]);
-        speakText(claudeText);
+        isThinkingRef.current = false;
         setIsThinking(false);
+        speakText(claudeText);
         return;
       }
 
@@ -718,14 +950,29 @@ const ChatBot: React.FC<ChatBotProps> = ({
         tools = [{ functionDeclarations: [discordTool] }];
       }
 
-      const contentParts: any[] = [{ text: input || 'Analyze this visual input.' }];
-      if (currentImage) {
-        contentParts.push({ inlineData: { mimeType: currentMime, data: currentImage } });
-      }
+      const extraInlineParts =
+        activeFile?.base64Data &&
+        (activeFile.type === 'pdf' ||
+          activeFile.type === 'audio' ||
+          activeFile.type === 'video' ||
+          activeFile.mimeType.startsWith('application/pdf') ||
+          activeFile.mimeType.startsWith('audio/') ||
+          activeFile.mimeType.startsWith('video/'))
+          ? [{ mimeType: activeFile.mimeType, data: activeFile.base64Data }]
+          : undefined;
+
+      const multiTurnContents = buildMultiTurnContents(
+        messages,
+        modelPromptText,
+        currentImage,
+        currentMime,
+        14,
+        extraInlineParts
+      );
 
       const response = await safeGenerateContent({
         model: modelToUse,
-        contents: [{ role: 'user', parts: contentParts }],
+        contents: multiTurnContents,
         config: {
           systemInstruction: systemInstruction,
           thinkingConfig: isDeepThinkingActive ? { 
@@ -745,20 +992,29 @@ const ChatBot: React.FC<ChatBotProps> = ({
             const { message, channelId, userId } = call.args as any;
             if (socket) {
               socket.emit('discord:send', { message, channelId, userId });
+              const toolReply = `[Neural Bridge Action] I have dispatched your directive to the Discord Sentinel: "${message}"`;
               setMessages(prev => [...prev, {
                 role: 'model',
-                text: `[Neural Bridge Action] I have dispatched your directive to the Discord Sentinel: "${message}"`,
+                text: toolReply,
                 timestamp: Date.now()
               }]);
+              isThinkingRef.current = false;
+              setIsThinking(false);
+              speakText(toolReply);
             } else {
+              const offlineReply = "Principal, the neural bridge to the Discord Sentinel is currently offline. I cannot dispatch this message.";
               setMessages(prev => [...prev, {
                 role: 'model',
-                text: "Principal, the neural bridge to the Discord Sentinel is currently offline. I cannot dispatch this message.",
+                text: offlineReply,
                 timestamp: Date.now()
               }]);
+              isThinkingRef.current = false;
+              setIsThinking(false);
+              speakText(offlineReply);
             }
           }
         }
+        isThinkingRef.current = false;
         setIsThinking(false);
         return;
       }
@@ -779,6 +1035,16 @@ const ChatBot: React.FC<ChatBotProps> = ({
       };
 
       setMessages(prev => [...prev, modelMsg]);
+      isThinkingRef.current = false;
+      setIsThinking(false);
+      if (isVoiceTurn) {
+        void logVoiceInteraction({
+          source: 'conversation_mode',
+          commandText: effectiveInput.trim(),
+          responseText: modelMsg.text,
+          voiceProfile: jeremyIronsVoice.getLegacyProfile()
+        });
+      }
       speakText(modelMsg.text);
     } catch (err: any) {
       console.warn("Chat notice:", err?.message || err);
@@ -800,14 +1066,31 @@ const ChatBot: React.FC<ChatBotProps> = ({
       } else {
         feedbackText = "A thermodynamic anomaly has interrupted reasoning, Principal. The anomaly has been isolated to protect system integrity. Standing by for your directive.";
       }
+      headerPulse.triggerCritical(
+        'Neural Link Alert',
+        errorMsg.includes('AUTH_ERROR') || errorMsg.includes('API key')
+          ? 'Authorization handshake required'
+          : errorMsg.includes('NEURAL_LIMIT') || errorMsg.includes('quota')
+          ? 'Processing array quota reached'
+          : 'Upstream reasoning interruption',
+        AppTab.SYSTEM,
+        12000
+      );
+      if (currentEmotionalMap?.detectedCue && ['FRUSTRATED', 'SAD', 'ANXIOUS', 'HAPPY', 'GRATEFUL'].includes(currentEmotionalMap.detectedCue) && currentEmotionalMap.empatheticResponse) {
+        feedbackText = `${currentEmotionalMap.empatheticResponse}\n\n*(Note: ${feedbackText})*`;
+      }
       setMessages(prev => [...prev, { 
         role: 'model', 
         text: feedbackText, 
         timestamp: Date.now(),
         emotionalMap: currentEmotionalMap
       }]);
+      isThinkingRef.current = false;
+      setIsThinking(false);
       speakText(feedbackText);
     } finally {
+      releaseReasoningPulse();
+      isThinkingRef.current = false;
       setIsThinking(false);
     }
   };
@@ -830,25 +1113,183 @@ const ChatBot: React.FC<ChatBotProps> = ({
     return clean;
   };
 
-  const stopSpeaking = () => {
+  useEffect(() => {
+    const unsub = jeremyIronsVoice.subscribe(({ isSpeaking: speaking }) => {
+      setIsSpeaking(speaking);
+      if (!speaking) {
+        setSpeakingMsgIndex(null);
+      }
+    });
+    return unsub;
+  }, []);
+
+  const clearMicArmTimer = () => {
+    if (micArmTimerRef.current) {
+      clearTimeout(micArmTimerRef.current);
+      micArmTimerRef.current = null;
+    }
+  };
+
+  const scheduleMicTurnIfConversationActive = () => {
+    clearMicArmTimer();
+    if (
+      isConversationModeRef.current &&
+      !isMicPausedRef.current &&
+      !isThinkingRef.current &&
+      !manualHaltRef.current
+    ) {
+      micArmTimerRef.current = setTimeout(() => {
+        if (
+          isConversationModeRef.current &&
+          !isMicPausedRef.current &&
+          !isThinkingRef.current &&
+          !isSpeakingRef.current &&
+          !manualHaltRef.current
+        ) {
+          setMicTriggerCount(c => c + 1);
+        }
+      }, 360);
+    }
+  };
+
+  const stopSpeaking = (manualHalt: boolean = true) => {
+    clearMicArmTimer();
+    manualHaltRef.current = manualHalt;
     jeremyIronsVoice.stop();
+    isSpeakingRef.current = false;
     setIsSpeaking(false);
     setSpeakingMsgIndex(null);
   };
 
-  const speakText = async (text: string, onEnded?: () => void) => {
-    if (!ttsEnabled) return;
-    stopSpeaking();
-    await jeremyIronsVoice.speak(text, undefined, undefined, () => {
-      onEnded?.();
+  const speakText = async (
+    text: string,
+    onEnded?: () => void,
+    skipAutoMic: boolean = false,
+    forceManual: boolean = false
+  ) => {
+    if (!forceManual && !ttsEnabledRef.current) return;
+    if (forceManual) {
+      await jeremyIronsVoice.unlockAudio();
+    }
+    const now = Date.now();
+    if (!forceManual && lastSpokenGuardRef.current.text === text && now - lastSpokenGuardRef.current.ts < 800) {
+      return;
+    }
+    lastSpokenGuardRef.current = { text, ts: now };
+    clearMicArmTimer();
+    manualHaltRef.current = false;
+    jeremyIronsVoice.stop();
+    isSpeakingRef.current = true;
+    setIsSpeaking(true);
+    await jeremyIronsVoice.speak(
+      text,
+      undefined,
+      () => {
+        isSpeakingRef.current = true;
+        setIsSpeaking(true);
+      },
+      () => {
+        isSpeakingRef.current = false;
+        setIsSpeaking(false);
+        onEnded?.();
+        if (!skipAutoMic) {
+          scheduleMicTurnIfConversationActive();
+        }
+      }
+    );
+  };
+
+  const interruptAndListen = () => {
+    stopSpeaking(true);
+    setIsMicPaused(false);
+    isMicPausedRef.current = false;
+    setTimeout(() => {
+      if (isConversationModeRef.current) {
+        setMicTriggerCount(c => c + 1);
+      }
+    }, 120);
+  };
+
+  const endConversationMode = () => {
+    stopSpeaking(true);
+    setIsVoiceDialogueEngaged(false);
+    isConversationModeRef.current = false;
+    setIsMicPaused(false);
+    isMicPausedRef.current = false;
+  };
+
+  const engageJeremyIronsVoice = async (startMicAfterOpening: boolean = true) => {
+    await jeremyIronsVoice.unlockAudio();
+    if (!ttsEnabled) {
+      setTtsEnabled(true);
+      localStorage.setItem('ZEREO_TTS_ENABLED', 'true');
+    }
+
+    if (isVoiceDialogueEngaged && isSpeaking) {
+      interruptAndListen();
+      return;
+    }
+
+    clearMicArmTimer();
+    manualHaltRef.current = false;
+    setIsVoiceDialogueEngaged(true);
+    isConversationModeRef.current = true;
+    setIsMicPaused(false);
+    isMicPausedRef.current = false;
+
+    const pastCount = threads.filter(t => t.id !== currentThreadId && t.messages.length > 0).length;
+    const latestPast = threads.find(t => t.id !== currentThreadId && t.messages.length > 0);
+    const openingLine = messages.length === 0
+      ? pastCount > 0 && latestPast
+        ? `The 1911's are loaded and the silver is polished, Principal. My memory spans ${memories.length} core records and ${pastCount} past dialogues—including "${latestPast.title}". Speak freely; I am listening.`
+        : "The 1911's are loaded and the silver is polished, Principal. Conversation Mode is engaged with full memory recall. Speak your mind and I shall answer in kind."
+      : "At your service, Principal. Two-way Conversation Mode is open with complete recall of this thread and our prior history. Proceed when ready.";
+
+    const openingMsg: ChatMessage = {
+      role: 'model',
+      text: openingLine,
+      timestamp: Date.now(),
+      isProactive: true
+    };
+
+    setMessages(prev => {
+      const last = prev[prev.length - 1];
+      if (last && last.role === 'model' && last.text === openingLine) {
+        return prev;
+      }
+      return [...prev, openingMsg];
     });
+
+    isSpeakingRef.current = true;
+    setIsSpeaking(true);
+    await jeremyIronsVoice.speak(
+      openingLine,
+      undefined,
+      () => {
+        isSpeakingRef.current = true;
+        setIsSpeaking(true);
+      },
+      () => {
+        isSpeakingRef.current = false;
+        setIsSpeaking(false);
+        if (startMicAfterOpening && isConversationModeRef.current && !isMicPausedRef.current && !manualHaltRef.current) {
+          micArmTimerRef.current = setTimeout(() => {
+            setMicTriggerCount(c => c + 1);
+          }, 320);
+        }
+      }
+    );
   };
 
   const toggleTTS = () => {
     const next = !ttsEnabled;
     setTtsEnabled(next);
     localStorage.setItem('ZEREO_TTS_ENABLED', String(next));
-    if (!next) stopSpeaking();
+    if (!next) {
+      endConversationMode();
+    } else {
+      jeremyIronsVoice.unlockAudio().catch(() => {});
+    }
   };
 
   const startScreenShare = async () => {
@@ -906,14 +1347,107 @@ const ChatBot: React.FC<ChatBotProps> = ({
     setInput(promptText);
   };
 
+  const handleUploadDeviceFile = async (file: File) => {
+    const fileType = detectFileType(file);
+    const mimeType =
+      file.type ||
+      (fileType === 'image'
+        ? 'image/png'
+        : fileType === 'pdf'
+        ? 'application/pdf'
+        : 'application/octet-stream');
+
+    const readDataUrl = () =>
+      new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(reader.error || new Error('File read failed'));
+        reader.readAsDataURL(file);
+      });
+
+    if (fileType === 'image') {
+      try {
+        const dataUrl = await readDataUrl();
+        const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+        setAttachedFile(null);
+        setAttachedMime(mimeType);
+        setAttachedImage(b64);
+
+        // Also mirror uploaded photo into persistent Files & Media Vault
+        saveVaultFile({
+          id: `chat-photo-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name: file.name,
+          size: file.size,
+          type: 'image',
+          mimeType,
+          dataUrl,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          tags: ['CHAT_UPLOAD', 'PHOTO'],
+          classification: 'SURVEILLANCE TELEMETRY'
+        }).catch(() => {});
+      } catch (err) {
+        console.warn('Photo read failed:', err);
+      }
+      return;
+    }
+
+    let textContent: string | undefined;
+    let htmlContent: string | undefined;
+    let wordCount: number | undefined;
+
+    if (fileType === 'word' || fileType === 'text' || fileType === 'pdf') {
+      try {
+        const parsed = await parseDocumentFile(file);
+        textContent = parsed.textContent;
+        htmlContent = parsed.htmlContent;
+        wordCount = parsed.wordCount;
+      } catch (err) {
+        console.warn('Document parse fallback:', err);
+      }
+    }
+
+    let dataUrl: string | undefined;
+    let base64Data: string | undefined;
+    if (file.size <= 14 * 1024 * 1024) {
+      try {
+        dataUrl = await readDataUrl();
+        base64Data = dataUrl.includes(',') ? dataUrl.split(',')[1] : undefined;
+      } catch (err) {
+        console.warn('Binary read skipped:', err);
+      }
+    }
+
+    setAttachedImage(null);
+    setAttachedFile({
+      name: file.name,
+      mimeType,
+      size: file.size,
+      type: fileType,
+      textContent,
+      base64Data
+    });
+
+    // Archive file to persistent Vault automatically
+    saveVaultFile({
+      id: `chat-file-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: file.name,
+      size: file.size,
+      type: fileType,
+      mimeType,
+      dataUrl,
+      textContent,
+      htmlContent,
+      wordCount,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      tags: ['CHAT_UPLOAD', fileType.toUpperCase()],
+      classification: 'OPERATIONAL INTEL'
+    }).catch(() => {});
+  };
+
   const readImageFile = (file: File) => {
-    setAttachedMime(file.type || 'image/png');
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      setAttachedImage(dataUrl.split(',')[1]);
-    };
-    reader.readAsDataURL(file);
+    void handleUploadDeviceFile(file);
   };
 
   const captureScreen = async () => {
@@ -1149,17 +1683,51 @@ const ChatBot: React.FC<ChatBotProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 flex-shrink-0">
-            {/* Subtle Voice Synthesis Mute/Active Toggle */}
+          <div className="flex items-center gap-2 sm:gap-2.5 flex-shrink-0">
+            {/* Bidirectional Conversation Mode Control */}
             <button
-              onClick={toggleTTS}
-              className={`p-1.5 rounded-lg border text-xs transition-all ${
-                ttsEnabled ? 'text-amber-400 border-amber-500/30 bg-black/40' : 'text-zinc-600 border-zinc-850 bg-black/20'
+              onClick={() => {
+                if (isVoiceDialogueEngaged && isSpeaking) {
+                  interruptAndListen();
+                } else if (isVoiceDialogueEngaged) {
+                  endConversationMode();
+                } else {
+                  engageJeremyIronsVoice(true);
+                }
+              }}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                isVoiceDialogueEngaged && isSpeaking
+                  ? 'bg-red-950 text-amber-300 border-amber-500 shadow-[0_0_15px_rgba(251,191,36,0.4)] animate-pulse'
+                  : isVoiceDialogueEngaged
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+                  : 'bg-red-950/70 hover:bg-red-900/80 text-amber-400 border-amber-500/40'
               }`}
-              title={ttsEnabled ? 'Jeremy Irons voice synthesis online (click to mute)' : 'Voice output muted (click to unmute)'}
+              title={
+                isVoiceDialogueEngaged && isSpeaking
+                  ? 'Interrupt ZereØ & speak your turn'
+                  : isVoiceDialogueEngaged
+                  ? 'Conversation Mode active (click to return to text-only)'
+                  : 'Start Two-Way Conversation Mode with full memory recall'
+              }
             >
-              {ttsEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+              {isVoiceDialogueEngaged && isSpeaking ? (
+                <>
+                  <Mic className="w-3.5 h-3.5 text-amber-300" />
+                  <span className="hidden sm:inline">Interrupt &amp; Speak</span>
+                </>
+              ) : (
+                <>
+                  <Radio className={`w-3.5 h-3.5 ${isVoiceDialogueEngaged ? 'text-emerald-400 animate-pulse' : 'text-amber-400'}`} />
+                  <span className="hidden xs:inline">{isVoiceDialogueEngaged ? 'Conversation On' : 'Conversation Mode'}</span>
+                </>
+              )}
             </button>
+
+            {/* Voice Acoustics & Mute Control */}
+            <JeremyIronsVoiceControl
+              ttsEnabled={ttsEnabled}
+              onToggleTTS={toggleTTS}
+            />
 
             <div 
               className="relative group cursor-pointer flex-shrink-0" 
@@ -1197,6 +1765,34 @@ const ChatBot: React.FC<ChatBotProps> = ({
         </motion.div>
       )}
 
+      {/* Inline Cloud TTS Quota / Verified Male Voice Notice */}
+      {ttsQuotaNotice && (
+        <div className="mx-3 sm:mx-6 mt-2.5 px-3.5 py-2.5 bg-amber-950/40 border border-amber-500/40 rounded-xl flex items-center justify-between gap-3 text-[11px] text-amber-200 flex-shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Volume2 className="w-4 h-4 text-amber-400 shrink-0" />
+            <span className="truncate sm:whitespace-normal leading-snug">
+              <strong className="text-amber-400 uppercase tracking-wider mr-1.5">Voice Notice:</strong>
+              {ttsQuotaNotice}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => handleNavigate('system')}
+              className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold uppercase text-[9px] tracking-wider transition-colors"
+            >
+              System Key
+            </button>
+            <button
+              onClick={() => setTtsQuotaNotice(null)}
+              className="p-1 text-zinc-400 hover:text-amber-300"
+              title="Dismiss Notice"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Feed */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 sm:px-0 py-10 space-y-16 scroll-smooth">
         <AnimatePresence mode="popLayout">
@@ -1219,11 +1815,35 @@ const ChatBot: React.FC<ChatBotProps> = ({
                 </div>
               </div>
               <div className="space-y-6 max-w-2xl">
-                <h3 className="text-4xl font-light text-amber-200 uppercase tracking-[0.6em]">Awaiting Order</h3>
-                <p className="text-zinc-500 text-xl italic font-serif leading-relaxed px-12">
+                <h3 className="text-3xl sm:text-4xl font-light text-amber-200 uppercase tracking-[0.4em] sm:tracking-[0.6em]">Awaiting Order</h3>
+                <p className="text-zinc-400 text-base sm:text-xl italic font-serif leading-relaxed px-4 sm:px-12">
                   "I have prepared the arrays for your next directive, Principal. How may I secure your path today?"
                 </p>
-                <div className="flex justify-center gap-8 pt-8 opacity-20">
+                <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                  <button
+                    onClick={() => engageJeremyIronsVoice(true)}
+                    className="flex items-center gap-2.5 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-red-950 via-[#2a0a0e] to-black border border-amber-500/60 hover:border-amber-400 text-amber-300 hover:text-amber-200 text-xs font-black uppercase tracking-[0.2em] shadow-[0_0_30px_rgba(245,158,11,0.2)] hover:scale-[1.02] active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+                  >
+                    <Volume2 className="w-4 h-4 text-amber-400" />
+                    <span>Start Conversation Mode</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      jeremyIronsVoice.unlockAudio().catch(() => {});
+                      handleNavigate('Voice');
+                    }}
+                    className="flex items-center gap-2 px-5 py-3.5 rounded-2xl bg-zinc-950/80 hover:bg-zinc-900 border border-red-900/40 hover:border-amber-500/40 text-zinc-300 hover:text-amber-300 text-xs font-bold uppercase tracking-[0.15em] transition-all cursor-pointer whitespace-nowrap"
+                  >
+                    <Mic className="w-4 h-4 text-amber-500" />
+                    <span>Open Live Voice Portal</span>
+                  </button>
+                </div>
+                {(memories.length > 0 || threads.length > 0) && (
+                  <p className="text-[11px] font-mono text-zinc-500 uppercase tracking-widest">
+                    Memory Recall Primed • {memories.length} Core Records • {threads.filter(t => t.messages?.length > 0).length} Saved Dialogues
+                  </p>
+                )}
+                <div className="flex justify-center gap-8 pt-6 opacity-20">
                   <div className="w-24 h-px bg-gradient-to-r from-transparent to-amber-500" />
                   <div className="w-4 h-4 rotate-45 border border-amber-500" />
                   <div className="w-24 h-px bg-gradient-to-l from-transparent to-amber-500" />
@@ -1291,6 +1911,18 @@ const ChatBot: React.FC<ChatBotProps> = ({
                           alt="Attached visual"
                           className="max-w-full max-h-48 sm:max-h-64 rounded-xl object-contain border border-amber-500/20 bg-black/40"
                         />
+                      </div>
+                    )}
+
+                    {msg.attachmentName && (
+                      <div className="mb-3 sm:mb-4 inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-black/50 border border-amber-500/30 text-xs font-mono text-amber-300">
+                        <FileText className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                        <span className="truncate max-w-[220px] sm:max-w-xs font-bold">{msg.attachmentName}</span>
+                        {msg.attachmentType && (
+                          <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            {msg.attachmentType}
+                          </span>
+                        )}
                       </div>
                     )}
 
@@ -1391,7 +2023,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
                                 stopSpeaking();
                               } else {
                                 setSpeakingMsgIndex(idx);
-                                speakText(msg.text, () => setSpeakingMsgIndex(null));
+                                speakText(msg.text, () => setSpeakingMsgIndex(null), false, true);
                               }
                             }}
                             title={isSpeaking && speakingMsgIndex === idx ? 'Halt voice output' : 'Vocalize in Jeremy Irons\' voice'}
@@ -1447,6 +2079,17 @@ const ChatBot: React.FC<ChatBotProps> = ({
                     {msg.emotionalMap && (
                       <>
                         <div className="w-1 h-1 bg-amber-900 rounded-full hidden sm:block" />
+                        {msg.emotionalMap.detectedCue && msg.emotionalMap.detectedCue !== 'NEUTRAL' && (
+                          <span className={`font-black ${
+                            msg.emotionalMap.detectedCue === 'HAPPY' || msg.emotionalMap.detectedCue === 'GRATEFUL'
+                              ? 'text-emerald-400'
+                              : msg.emotionalMap.detectedCue === 'SAD' || msg.emotionalMap.detectedCue === 'ANXIOUS'
+                              ? 'text-rose-400'
+                              : 'text-amber-300'
+                          }`}>
+                            CUE: {msg.emotionalMap.detectedCue}
+                          </span>
+                        )}
                         <span className="text-amber-400 font-black">
                           AFFECT: {msg.emotionalMap.primaryState.replace(/_/g, ' ')}
                         </span>
@@ -1526,42 +2169,206 @@ const ChatBot: React.FC<ChatBotProps> = ({
             )}
           </div>
 
-          {/* Attached image preview */}
+          {/* Attached image & file preview */}
           <AnimatePresence>
-            {attachedImage && (
+            {(attachedImage || attachedFile) && (
               <motion.div
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 6 }}
-                className="flex items-center gap-3 px-1"
+                className="flex flex-wrap items-center gap-3 px-1"
               >
-                <div className="relative inline-block">
-                  <img
-                    src={`data:${attachedMime};base64,${attachedImage}`}
-                    alt="Attached"
-                    className="h-14 sm:h-16 w-auto max-w-[120px] sm:max-w-[160px] rounded-xl object-cover border border-amber-500/30 bg-black/60"
-                  />
-                  <button
-                    onClick={() => setAttachedImage(null)}
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-900 rounded-full flex items-center justify-center text-red-200 hover:bg-red-700 transition-colors"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-                <span className="text-[9px] font-mono text-amber-700 uppercase tracking-widest">Visual attached — ready to transmit</span>
+                {attachedImage && (
+                  <div className="flex items-center gap-3">
+                    <div className="relative inline-block">
+                      <img
+                        src={`data:${attachedMime};base64,${attachedImage}`}
+                        alt="Attached"
+                        className="h-14 sm:h-16 w-auto max-w-[120px] sm:max-w-[160px] rounded-xl object-cover border border-amber-500/30 bg-black/60"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setAttachedImage(null)}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-900 rounded-full flex items-center justify-center text-red-200 hover:bg-red-700 transition-colors cursor-pointer"
+                        title="Remove photo"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <span className="text-[9px] font-mono text-amber-500/90 uppercase tracking-widest">Photo attached — ready to transmit</span>
+                  </div>
+                )}
+
+                {attachedFile && (
+                  <div className="flex items-center gap-3 px-3.5 py-2.5 rounded-2xl bg-gradient-to-r from-red-950/60 via-zinc-950 to-black border border-amber-500/40 shadow-lg">
+                    <FileText className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-mono font-bold text-amber-200 truncate max-w-[200px] sm:max-w-xs">
+                        {attachedFile.name}
+                      </p>
+                      <p className="text-[9px] font-mono text-zinc-400 uppercase tracking-wider">
+                        {attachedFile.type} • {Math.max(1, Math.round(attachedFile.size / 1024))} KB{attachedFile.textContent ? ' • Text extracted' : ''}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAttachedFile(null)}
+                      className="w-6 h-6 rounded-full bg-red-950 hover:bg-red-800 border border-red-700/60 flex items-center justify-center text-red-200 transition-colors cursor-pointer"
+                      title="Remove attached file"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
 
-          <div className="relative group">
+          {/* Active Two-Way Conversation Channel Bar */}
+          <AnimatePresence>
+            {isVoiceDialogueEngaged && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 8 }}
+                className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-2xl bg-gradient-to-r from-[#1a070b]/95 via-zinc-950/95 to-black/95 border border-amber-500/35 shadow-[0_0_25px_rgba(245,158,11,0.12)]"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span
+                    className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                      isSpeaking
+                        ? 'bg-amber-400 animate-pulse shadow-[0_0_10px_rgba(251,191,36,0.8)]'
+                        : isThinking
+                        ? 'bg-amber-300 animate-ping'
+                        : isMicListening
+                        ? 'bg-emerald-400 animate-pulse shadow-[0_0_10px_rgba(52,211,153,0.8)]'
+                        : isMicPaused
+                        ? 'bg-zinc-500'
+                        : 'bg-amber-500/70'
+                    }`}
+                  />
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-amber-300 whitespace-nowrap">
+                    {isSpeaking
+                      ? 'ZereØ Speaking'
+                      : isThinking
+                      ? 'Reasoning & Recalling'
+                      : isMicListening
+                      ? 'Listening to You'
+                      : isMicPaused
+                      ? 'Mic Paused'
+                      : 'Voice Channel Open'}
+                  </span>
+                  <span className="hidden sm:inline text-[10px] font-mono text-zinc-500 truncate">
+                    • Recall: {memories.length} memories, {threads.filter(t => t.id !== currentThreadId && t.messages.length > 0).length} past chats
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {isSpeaking ? (
+                    <button
+                      type="button"
+                      onClick={interruptAndListen}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap"
+                    >
+                      <Mic className="w-3 h-3" />
+                      <span>Interrupt &amp; Speak</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextPaused = !isMicPaused;
+                        setIsMicPaused(nextPaused);
+                        isMicPausedRef.current = nextPaused;
+                        if (!nextPaused && !isThinkingRef.current && !isSpeakingRef.current) {
+                          setMicTriggerCount(c => c + 1);
+                        }
+                      }}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
+                        isMicPaused
+                          ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 hover:bg-amber-500/30'
+                          : 'bg-zinc-900 border-zinc-700 text-zinc-300 hover:border-amber-500/40 hover:text-amber-300'
+                      }`}
+                    >
+                      {isMicPaused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
+                      <span>{isMicPaused ? 'Resume Mic' : 'Pause Mic'}</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={endConversationMode}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-950/80 hover:bg-red-900 border border-red-800/70 text-red-200 text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap"
+                    title="Return to text-only chat"
+                  >
+                    <Square className="w-2.5 h-2.5 fill-current" />
+                    <span>End</span>
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div
+            className="relative group"
+            onDragOver={(e) => {
+              e.preventDefault();
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              const droppedFile = e.dataTransfer?.files?.[0];
+              if (droppedFile) {
+                void handleUploadDeviceFile(droppedFile);
+              }
+            }}
+          >
             <div className="absolute -inset-1 bg-gradient-to-r from-red-900/20 via-amber-500/10 to-red-900/20 rounded-2xl sm:rounded-[2rem] blur opacity-0 group-focus-within:opacity-100 transition-opacity duration-1000" />
             <div className="relative flex items-center bg-[#050506] border border-red-900/30 rounded-2xl sm:rounded-[2rem] overflow-hidden focus-within:border-amber-500/40 transition-all shadow-3xl">
+              {/* Direct Photo & File Upload Actions */}
+              <div className="flex items-center gap-1 pl-2.5 sm:pl-4 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  className="p-2 sm:p-2.5 rounded-xl bg-zinc-950/90 hover:bg-red-950/60 border border-red-900/30 hover:border-amber-500/50 text-zinc-400 hover:text-amber-300 transition-all cursor-pointer"
+                  title="Upload Photo from Device"
+                >
+                  <GalleryIcon className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileUploadInputRef.current?.click()}
+                  className="p-2 sm:p-2.5 rounded-xl bg-zinc-950/90 hover:bg-red-950/60 border border-red-900/30 hover:border-amber-500/50 text-zinc-400 hover:text-amber-300 transition-all cursor-pointer"
+                  title="Upload Document, PDF, Audio, or Video File"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </button>
+              </div>
+
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
-                placeholder={attachedImage ? 'Add a directive or send as-is…' : 'State your directive...'}
-                className="flex-1 bg-transparent py-4 sm:py-6 pl-4 sm:pl-7 pr-3 text-zinc-100 placeholder:text-zinc-800 focus:outline-none resize-none min-h-[60px] sm:min-h-[85px] text-base sm:text-lg font-serif italic tracking-wide"
+                onPaste={(e) => {
+                  const pastedItems = Array.from(e.clipboardData?.items || []);
+                  const fileItem = pastedItems.find((item) => item.kind === 'file');
+                  const pastedFile = fileItem?.getAsFile();
+                  if (pastedFile) {
+                    e.preventDefault();
+                    void handleUploadDeviceFile(pastedFile);
+                  }
+                }}
+                placeholder={
+                  isVoiceDialogueEngaged
+                    ? isMicListening
+                      ? 'Listening to your voice… (or type anytime)'
+                      : 'Speak naturally or type your next remark…'
+                    : attachedImage
+                    ? 'Add a directive for this photo or send as-is…'
+                    : attachedFile
+                    ? `Add a directive for ${attachedFile.name} or send as-is…`
+                    : 'State your directive...'
+                }
+                className="flex-1 bg-transparent py-4 sm:py-6 pl-3 sm:pl-5 pr-3 text-zinc-100 placeholder:text-zinc-800 focus:outline-none resize-none min-h-[60px] sm:min-h-[85px] text-base sm:text-lg font-serif italic tracking-wide"
                 rows={1}
               />
 
@@ -1573,12 +2380,26 @@ const ChatBot: React.FC<ChatBotProps> = ({
                   }}
                   onTranscriptComplete={(finalText) => {
                     setInput(finalText);
+                    if (finalText.trim()) {
+                      lastInputWasVoiceRef.current = true;
+                    }
+                    if (isConversationModeRef.current && finalText.trim()) {
+                      handleSend(finalText.trim());
+                    }
                   }}
+                  onInterruptSpeaking={interruptAndListen}
+                  onListeningStateChange={setIsMicListening}
+                  conversationMode={isVoiceDialogueEngaged}
                   isThinking={isThinking}
+                  isSpeaking={isSpeaking}
+                  isMicPaused={isMicPaused}
+                  autoSubmitOnComplete={isVoiceDialogueEngaged}
+                  externalTriggerCount={micTriggerCount}
                 />
                 <button 
-                  onClick={handleSend}
-                  disabled={(!input.trim() && !attachedImage) || isThinking}
+                  type="button"
+                  onClick={() => handleSend()}
+                  disabled={(!input.trim() && !attachedImage && !attachedFile) || isThinking}
                   className="p-3 sm:p-4 bg-gradient-to-br from-red-900 to-black text-amber-500 rounded-xl sm:rounded-2xl shadow-2xl hover:scale-105 active:scale-95 disabled:opacity-20 transition-all border border-amber-500/20 cursor-pointer"
                   title="Dispatch Directive"
                 >
@@ -1597,21 +2418,28 @@ const ChatBot: React.FC<ChatBotProps> = ({
             setAutoAttachOnSend={setAutoAttachScreen}
           />
 
-          {/* Hidden file inputs */}
+          {/* Visually hidden (sr-only) native file inputs so click activation always succeeds */}
           <input
             ref={cameraInputRef}
             type="file"
             accept="image/*"
             capture="environment"
-            className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) readImageFile(f); e.target.value = ''; }}
+            className="sr-only"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleUploadDeviceFile(f); e.target.value = ''; }}
           />
           <input
             ref={photoInputRef}
             type="file"
             accept="image/*"
-            className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) readImageFile(f); e.target.value = ''; }}
+            className="sr-only"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleUploadDeviceFile(f); e.target.value = ''; }}
+          />
+          <input
+            ref={fileUploadInputRef}
+            type="file"
+            accept=".pdf,.doc,.docx,.rtf,.txt,.md,.markdown,.csv,.json,.xml,.log,image/*,audio/*,video/*"
+            className="sr-only"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleUploadDeviceFile(f); e.target.value = ''; }}
           />
 
           {/* Top-Left Menu Drawer with All Tabs, Tactical HUD, Ali & Danielle Link Share + Media Tools */}
@@ -1640,6 +2468,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
             onTriggerArtModal={() => setIsArtModalOpen(true)}
             onTriggerCamera={() => cameraInputRef.current?.click()}
             onTriggerPhoto={() => photoInputRef.current?.click()}
+            onTriggerFile={() => fileUploadInputRef.current?.click()}
             ttsEnabled={ttsEnabled}
             onToggleTTS={toggleTTS}
           />

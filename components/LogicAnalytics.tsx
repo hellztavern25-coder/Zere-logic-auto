@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { FileText, Search, Play, Upload, Image as ImageIcon, Video, Brain, Loader2, Info, Activity, Camera, RefreshCw, StopCircle, Globe, Link as LinkIcon, Save, Layers, HardDrive } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
-import { getAI, fileToBase64, getApiKey } from '../services/geminiService';
+import { fileToBase64, safeGenerateContent } from '../services/geminiService';
 import { GeminiModel } from '../types';
 import SystemHealthDashboard from './SystemHealthDashboard';
 import { Socket } from 'socket.io-client';
@@ -47,7 +47,7 @@ const LogicAnalytics: React.FC<LogicAnalyticsProps> = ({ socket }) => {
       setIsLiveMode(true);
       setFacingMode(mode);
     } catch (err: any) {
-      alert(`Camera Access Denied: ${err.message}`);
+      setAnalysis(`Camera Access Denied: ${err?.message || err}`);
     }
   };
 
@@ -57,15 +57,6 @@ const LogicAnalytics: React.FC<LogicAnalyticsProps> = ({ socket }) => {
     setIsAnalyzing(true);
     setGroundingUrls([]);
     try {
-      // Check platform key first if in AI Studio, but only if we don't have a local key
-      if (typeof window !== 'undefined' && (window as any).aistudio) {
-        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-        const localKey = getApiKey();
-        if (!hasKey && !localKey) {
-          await (window as any).aistudio.openSelectKey();
-        }
-      }
-
       const canvas = canvasRef.current;
       const video = videoRef.current;
       canvas.width = video.videoWidth;
@@ -73,16 +64,14 @@ const LogicAnalytics: React.FC<LogicAnalyticsProps> = ({ socket }) => {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.drawImage(video, 0, 0);
-      
+
       const base64Data = canvas.toDataURL('image/jpeg').split(',')[1];
-      
-      const ai = getAI();
-      const response = await ai.models.generateContent({
-        model: GeminiModel.PRO_PREVIEW,
+
+      const response = await safeGenerateContent({
+        model: GeminiModel.FLASH_PREVIEW,
         contents: { parts: [{ inlineData: { data: base64Data, mimeType: 'image/jpeg' } }, { text: taskPrompt }] },
-        config: { 
-          systemInstruction: "Analyze this live visual feed with the clinical precision of a high-end AI butler. Use a formal tone, addressing the Principal. Provide structured, logical insights based on the real-time surroundings. If search is enabled, find the best deals, facts, or real-time data to assist the Principal.", 
-          temperature: 0.1,
+        config: {
+          systemInstruction: "Analyze this live visual feed with the clinical precision of a high-end AI butler. Use a formal tone, addressing the Principal. Provide structured, logical insights based on the real-time surroundings. If search is enabled, find the best deals, facts, or real-time data to assist the Principal.",
           tools: useSearch ? [{ googleSearch: {} }] : undefined
         }
       });
@@ -90,12 +79,12 @@ const LogicAnalytics: React.FC<LogicAnalyticsProps> = ({ socket }) => {
       const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       const urls = chunks.map((c: any) => c.web ? { uri: c.web.uri, title: c.web.title } : null).filter(Boolean) as any[];
       setGroundingUrls(urls);
-      
+
       setAnalysis(response.text || 'Analysis failed to yield coherent logic.');
-    } catch (err: any) { 
-      alert(err.message); 
-    } finally { 
-      setIsAnalyzing(false); 
+    } catch (err: any) {
+      setAnalysis(`Analysis Error: ${err?.message || 'Unable to inspect visual feed.'}`);
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
@@ -108,24 +97,13 @@ const LogicAnalytics: React.FC<LogicAnalyticsProps> = ({ socket }) => {
     setIsAnalyzing(true);
     setGroundingUrls([]);
     try {
-      // Check platform key first if in AI Studio, but only if we don't have a local key
-      if (typeof window !== 'undefined' && (window as any).aistudio) {
-        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-        const localKey = getApiKey();
-        if (!hasKey && !localKey) {
-          await (window as any).aistudio.openSelectKey();
-        }
-      }
-
-      const ai = getAI();
       const base64Data = file.split(',')[1];
       const mimeType = file.split(';')[0].split(':')[1];
-      const response = await ai.models.generateContent({
-        model: GeminiModel.PRO_PREVIEW,
+      const response = await safeGenerateContent({
+        model: GeminiModel.FLASH_PREVIEW,
         contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: taskPrompt }] },
-        config: { 
-          systemInstruction: "Analyze this data with the clinical precision of a high-end AI butler. Use a formal tone, addressing the Principal. Provide structured, logical insights. If search is enabled, cross-reference with real-time web data.", 
-          temperature: 0.1,
+        config: {
+          systemInstruction: "Analyze this data with the clinical precision of a high-end AI butler. Use a formal tone, addressing the Principal. Provide structured, logical insights. If search is enabled, cross-reference with real-time web data.",
           tools: useSearch ? [{ googleSearch: {} }] : undefined
         }
       });
@@ -135,7 +113,11 @@ const LogicAnalytics: React.FC<LogicAnalyticsProps> = ({ socket }) => {
       setGroundingUrls(urls);
 
       setAnalysis(response.text || 'Analysis failed to yield coherent logic.');
-    } catch (err: any) { alert(err.message); } finally { setIsAnalyzing(false); }
+    } catch (err: any) {
+      setAnalysis(`Analysis Error: ${err?.message || 'Unable to process evidence.'}`);
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   useEffect(() => {

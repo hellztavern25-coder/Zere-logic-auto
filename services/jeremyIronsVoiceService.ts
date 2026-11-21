@@ -10,10 +10,32 @@
  * 6. Web Audio DSP Formant Modeling (chest resonance, vocal fold gravel, British consonant bite)
  */
 
-import { generateTTS } from './geminiService';
+import { generateTTS, decodeBase64, decodeAudioData, markTtsQuotaExhausted } from './geminiService';
 import { VoiceProfile, VoiceClip, VoiceAccentType, VoiceDSPConfig } from '../types';
+import {
+  LOW_E2_HZ,
+  LOW_E_MIN_PITCH_RATE,
+  LOW_E_TARGET_PITCH_RATE,
+  LOW_E_MAX_PITCH_RATE,
+  LOW_E_MIN_SPEECH_PITCH,
+  LOW_E_TARGET_SPEECH_PITCH,
+  LOW_E_MAX_SPEECH_PITCH,
+  clampLowEPitchRate,
+  clampLowESpeechPitch
+} from './voiceCalibration';
 
 export type { VoiceProfile, VoiceClip, VoiceAccentType, VoiceDSPConfig };
+export {
+  LOW_E2_HZ,
+  LOW_E_MIN_PITCH_RATE,
+  LOW_E_TARGET_PITCH_RATE,
+  LOW_E_MAX_PITCH_RATE,
+  LOW_E_MIN_SPEECH_PITCH,
+  LOW_E_TARGET_SPEECH_PITCH,
+  LOW_E_MAX_SPEECH_PITCH,
+  clampLowEPitchRate,
+  clampLowESpeechPitch
+};
 
 export interface FormantPresetDefinition {
   id: string;
@@ -37,85 +59,85 @@ export interface FormantPresetDefinition {
 export const JEREMY_IRONS_FORMANT_PRESETS: Record<string, FormantPresetDefinition> = {
   'sovereign-gravitas': {
     id: 'sovereign-gravitas',
-    name: 'Sovereign Gravitas (Canonical Signature)',
-    tagline: 'Definitive Jeremy Irons • Formant-Shifted Aristocratic Baritone',
-    f1Hz: 380,
-    f1GainDb: 6.2,
-    f2Hz: 1350,
-    f2GainDb: -3.0,
-    f3Hz: 2680,
-    f3GainDb: 6.5,
+    name: 'Sovereign Gravitas (Low-E Signature)',
+    tagline: 'Definitive Jeremy Irons • Low-E2 (82.4 Hz) Aristocratic Baritone',
+    f1Hz: 375,
+    f1GainDb: 4.5,
+    f2Hz: 1320,
+    f2GainDb: -2.8,
+    f3Hz: 2640,
+    f3GainDb: 2.4,
     vocalTractLengthFactor: 1.14,
-    chestResonanceDb: 6.8,
-    articulationDb: 5.2,
-    gravelAmount: 0.88,
-    pitchRate: 0.86,
-    speechRate: 0.88,
-    description: 'The canonical Jeremy Irons vocal signature. Formant-shifted Web Audio DSP core with F1 pharyngeal cavity depression, F2 lingual vowel retraction, and piercing F3 actor projection with soft-sigmoid gravel.'
+    chestResonanceDb: 5.2,
+    articulationDb: 1.6,
+    gravelAmount: 0.42,
+    pitchRate: 0.87,
+    speechRate: 0.90,
+    description: 'Anchored around Low E (82.4 Hz) with natural pharyngeal cavity depth, darkened RP vowel backness, and warm analog baritone presence without metallic distortion.'
   },
   'theatrical-menace': {
     id: 'theatrical-menace',
-    name: 'Theatrical Menace',
-    tagline: 'Piercing Sardonic Projection • High-Grit Upper Actor Bite',
-    f1Hz: 350,
-    f1GainDb: 5.5,
-    f2Hz: 1420,
-    f2GainDb: -2.0,
-    f3Hz: 2750,
-    f3GainDb: 7.5,
-    vocalTractLengthFactor: 1.10,
-    chestResonanceDb: 6.0,
-    articulationDb: 5.8,
-    gravelAmount: 0.95,
-    pitchRate: 0.84,
-    speechRate: 0.86,
-    description: 'Heightened 2750Hz actor formant peak with elevated vocal fold saturation for theatrical, cutting delivery.'
+    name: 'Theatrical Menace (Low E♭–E)',
+    tagline: 'Piercing Sardonic Projection • Anchored Low-E Chest',
+    f1Hz: 355,
+    f1GainDb: 4.8,
+    f2Hz: 1380,
+    f2GainDb: -2.2,
+    f3Hz: 2680,
+    f3GainDb: 2.6,
+    vocalTractLengthFactor: 1.12,
+    chestResonanceDb: 5.6,
+    articulationDb: 2.0,
+    gravelAmount: 0.48,
+    pitchRate: 0.85,
+    speechRate: 0.88,
+    description: 'Anchored low-E baritone foundation with controlled analog texture for theatrical, cutting delivery.'
   },
   'subtle-steward': {
     id: 'subtle-steward',
-    name: 'Subtle Steward',
+    name: 'Subtle Steward (Anchored Low E)',
     tagline: 'Quiet Tactical Baritone • Extended Vocal Cavity Depth',
-    f1Hz: 410,
-    f1GainDb: 7.0,
+    f1Hz: 395,
+    f1GainDb: 5.0,
     f2Hz: 1280,
-    f2GainDb: -4.0,
-    f3Hz: 2550,
-    f3GainDb: 4.8,
-    vocalTractLengthFactor: 1.18,
-    chestResonanceDb: 7.2,
-    articulationDb: 3.8,
-    gravelAmount: 0.70,
-    pitchRate: 0.82,
-    speechRate: 0.84,
-    description: 'Elongated vocal tract acoustic simulation with softened upper transients for discreet, high-gravity quarters.'
+    f2GainDb: -3.2,
+    f3Hz: 2520,
+    f3GainDb: 2.0,
+    vocalTractLengthFactor: 1.16,
+    chestResonanceDb: 5.8,
+    articulationDb: 1.4,
+    gravelAmount: 0.35,
+    pitchRate: 0.86,
+    speechRate: 0.88,
+    description: 'Elongated vocal tract acoustic simulation locked steadily around Low E for discreet, high-gravity quarters.'
   },
   'clinical-precision': {
     id: 'clinical-precision',
     name: 'Clinical Auditor',
-    tagline: 'Analytical Deconstruction • High-Transience Clarity',
-    f1Hz: 390,
-    f1GainDb: 3.5,
-    f2Hz: 1500,
-    f2GainDb: 0.5,
-    f3Hz: 2850,
-    f3GainDb: 5.5,
-    vocalTractLengthFactor: 1.02,
-    chestResonanceDb: 3.0,
-    articulationDb: 5.5,
-    gravelAmount: 0.35,
-    pitchRate: 0.96,
-    speechRate: 1.00,
-    description: 'Crisply notched low-end with expanded consonant articulation for rapid logical deconstructions.'
+    tagline: 'Analytical Deconstruction • Controlled Low-E Clarity',
+    f1Hz: 385,
+    f1GainDb: 3.6,
+    f2Hz: 1440,
+    f2GainDb: -1.0,
+    f3Hz: 2740,
+    f3GainDb: 2.4,
+    vocalTractLengthFactor: 1.06,
+    chestResonanceDb: 4.0,
+    articulationDb: 2.0,
+    gravelAmount: 0.30,
+    pitchRate: 0.88,
+    speechRate: 0.96,
+    description: 'Tightened low-E baritone resonance with clean consonant articulation for rapid logical deconstructions.'
   }
 };
 
 export interface JeremyIronsConfig {
-  baseVoice: 'Charon' | 'Fenrir';
-  pitchRate: number; // 0.80 to 1.15 (default 0.86)
-  gravelAmount: number; // 0.0 to 1.0 (default 0.88)
-  chestResonanceDb: number; // dB boost at 105Hz (default 6.8)
-  articulationDb: number; // dB boost at 2680Hz (default 5.2)
-  speechRate: number; // 0.80 to 1.15 (default 0.88)
+  baseVoice: 'Charon' | 'Fenrir' | 'Orus';
+  pitchRate: number; // 0.84 to 0.92 (default 0.87 - Low E2 anchor)
+  gravelAmount: number; // 0.0 to 1.0 (default 0.42)
+  chestResonanceDb: number; // dB boost at 85Hz (default 5.2)
+  articulationDb: number; // dB boost at 3100Hz (default 1.6)
+  speechRate: number; // 0.80 to 1.15 (default 0.90)
   // Specific Formant-Shifting Presets in DSP core to mimic his gravitas:
   formantPresetName?: string;
   f1Hz?: number;
@@ -152,27 +174,27 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
     id: 'Jeremy-Irons-Signature',
     name: 'Jeremy Irons (Vocal Signature)',
     tagline: 'Vocal Signature • Formant-Shifted Aristocratic Gravitas',
-    description: 'The dedicated Jeremy Irons vocal signature and default speech tone. Formant-shifting DSP core with F1 pharyngeal cavity depression (380 Hz, +6.2 dB), F2 lingual retraction (1350 Hz, -3.0 dB), and F3 actor projection peak (2680 Hz, +6.5 dB) coupled with soft-sigmoid vocal fold gravel to mimic his legendary gravitas and dry sardonic authority.',
+    description: 'The dedicated Jeremy Irons vocal signature and default speech tone. Charon neural baritone baseline paired with warm Low-E2 acoustic resonance and controlled British diction.',
     isDefault: true,
     config: {
       baseVoice: 'Charon',
-      pitchRate: 0.86,
-      gravelAmount: 0.88,
-      chestResonanceDb: 6.8,
-      articulationDb: 5.2,
-      speechRate: 0.88,
+      pitchRate: 0.87,
+      gravelAmount: 0.42,
+      chestResonanceDb: 5.2,
+      articulationDb: 1.6,
+      speechRate: 0.90,
       formantPresetName: 'sovereign-gravitas',
-      f1Hz: 380,
-      f1GainDb: 6.2,
-      f2Hz: 1350,
-      f2GainDb: -3.0,
-      f3Hz: 2680,
-      f3GainDb: 6.5,
+      f1Hz: 375,
+      f1GainDb: 4.5,
+      f2Hz: 1320,
+      f2GainDb: -2.8,
+      f3Hz: 2640,
+      f3GainDb: 2.4,
       vocalTractLengthFactor: 1.14
     },
-    fallbackPitch: 0.62,
-    fallbackRate: 0.80,
-    badge: 'Vocal Signature • Default',
+    fallbackPitch: 0.81,
+    fallbackRate: 0.86,
+    badge: 'Vocal Signature • Low E2',
     accentColor: 'amber',
     auditionSample: 'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your absolute command.'
   },
@@ -180,26 +202,26 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
     id: 'Iron-Adaptive',
     name: 'Iron-Adaptive (Canonical)',
     tagline: 'Identity Preset • Canonical Jeremy Irons',
-    description: 'The definitive Jeremy Irons vocal signature. Unhurried cadence, heavy sub-harmonic chest resonance, razor-sharp aristocratic diction, and dry sardonic authority.',
+    description: 'The definitive Jeremy Irons vocal signature. Unhurried cadence, Low-E chest resonance, razor-sharp aristocratic diction, and dry sardonic authority.',
     isDefault: false,
     config: {
       baseVoice: 'Charon',
-      pitchRate: 0.86,
-      gravelAmount: 0.88,
-      chestResonanceDb: 6.8,
-      articulationDb: 5.2,
-      speechRate: 0.88,
+      pitchRate: 0.87,
+      gravelAmount: 0.42,
+      chestResonanceDb: 5.2,
+      articulationDb: 1.6,
+      speechRate: 0.90,
       formantPresetName: 'sovereign-gravitas',
-      f1Hz: 380,
-      f1GainDb: 6.2,
-      f2Hz: 1350,
-      f2GainDb: -3.0,
-      f3Hz: 2680,
-      f3GainDb: 6.5,
+      f1Hz: 375,
+      f1GainDb: 4.5,
+      f2Hz: 1320,
+      f2GainDb: -2.8,
+      f3Hz: 2640,
+      f3GainDb: 2.4,
       vocalTractLengthFactor: 1.14
     },
-    fallbackPitch: 0.62,
-    fallbackRate: 0.80,
+    fallbackPitch: 0.81,
+    fallbackRate: 0.86,
     badge: 'Canonical Core',
     accentColor: 'amber',
     auditionSample: 'The 1911s are loaded and the silver polished, Principal. System substrate running without friction.'
@@ -207,27 +229,27 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
   'Clinical-Analytical': {
     id: 'Clinical-Analytical',
     name: 'Clinical-Analytical',
-    tagline: 'Algorithmic Precision • Cold Readout',
-    description: 'Stripped of analog gravel for hyper-articulated high-frequency transients, tighter low-end, and accelerated delivery. Tuned for raw algorithmic deconstructions.',
+    tagline: 'Algorithmic Precision • Controlled Low-E Readout',
+    description: 'Tightened analog resonance for clean articulated transients and steady Low-E baritone delivery. Tuned for raw algorithmic deconstructions.',
     isDefault: false,
     config: {
       baseVoice: 'Charon',
-      pitchRate: 0.98,
-      gravelAmount: 0.25,
-      chestResonanceDb: 2.5,
-      articulationDb: 5.5,
-      speechRate: 1.02,
+      pitchRate: 0.88,
+      gravelAmount: 0.30,
+      chestResonanceDb: 4.0,
+      articulationDb: 2.0,
+      speechRate: 0.96,
       formantPresetName: 'clinical-precision',
-      f1Hz: 390,
-      f1GainDb: 3.5,
-      f2Hz: 1500,
-      f2GainDb: 0.5,
-      f3Hz: 2850,
-      f3GainDb: 5.5,
-      vocalTractLengthFactor: 1.02
+      f1Hz: 385,
+      f1GainDb: 3.6,
+      f2Hz: 1440,
+      f2GainDb: -1.0,
+      f3Hz: 2740,
+      f3GainDb: 2.4,
+      vocalTractLengthFactor: 1.06
     },
-    fallbackPitch: 0.78,
-    fallbackRate: 0.96,
+    fallbackPitch: 0.83,
+    fallbackRate: 0.92,
     badge: 'Analytical Precision',
     accentColor: 'cyan',
     auditionSample: 'Telemetry confirmed. Substrate clock speed synchronized with zero logical drift.'
@@ -235,27 +257,27 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
   'Subtle-Steward': {
     id: 'Subtle-Steward',
     name: 'Subtle-Steward',
-    tagline: 'Covert Oversight • Intimate Baritone',
-    description: 'Reserved, low-gain presence. Deep sub-audible foundation, softened consonant edges, and relaxed aristocratic delivery for quiet operational quarters.',
+    tagline: 'Covert Oversight • Anchored Low-E Baritone',
+    description: 'Reserved, steady Low-E foundation with softened consonant edges and relaxed aristocratic delivery for quiet operational quarters.',
     isDefault: false,
     config: {
       baseVoice: 'Charon',
-      pitchRate: 0.84,
-      gravelAmount: 0.65,
-      chestResonanceDb: 7.0,
-      articulationDb: 3.2,
-      speechRate: 0.84,
+      pitchRate: 0.86,
+      gravelAmount: 0.35,
+      chestResonanceDb: 5.8,
+      articulationDb: 1.4,
+      speechRate: 0.88,
       formantPresetName: 'subtle-steward',
-      f1Hz: 410,
-      f1GainDb: 7.0,
+      f1Hz: 395,
+      f1GainDb: 5.0,
       f2Hz: 1280,
-      f2GainDb: -4.0,
-      f3Hz: 2550,
-      f3GainDb: 4.8,
-      vocalTractLengthFactor: 1.18
+      f2GainDb: -3.2,
+      f3Hz: 2520,
+      f3GainDb: 2.0,
+      vocalTractLengthFactor: 1.16
     },
-    fallbackPitch: 0.60,
-    fallbackRate: 0.78,
+    fallbackPitch: 0.80,
+    fallbackRate: 0.85,
     badge: 'Stealth Intimate',
     accentColor: 'red',
     auditionSample: 'Quietly observing, Principal. Your perimeter remains entirely impenetrable.'
@@ -306,40 +328,40 @@ export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
       }
     ],
     dspConfig: {
-      pitchMultiplier: 0.86,
-      speechRate: 0.88,
-      chestResonanceDb: 6.8,
+      pitchMultiplier: 0.87,
+      speechRate: 0.90,
+      chestResonanceDb: 5.2,
       thoracicWarmthDb: 2.6,
-      articulationBoostDb: 5.2,
-      gravelSaturation: 0.88,
+      articulationBoostDb: 1.6,
+      gravelSaturation: 0.42,
       antiBoxNotchDb: -2.5,
       roomAmbience: 0.18,
       formantPresetName: 'sovereign-gravitas',
       formants: {
-        f1Hz: 380,
-        f1GainDb: 6.2,
-        f2Hz: 1350,
-        f2GainDb: -3.0,
-        f3Hz: 2680,
-        f3GainDb: 6.5,
+        f1Hz: 375,
+        f1GainDb: 4.5,
+        f2Hz: 1320,
+        f2GainDb: -2.8,
+        f3Hz: 2640,
+        f3GainDb: 2.4,
         vocalTractLengthFactor: 1.14,
-        description: 'Canonical Jeremy Irons Formant Shifting Network'
+        description: 'Canonical Jeremy Irons Low-E2 Formant Shifting Network'
       }
     },
     speechSynthesisConfig: {
-      pitch: 0.62,
-      rate: 0.80,
+      pitch: 0.81,
+      rate: 0.86,
       priorityLocales: ['en-GB', 'en_GB', 'en-UK', 'en-US'],
-      preferredVoiceNames: ['Daniel', 'Oliver', 'George', 'Arthur', 'Ryan', 'Google UK English Male', 'Microsoft George', 'Alfred', 'Alex']
+      preferredVoiceNames: ['George', 'Microsoft George', 'Daniel', 'Arthur', 'Oliver', 'Ryan', 'Google UK English Male', 'Alfred', 'Alex']
     },
-    systemPromptStyle: 'Deliver in the deep, measured baritone, sharp dry wit, and aristocratic gravitas of Jeremy Irons portraying Alfred Pennyworth. Heavy gravelly sub-harmonics, unhurried cadence, and lethal precision:',
+    systemPromptStyle: 'dry, gravelly, aristocratic British baritone, steady low-E chest register, unhurried measured cadence, sharp sardonic wit',
     auditionSample: 'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your absolute command.'
   },
   {
     id: 'iron-adaptive',
     name: 'Iron-Adaptive (Canonical)',
-    tagline: 'Alfred Pennyworth • British Aristocratic Baritone',
-    description: 'The definitive Jeremy Irons vocal signature. Unhurried cadence, heavy sub-harmonic chest resonance, dry sardonic British inflection, and gravelly aristocratic authority.',
+    tagline: 'Alfred Pennyworth • Low-E British Aristocratic Baritone',
+    description: 'The definitive Jeremy Irons vocal signature. Unhurried cadence, steady Low-E chest resonance, dry sardonic British inflection, and gravelly aristocratic authority.',
     accent: 'british_aristocrat',
     isCanonical: true,
     isDefault: false,
@@ -375,29 +397,29 @@ export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
       }
     ],
     dspConfig: {
-      pitchMultiplier: 0.78,
-      speechRate: 0.88,
-      chestResonanceDb: 6.0,
+      pitchMultiplier: 0.87,
+      speechRate: 0.90,
+      chestResonanceDb: 5.2,
       thoracicWarmthDb: 2.5,
-      articulationBoostDb: 4.5,
-      gravelSaturation: 0.85,
+      articulationBoostDb: 1.6,
+      gravelSaturation: 0.42,
       antiBoxNotchDb: -2.4,
       roomAmbience: 0.20
     },
     speechSynthesisConfig: {
-      pitch: 0.65,
-      rate: 0.82,
+      pitch: 0.81,
+      rate: 0.86,
       priorityLocales: ['en-GB', 'en_GB', 'en-UK'],
-      preferredVoiceNames: ['Daniel', 'Oliver', 'George', 'Arthur', 'Ryan', 'Google UK English Male', 'Microsoft George', 'Alfred']
+      preferredVoiceNames: ['George', 'Microsoft George', 'Daniel', 'Arthur', 'Oliver', 'Ryan', 'Google UK English Male', 'Alfred']
     },
-    systemPromptStyle: 'Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth):',
+    systemPromptStyle: 'dry, gravelly, aristocratic British baritone, steady low-E chest register, unhurried cadence, understated authority',
     auditionSample: 'The 1911s are loaded and the silver is polished, Principal. All systems operational without friction.'
   },
   {
     id: 'british-aristocrat',
     name: 'British Aristocrat (High RP)',
-    tagline: 'J.A.R.V.I.S. / Bettany Class • Oxford Elocution',
-    description: 'Crisply articulated British Received Pronunciation. Flawless elocution with high intelligibility and measured upper-register elegance.',
+    tagline: 'J.A.R.V.I.S. / Bettany Class • Controlled Low-E RP',
+    description: 'Crisply articulated British Received Pronunciation anchored in a steady Low-E baritone register without drifting sharp.',
     accent: 'british_rp',
     isCanonical: false,
     isDefault: false,
@@ -415,33 +437,33 @@ export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
       }
     ],
     dspConfig: {
-      pitchMultiplier: 0.92,
-      speechRate: 0.95,
-      chestResonanceDb: 3.0,
-      thoracicWarmthDb: 1.8,
-      articulationBoostDb: 5.5,
-      gravelSaturation: 0.20,
-      antiBoxNotchDb: -1.5,
+      pitchMultiplier: 0.88,
+      speechRate: 0.92,
+      chestResonanceDb: 4.0,
+      thoracicWarmthDb: 2.0,
+      articulationBoostDb: 2.0,
+      gravelSaturation: 0.30,
+      antiBoxNotchDb: -1.8,
       roomAmbience: 0.15
     },
     speechSynthesisConfig: {
-      pitch: 0.82,
-      rate: 0.92,
+      pitch: 0.83,
+      rate: 0.90,
       priorityLocales: ['en-GB', 'en_GB', 'en-UK'],
-      preferredVoiceNames: ['Oliver', 'Daniel', 'George', 'Google UK English Male']
+      preferredVoiceNames: ['George', 'Daniel', 'Oliver', 'Google UK English Male']
     },
-    systemPromptStyle: 'Say in a crisp, silky, refined British Received Pronunciation accent with aristocratic clarity:',
+    systemPromptStyle: 'crisp, refined British Received Pronunciation baritone, steady low-E register, calm aristocratic clarity',
     auditionSample: 'Telemetry confirmed, Principal. Estates networks synchronized with zero logical drift.'
   },
   {
     id: 'tactical-commander',
     name: 'Tactical Commander',
-    tagline: 'Heavy Sub-Bass • Combat Operational Readiness',
-    description: 'Sub-bass reinforced authoritative command voice. Heavy low-end impact designed for high-stress tactical operations.',
+    tagline: 'Anchored Low-E • Combat Operational Readiness',
+    description: 'Low-E reinforced authoritative command voice. Firm chest gravity without dropping into muddy sub-harmonic distortion.',
     accent: 'american_baritone',
     isCanonical: false,
     isDefault: false,
-    badge: 'Sub-Bass Tactical',
+    badge: 'Low-E Tactical',
     accentColor: 'red',
     clips: [
       {
@@ -455,33 +477,46 @@ export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
       }
     ],
     dspConfig: {
-      pitchMultiplier: 0.70,
-      speechRate: 0.98,
-      chestResonanceDb: 9.0,
-      thoracicWarmthDb: 3.5,
-      articulationBoostDb: 3.0,
-      gravelSaturation: 0.60,
-      antiBoxNotchDb: -2.0,
-      roomAmbience: 0.05
+      pitchMultiplier: 0.86,
+      speechRate: 0.90,
+      chestResonanceDb: 5.8,
+      thoracicWarmthDb: 3.0,
+      articulationBoostDb: 1.4,
+      gravelSaturation: 0.35,
+      antiBoxNotchDb: -2.2,
+      roomAmbience: 0.10
     },
     speechSynthesisConfig: {
-      pitch: 0.55,
-      rate: 0.90,
-      priorityLocales: ['en-US', 'en-GB'],
-      preferredVoiceNames: ['Alex', 'David', 'Fred', 'Guy']
+      pitch: 0.80,
+      rate: 0.86,
+      priorityLocales: ['en-GB', 'en-US'],
+      preferredVoiceNames: ['George', 'Daniel', 'Alex', 'Fred', 'David', 'Guy']
     },
-    systemPromptStyle: 'Say in a heavy, commanding, low-frequency tactical combat baritone:',
+    systemPromptStyle: 'low, firm, commanding baritone, steady low-E register, clipped tactical precision',
     auditionSample: 'Perimeter secured, Principal. Tactical array active and monitoring all ingress vectors.'
   }
 ];
 
-// Known female voice markers to strictly quarantine (Russell removed because it is a male name)
-const FEMALE_VOICE_MARKERS = [
-  'female', 'susan', 'serena', 'victoria', 'samantha', 'karen', 'moira', 'fiona',
-  'tessa', 'stephanie', 'zira', 'hazel', 'catherine', 'linda', 'heather', 'jenny',
-  'aria', 'libby', 'sonia', 'natasha', 'clara', 'amy', 'sarah', 'ava', 'emma',
-  'zoe', 'allison', 'kendra', 'woman', 'girl', 'salli', 'joanna', 'ivy',
-  'kimberly', 'nicole', 'penelope'
+// Strictly quarantine female, default Chrome/OS female, and 1980s robotic/novelty TTS voices
+const ROBOTIC_OR_FEMALE_MARKERS = [
+  // Default Chrome/Android/ChromeOS unlabelled female voices & Google female voice IDs
+  'google us english', 'chrome os us english', 'en-gb-x-gba', 'en-gb-x-fis',
+  'en-us-x-sfg', 'en-us-x-iob', 'en-us-x-tpf',
+  // Female markers & OS voice names
+  'female', 'woman', 'girl', 'susan', 'serena', 'victoria', 'samantha', 'karen',
+  'moira', 'fiona', 'tessa', 'stephanie', 'zira', 'hazel', 'catherine', 'linda',
+  'heather', 'jenny', 'aria', 'libby', 'sonia', 'natasha', 'clara', 'amy', 'sarah',
+  'ava', 'emma', 'zoe', 'allison', 'kendra', 'salli', 'joanna', 'ivy', 'kimberly',
+  'nicole', 'penelope', 'kate', 'martha', 'maisie', 'alice', 'claire', 'rachel',
+  'hannah', 'rebecca', 'sara', 'laura', 'emily', 'olivia', 'sophie', 'ruby',
+  'chloe', 'shelley', 'sandy', 'kathy', 'ellen', 'agnes', 'vicki', 'princess',
+  'nicky', 'veena', 'nora', 'tina', 'molly', 'ana', 'michelle', 'neerja', 'flo',
+  'grandma',
+  // 1980s robotic / novelty macOS & Linux TTS voices
+  'zarvox', 'trinoids', 'espeak', 'festival', 'speech dispatcher', 'albert',
+  'bad news', 'bahh', 'bells', 'boing', 'bubbles', 'cellos', 'deranged',
+  'good news', 'hysterical', 'jester', 'organ', 'whisper', 'wobble', 'eddy',
+  'reed', 'rocko', 'superstar'
 ];
 
 // In-memory cache to prevent random switching between sentences
@@ -497,11 +532,8 @@ export function applyBritishProsodyAndPhonetics(text: string): string {
   if (!text) return '';
 
   let converted = text
-    // Lexicon transliterations for British pronunciation
+    // Authentic British spelling & lexicon adjustments without broken syllable hyphens
     .replace(/\baluminum\b/gi, 'aluminium')
-    .replace(/\bschedule\b/gi, 'shed-yool')
-    .replace(/\bgarage\b/gi, 'gar-rahzh')
-    .replace(/\bprocess\b/gi, 'proh-cess')
     .replace(/\bcolor\b/gi, 'colour')
     .replace(/\bcolors\b/gi, 'colours')
     .replace(/\bhypothesize\b/gi, 'hypothesise')
@@ -536,7 +568,8 @@ export function applyBritishProsodyAndPhonetics(text: string): string {
 }
 
 /**
- * Filter and resolve stable British male voices
+ * Filter and resolve ONLY verified British/English male voices.
+ * Fails closed (returns null) rather than falling back to female or 1980s robotic OS voices.
  */
 export function resolveJeremyIronsVoice(
   voices: SpeechSynthesisVoice[], 
@@ -544,15 +577,19 @@ export function resolveJeremyIronsVoice(
 ): SpeechSynthesisVoice | null {
   if (!voices || voices.length === 0) return null;
 
-  // Return locked voice if already validated
-  if (cachedVoiceLock && voices.some(v => v.name === cachedVoiceLock?.name)) {
+  const isQuarantined = (v: SpeechSynthesisVoice) => {
+    const sig = `${v.name} ${v.voiceURI || ''}`.toLowerCase();
+    return ROBOTIC_OR_FEMALE_MARKERS.some(marker => sig.includes(marker));
+  };
+
+  // Return locked voice only if still present and verified non-female/non-robotic
+  if (
+    cachedVoiceLock &&
+    !isQuarantined(cachedVoiceLock) &&
+    voices.some(v => v.name === cachedVoiceLock?.name)
+  ) {
     return cachedVoiceLock;
   }
-
-  const isFemale = (v: SpeechSynthesisVoice) => {
-    const name = v.name.toLowerCase();
-    return FEMALE_VOICE_MARKERS.some(marker => name.includes(marker));
-  };
 
   const isBritish = (v: SpeechSynthesisVoice) => {
     const lang = v.lang.toLowerCase();
@@ -563,9 +600,11 @@ export function resolveJeremyIronsVoice(
     return v.lang.toLowerCase().startsWith('en');
   };
 
-  // 1. Check user/profile preferred names in British locale
+  // 1. Check user/profile preferred male voice names in British locale
   for (const pName of preferredVoiceNames) {
-    const match = voices.find(v => isBritish(v) && !isFemale(v) && v.name.toLowerCase().includes(pName.toLowerCase()));
+    const pLower = pName.toLowerCase();
+    if (pLower === 'en-gb' || pLower === 'en_gb' || pLower === 'en-uk') continue;
+    const match = voices.find(v => isBritish(v) && !isQuarantined(v) && v.name.toLowerCase().includes(pLower));
     if (match) {
       cachedVoiceLock = match;
       cachedVoiceLockId = match.name;
@@ -573,45 +612,92 @@ export function resolveJeremyIronsVoice(
     }
   }
 
-  // 2. British male with canonical UK keywords
-  const ukKeywords = ['daniel', 'oliver', 'george', 'arthur', 'ryan', 'male', 'richard', 'charles', 'brian', 'alfred', 'uk'];
-  const t1 = voices.find(v => isBritish(v) && !isFemale(v) && ukKeywords.some(kw => v.name.toLowerCase().includes(kw)));
+  // 2. Verified British male voices by canonical UK male names / Google UK male IDs
+  const ukMaleMarkers = [
+    'daniel', 'oliver', 'george', 'arthur', 'ryan', 'male', 'richard',
+    'charles', 'brian', 'alfred', 'thomas', 'william', 'james', 'gordon',
+    'anthony', 'malcolm', 'hugh', 'paul', 'lee', 'sean', 'liam', 'connor',
+    'russell', 'en-gb-x-gbd', 'en-gb-x-rjs', 'google uk english male'
+  ];
+  const t1 = voices.find(v => {
+    const sig = `${v.name} ${v.voiceURI || ''}`.toLowerCase();
+    return isBritish(v) && !isQuarantined(v) && ukMaleMarkers.some(kw => sig.includes(kw));
+  });
   if (t1) {
     cachedVoiceLock = t1;
+    cachedVoiceLockId = t1.name;
     return t1;
   }
 
-  // 3. Any British voice verified not female
-  const t2 = voices.find(v => isBritish(v) && !isFemale(v));
-  if (t2) {
-    cachedVoiceLock = t2;
-    return t2;
-  }
-
-  // 4. Any English male voice
-  const enKeywords = ['alex', 'fred', 'david', 'guy', 'aaron', 'mark', 'male', 'matthew'];
-  const t3 = voices.find(v => isEnglish(v) && !isFemale(v) && enKeywords.some(kw => v.name.toLowerCase().includes(kw)));
+  // 3. Verified English male voices only (no blind female/robotic/voices[0] fallback)
+  const enMaleMarkers = [
+    'alex', 'fred', 'david', 'guy', 'aaron', 'mark', 'male', 'matthew',
+    'andrew', 'eric', 'christopher', 'roger', 'steffan', 'evan', 'nathan',
+    'bruce', 'ralph', 'james', 'william', 'paul', 'thomas',
+    'en-us-x-iom', 'en-us-x-tpd'
+  ];
+  const t3 = voices.find(v => {
+    const sig = `${v.name} ${v.voiceURI || ''}`.toLowerCase();
+    return isEnglish(v) && !isQuarantined(v) && enMaleMarkers.some(kw => sig.includes(kw));
+  });
   if (t3) {
     cachedVoiceLock = t3;
+    cachedVoiceLockId = t3.name;
     return t3;
   }
 
-  // 5. Any English voice not female
-  const t4 = voices.find(v => isEnglish(v) && !isFemale(v));
-  if (t4) {
-    cachedVoiceLock = t4;
-    return t4;
+  // 4. Any non-quarantined British or English voice (e.g. generic OS UK/EN voices without gender in name)
+  const t4Uk = voices.find(v => isBritish(v) && !isQuarantined(v));
+  if (t4Uk) {
+    cachedVoiceLock = t4Uk;
+    cachedVoiceLockId = t4Uk.name;
+    return t4Uk;
   }
 
-  return voices[0] || null;
+  const t4En = voices.find(v => isEnglish(v) && !isQuarantined(v));
+  if (t4En) {
+    cachedVoiceLock = t4En;
+    cachedVoiceLockId = t4En.name;
+    return t4En;
+  }
+
+  return null;
 }
 
-// Warm up voices immediately in the browser
+let voiceWaiters: Array<() => void> = [];
+
+function waitForSpeechVoices(timeoutMs: number = 600): Promise<SpeechSynthesisVoice[]> {
+  if (typeof window === 'undefined' || !window.speechSynthesis) {
+    return Promise.resolve([]);
+  }
+  const current = window.speechSynthesis.getVoices();
+  if (current.length > 0) {
+    return Promise.resolve(current);
+  }
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      resolve(window.speechSynthesis.getVoices());
+    };
+    const timer = setTimeout(() => {
+      voiceWaiters = voiceWaiters.filter((fn) => fn !== done);
+      resolve(window.speechSynthesis.getVoices());
+    }, timeoutMs);
+    voiceWaiters.push(done);
+  });
+}
+
+// Warm up voices immediately in the browser and invalidate stale voice lock when OS voices finish loading
 if (typeof window !== 'undefined' && window.speechSynthesis) {
   try {
     window.speechSynthesis.getVoices();
     window.speechSynthesis.onvoiceschanged = () => {
+      cachedVoiceLock = null;
+      cachedVoiceLockId = null;
       window.speechSynthesis.getVoices();
+      const waiters = voiceWaiters;
+      voiceWaiters = [];
+      waiters.forEach((fn) => fn());
     };
   } catch (_) {}
 }
@@ -647,80 +733,88 @@ export function buildJeremyIronsDSP(
   updateConfig: (newCfg: Partial<JeremyIronsConfig>) => void;
   getFormantTelemetry: () => { f1: number; f2: number; f3: number; gravel: number; tractFactor: number; chestDb: number };
 } {
-  // 1. Sub-Harmonic Low Shelf (Chest Cavity Resonance)
+  // 1. Sub-Harmonic Low Shelf (Anchored around Low E ~82.4Hz without muddy boom)
   const chestFilter = ctx.createBiquadFilter();
   chestFilter.type = 'lowshelf';
-  chestFilter.frequency.value = 105;
-  chestFilter.gain.value = config.chestResonanceDb ?? 6.8;
+  chestFilter.frequency.value = 85;
+  chestFilter.gain.value = Math.min(6.2, Math.max(2.0, config.chestResonanceDb ?? 5.2));
+
+  // 1b. Low-E2 (82.41 Hz) Fundamental Chest Resonance Anchor
+  const lowEAnchor = ctx.createBiquadFilter();
+  lowEAnchor.type = 'peaking';
+  lowEAnchor.frequency.value = LOW_E2_HZ;
+  lowEAnchor.Q.value = 1.6;
+  lowEAnchor.gain.value = 4.0;
 
   // 2. Formant 1 (F1): Pharyngeal Cavity Resonator (Vowel Height / Deep Baritone Foundation)
   const f1Filter = ctx.createBiquadFilter();
   f1Filter.type = 'peaking';
-  f1Filter.frequency.value = config.f1Hz ?? 380;
-  f1Filter.Q.value = 2.2;
-  f1Filter.gain.value = config.f1GainDb ?? 6.2;
+  f1Filter.frequency.value = config.f1Hz ?? 375;
+  f1Filter.Q.value = 2.0;
+  f1Filter.gain.value = Math.min(5.2, Math.max(1.5, config.f1GainDb ?? 4.5));
 
-  // 3. Thoracic Warmth (Low-Mid Body ~240Hz)
+  // 3. Thoracic Warmth (Low-Mid Body ~220Hz)
   const warmthFilter = ctx.createBiquadFilter();
   warmthFilter.type = 'peaking';
-  warmthFilter.frequency.value = 240;
+  warmthFilter.frequency.value = 220;
   warmthFilter.Q.value = 1.2;
-  warmthFilter.gain.value = 2.6;
+  warmthFilter.gain.value = 2.2;
 
-  // 4. Formant 2 (F2): Oral/Lingual Cavity Backness (~1350Hz) - Notch for Darkened RP Vowels
+  // 4. Formant 2 (F2): Oral/Lingual Cavity Backness (~1320Hz) - Notch for Darkened RP Vowels
   const f2Filter = ctx.createBiquadFilter();
   f2Filter.type = 'peaking';
-  f2Filter.frequency.value = config.f2Hz ?? 1350;
-  f2Filter.Q.value = 2.4;
-  f2Filter.gain.value = config.f2GainDb ?? -3.0;
+  f2Filter.frequency.value = config.f2Hz ?? 1320;
+  f2Filter.Q.value = 2.0;
+  f2Filter.gain.value = Math.max(-3.6, Math.min(0, config.f2GainDb ?? -2.8));
 
   // 5. Anti-Box Notch (~650Hz)
   const deboxFilter = ctx.createBiquadFilter();
   deboxFilter.type = 'peaking';
   deboxFilter.frequency.value = 650;
   deboxFilter.Q.value = 1.4;
-  deboxFilter.gain.value = -2.5;
+  deboxFilter.gain.value = -2.4;
 
-  // 6. Formant 3 (F3): The Actor's Projection Formant / British Aristocratic Bite (~2680Hz)
+  // 6. Formant 3 (F3): Smoothed Actor's Projection Formant (~2640Hz, no metallic spike)
   const f3Filter = ctx.createBiquadFilter();
   f3Filter.type = 'peaking';
-  f3Filter.frequency.value = config.f3Hz ?? 2680;
-  f3Filter.Q.value = 3.2;
-  f3Filter.gain.value = config.f3GainDb ?? 6.5;
+  f3Filter.frequency.value = config.f3Hz ?? 2640;
+  f3Filter.Q.value = 2.0;
+  f3Filter.gain.value = Math.min(3.0, Math.max(0, config.f3GainDb ?? 2.4));
 
-  // 7. Consonant Articulation Peak (~2950Hz)
+  // 7. Gentle Consonant Articulation Presence (~3100Hz, cleanly separated from F3)
   const articulationFilter = ctx.createBiquadFilter();
   articulationFilter.type = 'peaking';
-  articulationFilter.frequency.value = 2950;
-  articulationFilter.Q.value = 1.6;
-  articulationFilter.gain.value = config.articulationDb ?? 5.2;
+  articulationFilter.frequency.value = 3100;
+  articulationFilter.Q.value = 1.4;
+  articulationFilter.gain.value = Math.min(2.5, Math.max(0, config.articulationDb ?? 1.6));
 
-  // 8. WaveShaper for organic vocal fold gravel / analog tube saturation
+  // 8. Light Analog WaveShaper (Subtle warm vocal fold texture, zero robotic buzz)
   const waveshaper = ctx.createWaveShaper();
-  const gravel = config.gravelAmount ?? 0.88;
-  waveshaper.curve = makeGravelCurve(gravel * 0.42);
+  const gravel = Math.min(1, Math.max(0, config.gravelAmount ?? 0.42));
+  waveshaper.curve = makeGravelCurve(gravel * 0.14);
   waveshaper.oversample = '4x';
 
-  // 9. High Shelf (Silky Film Roll-Off ~5800Hz)
+  // 9. High Shelf (Warm Film Roll-Off ~5200Hz so upper register never sounds thin or harsh)
   const airRollOff = ctx.createBiquadFilter();
   airRollOff.type = 'highshelf';
-  airRollOff.frequency.value = 5800;
-  airRollOff.gain.value = -2.8;
+  airRollOff.frequency.value = 5200;
+  airRollOff.gain.value = -3.4;
 
-  // 10. Dynamics Compressor (Theatrical Presence & Intelligibility)
+  // 10. Dynamics Compressor (Steady Presence & Controlled Excursion)
   const compressor = ctx.createDynamicsCompressor();
   compressor.threshold.value = -20;
   compressor.knee.value = 8;
-  compressor.ratio.value = 3.4;
-  compressor.attack.value = 0.004;
+  compressor.ratio.value = 3.2;
+  compressor.attack.value = 0.005;
   compressor.release.value = 0.14;
 
   // 11. Master Gain
   const masterGain = ctx.createGain();
-  masterGain.gain.value = 1.15;
+  masterGain.gain.value = 1.12;
 
   // Connect serial formant-shifting chain
   chestFilter
+    .connect(lowEAnchor)
     .connect(f1Filter)
     .connect(warmthFilter)
     .connect(deboxFilter)
@@ -736,31 +830,31 @@ export function buildJeremyIronsDSP(
   const updateConfig = (newCfg: Partial<JeremyIronsConfig>) => {
     const t = ctx.currentTime;
     if (newCfg.chestResonanceDb !== undefined) {
-      chestFilter.gain.setTargetAtTime(newCfg.chestResonanceDb, t, 0.04);
+      chestFilter.gain.setTargetAtTime(Math.min(6.2, Math.max(2.0, newCfg.chestResonanceDb)), t, 0.04);
     }
     if (newCfg.f1Hz !== undefined) {
       f1Filter.frequency.setTargetAtTime(newCfg.f1Hz, t, 0.04);
     }
     if (newCfg.f1GainDb !== undefined) {
-      f1Filter.gain.setTargetAtTime(newCfg.f1GainDb, t, 0.04);
+      f1Filter.gain.setTargetAtTime(Math.min(5.2, Math.max(1.5, newCfg.f1GainDb)), t, 0.04);
     }
     if (newCfg.f2Hz !== undefined) {
       f2Filter.frequency.setTargetAtTime(newCfg.f2Hz, t, 0.04);
     }
     if (newCfg.f2GainDb !== undefined) {
-      f2Filter.gain.setTargetAtTime(newCfg.f2GainDb, t, 0.04);
+      f2Filter.gain.setTargetAtTime(Math.max(-3.6, Math.min(0, newCfg.f2GainDb)), t, 0.04);
     }
     if (newCfg.f3Hz !== undefined) {
       f3Filter.frequency.setTargetAtTime(newCfg.f3Hz, t, 0.04);
     }
     if (newCfg.f3GainDb !== undefined) {
-      f3Filter.gain.setTargetAtTime(newCfg.f3GainDb, t, 0.04);
+      f3Filter.gain.setTargetAtTime(Math.min(3.0, Math.max(0, newCfg.f3GainDb)), t, 0.04);
     }
     if (newCfg.articulationDb !== undefined) {
-      articulationFilter.gain.setTargetAtTime(newCfg.articulationDb, t, 0.04);
+      articulationFilter.gain.setTargetAtTime(Math.min(2.5, Math.max(0, newCfg.articulationDb)), t, 0.04);
     }
     if (newCfg.gravelAmount !== undefined) {
-      waveshaper.curve = makeGravelCurve(newCfg.gravelAmount * 0.42);
+      waveshaper.curve = makeGravelCurve(Math.min(1, Math.max(0, newCfg.gravelAmount)) * 0.14);
     }
   };
 
@@ -768,7 +862,7 @@ export function buildJeremyIronsDSP(
     f1: f1Filter.frequency.value,
     f2: f2Filter.frequency.value,
     f3: f3Filter.frequency.value,
-    gravel: config.gravelAmount ?? 0.88,
+    gravel: config.gravelAmount ?? 0.42,
     tractFactor: config.vocalTractLengthFactor ?? 1.14,
     chestDb: chestFilter.gain.value
   });
@@ -785,7 +879,7 @@ export function buildJeremyIronsDSP(
  * Text preparation for authentic Jeremy Irons speech synthesis.
  * Strips markdown and cleans text WITHOUT arbitrary short truncation.
  */
-export function sanitizeTextForJeremyIrons(rawText: string): string {
+export function sanitizeTextForJeremyIrons(rawText: string, applyPhoneticRespelling: boolean = false): string {
   if (!rawText) return '';
   let clean = rawText
     // Remove code blocks and inline code
@@ -794,6 +888,9 @@ export function sanitizeTextForJeremyIrons(rawText: string): string {
     // Remove markdown image and links
     .replace(/!\[([^\]]*)\]\([^)]+\)/g, '')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    // Remove bracketed/parenthetical vocal stage directions (e.g. "(in Jeremy Irons' voice)", "[deep baritone]")
+    .replace(/[*_]*\([^)]*(?:jeremy irons|alfred|voice|baritone|tone|cadence|speaking|deliver|whispers|chuckles|sighs)[^)]*\)[*_]*/gi, ' ')
+    .replace(/\[[^\]]*(?:jeremy irons|alfred|voice|baritone|tone|cadence|speaking)[^\]]*\]/gi, ' ')
     // Remove headers, bold, italics, blockquotes
     .replace(/#{1,6}\s+/g, '')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
@@ -804,60 +901,90 @@ export function sanitizeTextForJeremyIrons(rawText: string): string {
     .replace(/^\s*[-*+]\s+/gm, '')
     // Normalize newlines to sentence pauses
     .replace(/\n{2,}/g, '. ')
-    .replace(/\n/g, ', ')
+    .replace(/\n/g, '. ')
     // Clean excessive spaces
     .replace(/\s+/g, ' ')
     .trim();
 
-  // Apply British prosody and phonology
-  clean = applyBritishProsodyAndPhonetics(clean);
+  if (applyPhoneticRespelling) {
+    clean = applyBritishProsodyAndPhonetics(clean);
+  }
 
   return clean;
 }
 
 /**
  * Splits arbitrary length text into logical sentence chunks (~100 to 220 chars)
- * to prevent TTS timeouts, browser SpeechSynthesis garbage collection, and message cutoffs.
+ * without splitting on decimals/versions (e.g. 3.14, v7.0) or common abbreviations (e.g. Dr., Mr., e.g.),
+ * preventing TTS timeouts, browser SpeechSynthesis GC cutoffs, and message clipping.
  */
-export function splitIntoSentenceChunks(text: string, maxChunkLength: number = 180): string[] {
-  if (!text || text.length <= maxChunkLength) {
-    return text ? [text] : [];
+export function splitIntoSentenceChunks(text: string, maxChunkLength: number = 220): string[] {
+  const normalized = (text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return [];
+  if (normalized.length <= maxChunkLength) {
+    return [normalized];
   }
 
+  // Protect abbreviations, initials, and decimals from sentence splitting
+  const DOT_PLACEHOLDER = '\uE000';
+  const protectedText = normalized
+    .replace(/\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Capt|Lt|Col|Gen|Sgt|vs|etc|e\.g|i\.e)\./gi, (m) => m.replace(/\./g, DOT_PLACEHOLDER))
+    .replace(/(\d)\.(\d)/g, `$1${DOT_PLACEHOLDER}$2`)
+    .replace(/\.{3}/g, `${DOT_PLACEHOLDER}${DOT_PLACEHOLDER}${DOT_PLACEHOLDER}`);
+
+  const rawSentences = protectedText.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [protectedText];
+  const sentences = rawSentences.map((s) => s.replace(new RegExp(DOT_PLACEHOLDER, 'g'), '.').trim()).filter(Boolean);
+
   const chunks: string[] = [];
-  // Split on sentence boundaries
-  const sentences = text.match(/[^.!?]+[.!?]+(\s+|$)|[^.!?]+$/g) || [text];
   let currentChunk = '';
 
-  for (const sentence of sentences) {
-    const trimmed = sentence.trim();
-    if (!trimmed) continue;
-
-    if ((currentChunk + ' ' + trimmed).trim().length <= maxChunkLength) {
-      currentChunk = currentChunk ? `${currentChunk} ${trimmed}` : trimmed;
-    } else {
-      if (currentChunk) chunks.push(currentChunk);
-      if (trimmed.length > maxChunkLength) {
-        // Split long clause on commas or semicolons
-        const clauses = trimmed.split(/([,;:]\s+)/);
-        let sub = '';
-        for (const c of clauses) {
-          if ((sub + c).length <= maxChunkLength) {
-            sub += c;
-          } else {
-            if (sub) chunks.push(sub.trim());
-            sub = c;
-          }
-        }
-        currentChunk = sub.trim();
+  const pushClauseOrWordChunks = (longSentence: string) => {
+    const clauses = longSentence.split(/([,;:]\s+|\s+—\s+|\s+-\s+)/);
+    let sub = '';
+    for (const part of clauses) {
+      if ((sub + part).trim().length <= maxChunkLength) {
+        sub += part;
       } else {
-        currentChunk = trimmed;
+        if (sub.trim()) chunks.push(sub.trim());
+        if (part.trim().length > maxChunkLength) {
+          // Word-level safe wrap so nothing is ever dropped or clipped mid-word
+          const words = part.trim().split(/\s+/);
+          let wordBuf = '';
+          for (const w of words) {
+            if ((wordBuf + ' ' + w).trim().length <= maxChunkLength) {
+              wordBuf = wordBuf ? `${wordBuf} ${w}` : w;
+            } else {
+              if (wordBuf) chunks.push(wordBuf);
+              wordBuf = w;
+            }
+          }
+          sub = wordBuf;
+        } else {
+          sub = part;
+        }
+      }
+    }
+    if (sub.trim()) chunks.push(sub.trim());
+  };
+
+  for (const sentence of sentences) {
+    if ((currentChunk + ' ' + sentence).trim().length <= maxChunkLength) {
+      currentChunk = currentChunk ? `${currentChunk} ${sentence}` : sentence;
+    } else {
+      if (currentChunk) {
+        chunks.push(currentChunk);
+        currentChunk = '';
+      }
+      if (sentence.length > maxChunkLength) {
+        pushClauseOrWordChunks(sentence);
+      } else {
+        currentChunk = sentence;
       }
     }
   }
 
   if (currentChunk) chunks.push(currentChunk);
-  return chunks.filter(c => c.length > 0);
+  return chunks.filter((c) => c.length > 0);
 }
 
 export interface VoicePlaybackState {
@@ -883,7 +1010,10 @@ class JeremyIronsPlaybackManager {
   
   // Streaming sentence queue state
   private playbackGenerationId = 0;
-  private keepaliveTimer: any = null;
+  private activeUtterances: Set<SpeechSynthesisUtterance> = new Set();
+  private chunkWatchdogTimer: any = null;
+  private initPromise: Promise<void> | null = null;
+  private isInitialized = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -891,8 +1021,30 @@ class JeremyIronsPlaybackManager {
       if (savedProfileId) {
         this.activeProfileId = savedProfileId;
       }
-      this.loadProfilesFromServer();
+      void this.initialize();
     }
+  }
+
+  /**
+   * Idempotent startup handshake: ensures server voice profiles and browser speech voices
+   * are ready before the first utterance is synthesized.
+   */
+  public initialize(): Promise<void> {
+    if (this.isInitialized) return Promise.resolve();
+    if (this.initPromise) return this.initPromise;
+
+    this.initPromise = (async () => {
+      try {
+        await Promise.all([
+          this.loadProfilesFromServer(),
+          waitForSpeechVoices(600)
+        ]);
+      } finally {
+        this.isInitialized = true;
+      }
+    })();
+
+    return this.initPromise;
   }
 
   public async loadProfilesFromServer(): Promise<VoiceProfile[]> {
@@ -900,11 +1052,12 @@ class JeremyIronsPlaybackManager {
       const res = await fetch('/api/voice/profiles');
       if (res.ok) {
         const data = await res.json();
-        if (data.profiles && Array.isArray(data.profiles) && data.profiles.length > 0) {
+        if (data.profiles && Array.isArray(data.profiles)) {
           // Merge canonical profiles with custom profiles
           const custom = data.profiles.filter((p: VoiceProfile) => !CANONICAL_VOICE_PROFILES.some(c => c.id === p.id));
           this.profiles = [...CANONICAL_VOICE_PROFILES, ...custom];
-          if (data.activeProfileId && this.profiles.some(p => p.id === data.activeProfileId)) {
+          const savedLocalProfileId = typeof window !== 'undefined' ? localStorage.getItem('ZEREO_ACTIVE_VOICE_PROFILE_ID') : null;
+          if (!savedLocalProfileId && data.activeProfileId && this.profiles.some(p => p.id === data.activeProfileId)) {
             this.activeProfileId = data.activeProfileId;
           }
           this.notify();
@@ -976,7 +1129,7 @@ class JeremyIronsPlaybackManager {
 
     this.profiles = this.profiles.filter(p => p.id !== profileId);
     if (this.activeProfileId === profileId) {
-      this.activeProfileId = 'iron-adaptive';
+      this.activeProfileId = 'jeremy-irons-signature';
     }
 
     try {
@@ -1044,12 +1197,32 @@ class JeremyIronsPlaybackManager {
     }
   }
 
+  public async unlockAudio(): Promise<void> {
+    if (typeof window === 'undefined') return;
+    try {
+      if (!this.activeCtx || this.activeCtx.state === 'closed') {
+        const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+        this.activeCtx = new AudioCtxClass({ sampleRate: 24000 });
+      }
+      if (this.activeCtx.state === 'suspended') {
+        await this.activeCtx.resume();
+      }
+      if (window.speechSynthesis) {
+        window.speechSynthesis.getVoices();
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+      }
+    } catch (_) {}
+  }
+
   public stop() {
     this.playbackGenerationId++;
-    if (this.keepaliveTimer) {
-      clearInterval(this.keepaliveTimer);
-      this.keepaliveTimer = null;
+    if (this.chunkWatchdogTimer) {
+      clearTimeout(this.chunkWatchdogTimer);
+      this.chunkWatchdogTimer = null;
     }
+    this.activeUtterances.clear();
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       try {
         window.speechSynthesis.cancel();
@@ -1068,57 +1241,102 @@ class JeremyIronsPlaybackManager {
   }
 
   /**
-   * Keepalive to prevent Chrome's SpeechSynthesis 15-second cut-off bug
+   * Plays a single chunk via browser SpeechSynthesis.
+   * Holds a strong reference in activeUtterances to prevent Chrome GC mid-speech cutoff
+   * and uses generous rate-scaled watchdog timeout without pause()/resume() keepalives.
    */
-  private startSpeechSynthesisKeepalive() {
-    if (this.keepaliveTimer) clearInterval(this.keepaliveTimer);
-    this.keepaliveTimer = setInterval(() => {
-      if (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking) {
-        window.speechSynthesis.pause();
-        window.speechSynthesis.resume();
-      } else {
-        if (this.keepaliveTimer) {
-          clearInterval(this.keepaliveTimer);
-          this.keepaliveTimer = null;
-        }
-      }
-    }, 5000);
-  }
-
-  /**
-   * Plays a single chunk via SpeechSynthesis
-   */
-  private speakChunkViaSpeechSynthesis(chunk: string, profile: VoiceProfile): Promise<void> {
+  private speakChunkViaSpeechSynthesis(
+    chunk: string,
+    profile: VoiceProfile,
+    genId: number,
+    customConfig?: Partial<JeremyIronsConfig>
+  ): Promise<void> {
     return new Promise((resolve) => {
-      if (typeof window === 'undefined' || !window.speechSynthesis) {
+      if (typeof window === 'undefined' || !window.speechSynthesis || genId !== this.playbackGenerationId) {
         return resolve();
       }
 
-      const utterance = new SpeechSynthesisUtterance(chunk);
-      const voices = window.speechSynthesis.getVoices();
-      const chosenVoice = resolveJeremyIronsVoice(voices, profile.speechSynthesisConfig.preferredVoiceNames);
+      const phoneticChunk = applyBritishProsodyAndPhonetics(chunk);
+      const subChunks = splitIntoSentenceChunks(phoneticChunk, 180);
+      const speakSub = async () => {
+        // Yield briefly if browser SpeechSynthesis just received cancel() so the next speak() isn't swallowed
+        if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
 
-      if (chosenVoice) {
-        utterance.voice = chosenVoice;
-      }
+        const voices = await waitForSpeechVoices(700);
+        const chosenVoice = resolveJeremyIronsVoice(voices, profile.speechSynthesisConfig.preferredVoiceNames);
 
-      utterance.pitch = profile.speechSynthesisConfig.pitch;
-      utterance.rate = profile.speechSynthesisConfig.rate;
+        if (!chosenVoice) {
+          markTtsQuotaExhausted(
+            'Cloud neural TTS quota reached and no verified male OS voice matched on this device; using system British fallback.',
+            300
+          );
+        }
 
-      utterance.onend = () => resolve();
-      utterance.onerror = (e) => {
-        console.warn('Utterance error:', e);
+        for (const sub of subChunks) {
+          if (genId !== this.playbackGenerationId) break;
+          await new Promise<void>((subResolve) => {
+            let settled = false;
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              if (this.chunkWatchdogTimer) {
+                clearTimeout(this.chunkWatchdogTimer);
+                this.chunkWatchdogTimer = null;
+              }
+              this.activeUtterances.delete(utterance);
+              subResolve();
+            };
+
+            const utterance = new SpeechSynthesisUtterance(sub);
+            this.activeUtterances.add(utterance);
+            if (chosenVoice) {
+              utterance.voice = chosenVoice;
+              utterance.lang = chosenVoice.lang || 'en-GB';
+            } else {
+              utterance.lang = 'en-GB';
+            }
+
+            // Lock pitch tightly around Low E (~82.4 Hz) so SpeechSynthesis stays steady
+            utterance.pitch = clampLowESpeechPitch(profile.speechSynthesisConfig.pitch, customConfig?.pitchRate);
+            const rawRate = customConfig?.speechRate || profile.speechSynthesisConfig.rate || 0.86;
+            const rate = Math.min(0.96, Math.max(0.78, rawRate));
+            utterance.rate = rate;
+
+            utterance.onend = finish;
+            utterance.onerror = (e) => {
+              if (e?.error !== 'interrupted' && e?.error !== 'canceled') {
+                console.warn('Utterance error:', e);
+              }
+              finish();
+            };
+
+            // Rate-scaled watchdog with generous headroom prevents slow deliberate cadence from clipping mid-sentence
+            const maxWaitMs = Math.max(12000, Math.ceil((sub.length / Math.max(0.5, rate)) * 140) + 4000);
+            this.chunkWatchdogTimer = setTimeout(finish, maxWaitMs);
+
+            try {
+              if (window.speechSynthesis.paused) {
+                window.speechSynthesis.resume();
+              }
+              window.speechSynthesis.speak(utterance);
+            } catch {
+              finish();
+            }
+          });
+        }
         resolve();
       };
 
-      this.startSpeechSynthesisKeepalive();
-      window.speechSynthesis.speak(utterance);
+      void speakSub();
     });
   }
 
   /**
    * Sequential speech pipeline:
-   * Chunks full text into sentences so the entire message is completely spoken!
+   * Pipelines Gemini Neural TTS across ALL sentence chunks (prefetching chunk i+1 while chunk i plays)
+   * with seamless per-chunk SpeechSynthesis fallback so long responses never cut out after 1-2 sentences.
    */
   public async speak(
     rawText: string,
@@ -1128,45 +1346,94 @@ class JeremyIronsPlaybackManager {
   ): Promise<boolean> {
     this.stop();
 
-    const clean = sanitizeTextForJeremyIrons(rawText);
+    const clean = sanitizeTextForJeremyIrons(rawText, false);
     if (!clean) return false;
 
     const currentGen = ++this.playbackGenerationId;
-    const activeProfile = this.getActiveProfile();
 
+    // Unlock AudioContext immediately while user gesture activation is fresh, then ensure profiles/voices are initialized
+    const unlockPromise = this.unlockAudio();
+    await unlockPromise;
+    await this.initialize();
+
+    if (currentGen !== this.playbackGenerationId) return false;
+
+    const activeProfile = this.getActiveProfile();
     this.activeText = clean;
     this.isCurrentlySpeaking = true;
     onStart?.();
 
-    // Split into chunks to eliminate mid-sentence cutoffs
-    const chunks = splitIntoSentenceChunks(clean, 175);
+    // Split into generous sentence-aligned chunks (~850 chars) to minimize quota usage and prevent mid-reply voice changes
+    const chunks = splitIntoSentenceChunks(clean, 850);
     if (chunks.length === 0) chunks.push(clean);
 
     this.notify(1, chunks.length);
 
     try {
-      // First attempt: Primary Gemini TTS for short/medium messages or first chunk
-      // If server TTS is unavailable or times out, seamlessly use sequential SpeechSynthesis queue!
-      let usedServerTTS = false;
-
-      if (chunks.length === 1 && clean.length < 500) {
+      let savedCfg: Partial<JeremyIronsConfig> | undefined = customConfig;
+      if (!savedCfg && typeof window !== 'undefined') {
         try {
-          const stylePrompt = activeProfile.systemPromptStyle;
-          const audioBuffer = await generateTTS(clean, 'Charon', stylePrompt, activeProfile.accent);
-          if (audioBuffer && currentGen === this.playbackGenerationId) {
-            usedServerTTS = true;
-            await this.playAudioBuffer(audioBuffer, activeProfile, customConfig);
+          const rawCfg = localStorage.getItem('ZEREO_JEREMY_IRONS_CONFIG');
+          if (rawCfg) {
+            const parsed = JSON.parse(rawCfg);
+            const allowedVoices = new Set(['Charon', 'Fenrir', 'Orus']);
+            const migratedBase = allowedVoices.has(parsed?.baseVoice) ? parsed.baseVoice : 'Charon';
+            const migrated = {
+              ...parsed,
+              baseVoice: migratedBase,
+              pitchRate: clampLowEPitchRate(parsed?.pitchRate),
+              gravelAmount: typeof parsed?.gravelAmount === 'number' && parsed.gravelAmount > 0.7 ? 0.42 : parsed?.gravelAmount
+            };
+            savedCfg = migrated;
+            if (parsed?.baseVoice !== migratedBase) {
+              localStorage.setItem('ZEREO_JEREMY_IRONS_CONFIG', JSON.stringify(migrated));
+            }
           }
-        } catch (err) {
-          console.warn('Gemini TTS direct playback failed, falling back to sequential SpeechSynthesis queue:', err);
-        }
+        } catch {}
       }
 
-      if (!usedServerTTS) {
-        for (let i = 0; i < chunks.length; i++) {
-          if (currentGen !== this.playbackGenerationId) break;
-          this.notify(i + 1, chunks.length);
-          await this.speakChunkViaSpeechSynthesis(chunks[i], activeProfile);
+      const stylePrompt = activeProfile.systemPromptStyle;
+      const requestedBase = savedCfg?.baseVoice as string | undefined;
+      const baseVoice: 'Charon' | 'Fenrir' | 'Orus' =
+        requestedBase === 'Fenrir' || requestedBase === 'Orus' || requestedBase === 'Charon'
+          ? requestedBase
+          : 'Charon';
+
+      // Prefetch chunk 0 immediately
+      let nextBufferPromise: Promise<AudioBuffer | null> | null = generateTTS(
+        chunks[0],
+        baseVoice,
+        stylePrompt,
+        activeProfile.accent
+      ).catch(() => null);
+
+      for (let i = 0; i < chunks.length; i++) {
+        if (currentGen !== this.playbackGenerationId) break;
+        this.notify(i + 1, chunks.length);
+
+        const currentBufferPromise = nextBufferPromise;
+        // Start prefetching chunk i+1 in parallel while chunk i decodes/plays
+        if (i + 1 < chunks.length) {
+          nextBufferPromise = generateTTS(
+            chunks[i + 1],
+            baseVoice,
+            stylePrompt,
+            activeProfile.accent
+          ).catch(() => null);
+        } else {
+          nextBufferPromise = null;
+        }
+
+        const audioBuffer = currentBufferPromise ? await currentBufferPromise : null;
+        if (currentGen !== this.playbackGenerationId) break;
+
+        let playedViaAudio = false;
+        if (audioBuffer) {
+          playedViaAudio = await this.playAudioBuffer(audioBuffer, activeProfile, savedCfg, currentGen);
+        }
+
+        if (!playedViaAudio && currentGen === this.playbackGenerationId) {
+          await this.speakChunkViaSpeechSynthesis(chunks[i], activeProfile, currentGen, savedCfg);
         }
       }
 
@@ -1180,6 +1447,71 @@ class JeremyIronsPlaybackManager {
     } catch (err) {
       console.error('Playback queue error:', err);
       this.stop();
+      onEnded?.();
+      return false;
+    }
+  }
+
+  /**
+   * Decodes and plays already-synthesized base64 audio (WAV/L16) through the Jeremy Irons DSP chain
+   * without triggering a redundant /api/gemini/tts request.
+   */
+  public async playBase64Audio(
+    base64Audio: string,
+    customConfig?: Partial<JeremyIronsConfig>,
+    onStart?: () => void,
+    onEnded?: () => void,
+    labelText: string = 'Auditioning synthesized neural voice'
+  ): Promise<boolean> {
+    if (!base64Audio) return false;
+    this.stop();
+
+    const currentGen = ++this.playbackGenerationId;
+
+    await this.unlockAudio();
+    await this.initialize();
+
+    if (currentGen !== this.playbackGenerationId) return false;
+
+    const activeProfile = this.getActiveProfile();
+    this.activeText = labelText;
+    this.isCurrentlySpeaking = true;
+    onStart?.();
+    this.notify(1, 1);
+
+    try {
+      if (!this.activeCtx || this.activeCtx.state === 'closed') {
+        const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+        this.activeCtx = new AudioCtxClass({ sampleRate: 24000 });
+      }
+      if (this.activeCtx.state === 'suspended') {
+        await this.activeCtx.resume().catch(() => {});
+      }
+
+      const audioBuffer = await decodeAudioData(
+        decodeBase64(base64Audio),
+        this.activeCtx,
+        24000,
+        1
+      );
+      if (currentGen !== this.playbackGenerationId) return false;
+
+      const played = await this.playAudioBuffer(audioBuffer, activeProfile, customConfig, currentGen);
+      if (currentGen === this.playbackGenerationId) {
+        this.isCurrentlySpeaking = false;
+        this.activeText = '';
+        this.notify();
+        onEnded?.();
+      }
+      return played;
+    } catch (err) {
+      console.warn('playBase64Audio error:', err);
+      if (currentGen === this.playbackGenerationId) {
+        this.isCurrentlySpeaking = false;
+        this.activeText = '';
+        this.notify();
+        onEnded?.();
+      }
       return false;
     }
   }
@@ -1187,57 +1519,93 @@ class JeremyIronsPlaybackManager {
   private async playAudioBuffer(
     buffer: AudioBuffer, 
     profile: VoiceProfile,
-    customConfig?: Partial<JeremyIronsConfig>
-  ): Promise<void> {
+    customConfig?: Partial<JeremyIronsConfig>,
+    genId?: number
+  ): Promise<boolean> {
     return new Promise(async (resolve) => {
+      let settled = false;
+      let fallbackTimer: any = null;
+      let tailTimer: any = null;
+      const finish = (didPlay: boolean) => {
+        if (settled) return;
+        settled = true;
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+        if (tailTimer) clearTimeout(tailTimer);
+        resolve(didPlay);
+      };
+
       try {
+        if (genId !== undefined && genId !== this.playbackGenerationId) {
+          return finish(true);
+        }
         if (!this.activeCtx || this.activeCtx.state === 'closed') {
           const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
           this.activeCtx = new AudioCtxClass({ sampleRate: 24000 });
         }
         if (this.activeCtx.state === 'suspended') {
-          await this.activeCtx.resume();
+          await this.activeCtx.resume().catch(() => {});
         }
 
         const ctx = this.activeCtx;
+        // If browser autoplay policy kept AudioContext suspended, abort and allow SpeechSynthesis fallback
+        if (ctx.state !== 'running') {
+          console.warn('Voice DSP AudioContext remains suspended; deferring chunk to SpeechSynthesis.');
+          return finish(false);
+        }
+
         const formants = profile.dspConfig.formants;
         const config: JeremyIronsConfig = {
           baseVoice: 'Charon',
-          pitchRate: profile.dspConfig.pitchMultiplier || 0.86,
-          gravelAmount: profile.dspConfig.gravelSaturation || 0.88,
-          chestResonanceDb: profile.dspConfig.chestResonanceDb || 6.8,
-          articulationDb: profile.dspConfig.articulationBoostDb || 5.2,
-          speechRate: profile.dspConfig.speechRate || 0.88,
+          pitchRate: clampLowEPitchRate(profile.dspConfig.pitchMultiplier ?? LOW_E_TARGET_PITCH_RATE),
+          gravelAmount: profile.dspConfig.gravelSaturation ?? 0.42,
+          chestResonanceDb: profile.dspConfig.chestResonanceDb ?? 5.2,
+          articulationDb: profile.dspConfig.articulationBoostDb ?? 1.6,
+          speechRate: profile.dspConfig.speechRate ?? 0.90,
           formantPresetName: profile.dspConfig.formantPresetName || 'sovereign-gravitas',
-          f1Hz: formants?.f1Hz || 380,
-          f1GainDb: formants?.f1GainDb || 6.2,
-          f2Hz: formants?.f2Hz || 1350,
-          f2GainDb: formants?.f2GainDb || -3.0,
-          f3Hz: formants?.f3Hz || 2680,
-          f3GainDb: formants?.f3GainDb || 6.5,
-          vocalTractLengthFactor: formants?.vocalTractLengthFactor || 1.14,
+          f1Hz: formants?.f1Hz ?? 375,
+          f1GainDb: formants?.f1GainDb ?? 4.5,
+          f2Hz: formants?.f2Hz ?? 1320,
+          f2GainDb: formants?.f2GainDb ?? -2.8,
+          f3Hz: formants?.f3Hz ?? 2640,
+          f3GainDb: formants?.f3GainDb ?? 2.4,
+          vocalTractLengthFactor: formants?.vocalTractLengthFactor ?? 1.14,
           ...customConfig
         };
 
         const dsp = buildJeremyIronsDSP(ctx, ctx.destination, config);
         const source = ctx.createBufferSource();
         source.buffer = buffer;
-        source.playbackRate.value = config.pitchRate;
+        const rate = clampLowEPitchRate(config.pitchRate);
+        source.playbackRate.value = rate;
 
         source.connect(dsp.inputNode);
         this.activeSource = source;
+
+        const expectedMs = Math.max(1500, Math.ceil((buffer.duration / rate) * 1000) + 1500);
+        fallbackTimer = setTimeout(() => {
+          if (this.activeSource === source) {
+            try { source.stop(); } catch {}
+            this.activeSource = null;
+          }
+          finish(true);
+        }, expectedMs);
 
         source.onended = () => {
           if (this.activeSource === source) {
             this.activeSource = null;
           }
-          resolve();
+          // Allow 65ms DSP compressor/formant release tail before starting next chunk so final syllables never clip
+          if (genId !== undefined && genId !== this.playbackGenerationId) {
+            finish(true);
+          } else {
+            tailTimer = setTimeout(() => finish(true), 65);
+          }
         };
 
         source.start(0);
       } catch (e) {
         console.warn('AudioBuffer playback error:', e);
-        resolve();
+        finish(false);
       }
     });
   }

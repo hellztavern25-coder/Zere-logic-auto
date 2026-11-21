@@ -68,19 +68,28 @@ export interface DaemonState {
 }
 
 export enum GeminiModel {
-  FLASH_38 = 'gemini-3.1-flash-lite', // Updated from 3.8 to 3.1-flash-lite due to upstream 503 high demand
-  FLASH_36 = 'gemini-3.1-flash-lite',
-  FLASH_PREVIEW = 'gemini-3-flash-preview',
-  PRO_PREVIEW = 'gemini-3.1-pro-preview',
-  FLASH_LITE = 'gemini-3.1-flash-lite',
+  FLASH_38 = 'gemini-3.8-flash',
+  FLASH_36 = 'gemini-4-hydrogen',
+  FLASH_PREVIEW = 'gemini-4-hydrogen',
+  PRO_PREVIEW = 'gemini-4-hydrogen',
+  FLASH_LITE = 'gemini-4-hydrogen',
   FLASH_IMAGE = 'gemini-3.1-flash-image',
   PRO_IMAGE_PREVIEW = 'gemini-3-pro-image',
   FLASH_TTS = 'gemini-3.8-flash-lite-tts',
-  FLASH_LIVE = 'gemini-3.1-flash-live-preview',
+  FLASH_LIVE = 'gemini-3.8-live',
   VEO_FAST = 'veo-3.1-lite-generate-preview',
   VEO_QUALITY = 'veo-3.1-generate-preview',
-  FLASH_25 = 'gemini-3.1-flash-lite'
+  FLASH_25 = 'gemini-3.8-flash'
 }
+
+export type DetectedEmotionCue =
+  | 'HAPPY'
+  | 'SAD'
+  | 'FRUSTRATED'
+  | 'ANXIOUS'
+  | 'GRATEFUL'
+  | 'FOCUSED'
+  | 'NEUTRAL';
 
 export type EmotionalPrimaryState = 
   | 'TACTICAL_DRIVE' 
@@ -101,6 +110,9 @@ export interface EmotionalMap {
   id: string;
   timestamp: number;
   speaker: string; // 'Preston Johnston (Council Grey)' | 'Danielle' | 'Ali' | 'System'
+  detectedCue?: DetectedEmotionCue;
+  matchedKeywords?: string[];
+  empatheticResponse?: string;
   primaryState: EmotionalPrimaryState;
   confidence: number; // 0 - 100%
   needVsWant: {
@@ -155,6 +167,8 @@ export interface ChatMessage {
   isDoorman?: boolean;
   imageData?: string;
   imageMime?: string;
+  attachmentName?: string;
+  attachmentType?: VaultFileType;
   generatedArt?: {
     prompt: string;
     imageUrl: string;
@@ -571,4 +585,20 @@ export interface AnchorEngineLedger {
   status: 'CALIBRATED' | 'SYNCHRONIZED';
 }
 
+export type VoiceCommandSource = 'live_bridge' | 'synthesizer' | 'conversation_mode';
 
+export interface VoiceCommandLogEntry {
+  id: string;
+  timestamp: number;
+  source: VoiceCommandSource;
+  commandText: string;
+  responseText?: string;
+  voiceProfile?: string;
+  formantPreset?: string;
+  durationMs?: number;
+  replayCount?: number;
+  lastReplayedAt?: number;
+  sessionId?: string;
+  waveformPeaks?: number[];
+  peakIntensityDb?: number;
+}

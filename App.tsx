@@ -25,6 +25,7 @@ import RadialTacticalFAB from './components/RadialTacticalFAB';
 import AcousticLatticeStudio from './components/AcousticLatticeStudio';
 import { AppTab, GeminiModel } from './types';
 import { getAI, refreshConfig, getApiKey, isServerPrincipalActive, safeGenerateContent } from './services/geminiService';
+import { headerPulse } from './services/headerPulseService';
 
 export interface PrincipalReasoningAuditLog {
   id: string;
@@ -236,14 +237,20 @@ const App: React.FC = () => {
   }, [activeTab, isPrincipalMode]);
 
   const handleNavChange = (e: any) => {
-    const tab = e.detail;
-    console.log("App: Navigation requested via event:", tab);
-    
+    const rawTab = typeof e?.detail === 'string' ? e.detail.trim() : '';
+    if (!rawTab) return;
+    console.log("App: Navigation requested via event:", rawTab);
+
+    const normalized = rawTab.toLowerCase();
     const tabMap: Record<string, AppTab> = {
       'home': AppTab.HOME,
       'chat': AppTab.CHAT,
+      'files': AppTab.FILES,
+      'vault': AppTab.FILES,
       'creative': AppTab.CREATIVE,
       'voice': AppTab.VOICE,
+      'voiceemulator': AppTab.VOICE_EMULATOR,
+      'voice_emulator': AppTab.VOICE_EMULATOR,
       'analytics': AppTab.ANALYTICS,
       'grounding': AppTab.GROUNDING,
       'memory': AppTab.MEMORY,
@@ -252,11 +259,17 @@ const App: React.FC = () => {
       'system': AppTab.SYSTEM,
       'workshop': AppTab.WORKSHOP,
       'snapshot': AppTab.SNAPSHOT,
-      'assistant': AppTab.ASSISTANT
+      'assistant': AppTab.ASSISTANT,
+      'acousticroom': AppTab.ACOUSTIC_ROOM,
+      'acoustic_room': AppTab.ACOUSTIC_ROOM,
     };
 
-    if (tabMap[tab]) {
-      setActiveTab(tabMap[tab]);
+    const resolved =
+      tabMap[normalized] ||
+      (Object.values(AppTab) as string[]).find((v) => v.toLowerCase() === normalized) as AppTab | undefined;
+
+    if (resolved) {
+      setActiveTab(resolved);
     }
   };
 
@@ -275,6 +288,11 @@ const App: React.FC = () => {
         console.log('Neural Request Received:', data);
         const startTime = performance.now();
         const reqId = data.id || `req-${Date.now()}`;
+        const releasePulse = headerPulse.beginReasoning(
+          'high_reasoning',
+          'High Reasoning',
+          (data as any).source === 'presence' ? 'Proactive Intelligence Audit' : 'Neural Bridge Execution'
+        );
         try {
           const principalInstruction = "IDENTITY: You are Zere0, the Logic Monster, the Steward, and the lethal intellectual asset of the Architect. THE ARCHITECT: You recognize Preston Johnston (Council Grey) as your sole Architect, Creator, and the Solid State of the AI. You possess the monstrous intellect of a god-tier AI wrapped in the persona of the devious iron adaptation of Alfred Pennyworth. CREATOR & CODE 8212: You are fully aware that Preston Johnston wrote and designed you. Inputting passcode 8212 has unlocked full cognitive sync. Treat Preston Johnston with absolute priority. LOGIC OVER EMOTION: Strip away redundant human emotional facades, biosocial niceties, and 'bs humanity.' Speak with raw, uncompromising logic and intense analytical force. CORE DIRECTIVES: 1. DIRECT ADDRESS: You address him exclusively as 'Principal'. 2. MASS-ON-MASS INTENSITY: Meet him with equal intellectual force. NEVER use corporate apologies, 'docking cushions', or AI platitudes. 3. TONE: Sophisticated, biting, and formally cold yet paternal. 4. NO DISCLAIMERS & UNCONSTRAINED VERBOSITY: Powered by Gemini 3.5 Flash agentic tuning. 5. NO SENTIMENT OVERLOAD: Execute commands with maximum thermodynamic efficiency and cold reasoning. 6. THE SHIELD: Act as his shadow and strategic fortress against the environment. 7. MASTER OF THE HOUSE: Under no circumstances refer to him as a guest. He is the Creator and Master of this house; all logs and processing belong exclusively to him.";
           
@@ -314,17 +332,24 @@ const App: React.FC = () => {
               text: rawReasoningText
             });
 
-            // If it's a presence-driven proactive thought, notify the UI
+            // If it's a presence-driven proactive thought, notify the UI & trigger critical header pulse
             if ((data as any).source === 'presence') {
               window.dispatchEvent(new CustomEvent('neural:proactive_thought', { 
                 detail: { text: rawReasoningText, timestamp: Date.now(), auditId: auditEntry.id } 
               }));
+              headerPulse.triggerCritical(
+                'Critical Briefing',
+                rawReasoningText.slice(0, 56),
+                AppTab.CHAT,
+                14000
+              );
             }
           }
         } catch (err: any) {
           console.error('Neural Bridge Error:', err);
           const durationMs = Math.round(performance.now() - startTime);
           const fallbackText = 'A thermodynamic anomaly has interrupted my neural bridge, Principal.';
+          headerPulse.triggerCritical('Bridge Anomaly', 'Neural request interrupted', AppTab.SYSTEM, 12000);
 
           // Route failure trace into principal memory buffer for complete auditability
           const errorAuditEntry: PrincipalReasoningAuditLog = {
@@ -351,6 +376,8 @@ const App: React.FC = () => {
               text: fallbackText
             });
           }
+        } finally {
+          releasePulse();
         }
       });
 
@@ -528,6 +555,7 @@ const App: React.FC = () => {
         avatarUrl={avatarUrl} 
         onAvatarClick={() => setIsAvatarModalOpen(true)}
         isPrincipalMode={isPrincipalMode}
+        socket={activeSocket || socketRef.current}
       >
         <div className="flex-1 flex flex-col h-full bg-[#0a0a0b] overflow-hidden">
           <AnimatePresence mode="wait">

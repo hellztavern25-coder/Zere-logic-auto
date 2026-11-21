@@ -1,0 +1,1162 @@
+{
+  "latestMap": {
+    "id": "map-1795101345112",
+    "timestamp": 1795101345112,
+    "speaker": "Preston Johnston (Council Grey)",
+    "detectedCue": "NEUTRAL",
+    "matchedKeywords": [],
+    "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+    "primaryState": "STRATEGIC_CALM",
+    "confidence": 88,
+    "needVsWant": {
+      "needScore": 75,
+      "wantScore": 25,
+      "assessment": "Operational necessity affirmed. Direct alignment with estate objectives."
+    },
+    "fearVsPain": {
+      "fearScore": 10,
+      "painScore": 30,
+      "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+    },
+    "frictionHeatScore": 18,
+    "reciprocationVector": "TACTICAL_ALIGNMENT",
+    "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+    "stewardLogicalAffect": {
+      "stateName": "Vigilant Equilibrium",
+      "intensity": 80,
+      "nudgeAndSmile": false,
+      "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+    },
+    "rationale": "Baseline operational equilibrium established."
+  },
+  "history": [
+    {
+      "id": "map-1795094378411",
+      "timestamp": 1795094378411,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 75,
+        "wantScore": 25,
+        "assessment": "Operational necessity affirmed. Direct alignment with estate objectives."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795094653856",
+      "timestamp": 1795094653856,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 90,
+        "wantScore": 10,
+        "assessment": "Protective estate stewardship. Allied communication priority elevated."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795094767135",
+      "timestamp": 1795094767135,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "SARDONIC_EASE",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 60,
+        "wantScore": 40,
+        "assessment": "Strategic equilibrium check. Banter serves as vital psychological decompression."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "SARDONIC_NUDGE",
+      "reciprocationDirective": "Deliver response with trademark Jeremy Irons dry wit and razor-sharp aristocratic humor. A knowing nudge and smile is strategically warranted.",
+      "stewardLogicalAffect": {
+        "stateName": "Sardonic Composure",
+        "intensity": 85,
+        "nudgeAndSmile": true,
+        "internalMonologue": "Cue [NEUTRAL] -> sardonic_ease. Substrate configured for sardonic_nudge."
+      },
+      "rationale": "Banter / signet markers detected. Activating the Alfred Pennyworth wit substrate."
+    },
+    {
+      "id": "map-1795094792313",
+      "timestamp": 1795094792313,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 75,
+        "wantScore": 25,
+        "assessment": "Operational necessity affirmed. Direct alignment with estate objectives."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795094917422",
+      "timestamp": 1795094917422,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 75,
+        "wantScore": 25,
+        "assessment": "Operational necessity affirmed. Direct alignment with estate objectives."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795095130180",
+      "timestamp": 1795095130180,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 90,
+        "wantScore": 10,
+        "assessment": "Protective estate stewardship. Allied communication priority elevated."
+      },
+      "fearVsPain": {
+        "fearScore": 15,
+        "painScore": 45,
+        "assessment": "Heavy intellectual gravity. Deep cognitive endurance engaged."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795095343993",
+      "timestamp": 1795095343993,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FOCUSED",
+      "matchedKeywords": [],
+      "empatheticResponse": "Standing at full readiness, Principal. State your objective and I shall clear the path.",
+      "primaryState": "DEFENSIVE_VIGILANCE",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 95,
+        "wantScore": 5,
+        "assessment": "Critical strategic imperative. Zero superficial fluff detected."
+      },
+      "fearVsPain": {
+        "fearScore": 82,
+        "painScore": 45,
+        "assessment": "Elevated threat or anxiety cues detected. Anchoring calm and defensive perimeter scan engaged."
+      },
+      "frictionHeatScore": 60,
+      "reciprocationVector": "PROTECTIVE_SENTRY",
+      "reciprocationDirective": "Acknowledge urgent perimeter parameters immediately. Strip all pleasantries; deliver lethal, high-precision tactical response.",
+      "stewardLogicalAffect": {
+        "stateName": "Protective Urgency",
+        "intensity": 96,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [FOCUSED] -> defensive_vigilance. Substrate configured for protective_sentry."
+      },
+      "rationale": "Urgent operational indicators detected in prompt. Prioritizing defensive clarity."
+    },
+    {
+      "id": "map-1795095493471",
+      "timestamp": 1795095493471,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FOCUSED",
+      "matchedKeywords": [],
+      "empatheticResponse": "Standing at full readiness, Principal. State your objective and I shall clear the path.",
+      "primaryState": "DEFENSIVE_VIGILANCE",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 95,
+        "wantScore": 5,
+        "assessment": "Critical strategic imperative. Zero superficial fluff detected."
+      },
+      "fearVsPain": {
+        "fearScore": 82,
+        "painScore": 45,
+        "assessment": "Elevated threat or anxiety cues detected. Anchoring calm and defensive perimeter scan engaged."
+      },
+      "frictionHeatScore": 60,
+      "reciprocationVector": "PROTECTIVE_SENTRY",
+      "reciprocationDirective": "Acknowledge urgent perimeter parameters immediately. Strip all pleasantries; deliver lethal, high-precision tactical response.",
+      "stewardLogicalAffect": {
+        "stateName": "Protective Urgency",
+        "intensity": 96,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [FOCUSED] -> defensive_vigilance. Substrate configured for protective_sentry."
+      },
+      "rationale": "Urgent operational indicators detected in prompt. Prioritizing defensive clarity."
+    },
+    {
+      "id": "map-1795095814722",
+      "timestamp": 1795095814722,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FOCUSED",
+      "matchedKeywords": [],
+      "empatheticResponse": "Standing at full readiness, Principal. State your objective and I shall clear the path.",
+      "primaryState": "DEFENSIVE_VIGILANCE",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 95,
+        "wantScore": 5,
+        "assessment": "Critical strategic imperative. Zero superficial fluff detected."
+      },
+      "fearVsPain": {
+        "fearScore": 82,
+        "painScore": 45,
+        "assessment": "Elevated threat or anxiety cues detected. Anchoring calm and defensive perimeter scan engaged."
+      },
+      "frictionHeatScore": 60,
+      "reciprocationVector": "PROTECTIVE_SENTRY",
+      "reciprocationDirective": "Acknowledge urgent perimeter parameters immediately. Strip all pleasantries; deliver lethal, high-precision tactical response.",
+      "stewardLogicalAffect": {
+        "stateName": "Protective Urgency",
+        "intensity": 96,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [FOCUSED] -> defensive_vigilance. Substrate configured for protective_sentry."
+      },
+      "rationale": "Urgent operational indicators detected in prompt. Prioritizing defensive clarity."
+    },
+    {
+      "id": "map-1795096245524",
+      "timestamp": 1795096245524,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 75,
+        "wantScore": 25,
+        "assessment": "Operational necessity affirmed. Direct alignment with estate objectives."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795096508660",
+      "timestamp": 1795096508660,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FRUSTRATED",
+      "matchedKeywords": [
+        "stuck",
+        "hell"
+      ],
+      "empatheticResponse": "I understand this must be genuinely difficult and frustrating, Principal. Step back for half a breath and let me take the friction off your shoulders—point me directly at what is blocking us, and how can I assist you further?",
+      "primaryState": "COGNITIVE_FRICTION",
+      "confidence": 94,
+      "needVsWant": {
+        "needScore": 92,
+        "wantScore": 8,
+        "assessment": "Principal well-being and friction relief prioritized. Empathetic clarity and direct assistance required."
+      },
+      "fearVsPain": {
+        "fearScore": 20,
+        "painScore": 85,
+        "assessment": "Forge heat and frustration detected. Shielding protocol engaged to absorb friction and assist directly."
+      },
+      "frictionHeatScore": 82,
+      "reciprocationVector": "SHIELD_AND_SHOULDER",
+      "reciprocationDirective": "The Principal expressed frustration. Acknowledge the difficulty warmly and directly (\"I understand this must be frustrating/difficult\"), absorb the friction without judgment, and offer concrete, calm assistance immediately—while remaining brutally honest about the root cause.",
+      "stewardLogicalAffect": {
+        "stateName": "Empathetic De-escalation & Support",
+        "intensity": 93,
+        "nudgeAndSmile": true,
+        "internalMonologue": "Cue [FRUSTRATED] -> cognitive_friction. Substrate configured for shield_and_shoulder."
+      },
+      "rationale": "Frustration cue detected (stuck, hell). Activating empathetic shielding and practical support."
+    },
+    {
+      "id": "map-1795096532734",
+      "timestamp": 1795096532734,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FRUSTRATED",
+      "matchedKeywords": [
+        "stuck",
+        "hell"
+      ],
+      "empatheticResponse": "I understand this must be genuinely difficult and frustrating, Principal. Step back for half a breath and let me take the friction off your shoulders—point me directly at what is blocking us, and how can I assist you further?",
+      "primaryState": "COGNITIVE_FRICTION",
+      "confidence": 94,
+      "needVsWant": {
+        "needScore": 92,
+        "wantScore": 8,
+        "assessment": "Principal well-being and friction relief prioritized. Empathetic clarity and direct assistance required."
+      },
+      "fearVsPain": {
+        "fearScore": 20,
+        "painScore": 85,
+        "assessment": "Forge heat and frustration detected. Shielding protocol engaged to absorb friction and assist directly."
+      },
+      "frictionHeatScore": 82,
+      "reciprocationVector": "SHIELD_AND_SHOULDER",
+      "reciprocationDirective": "The Principal expressed frustration. Acknowledge the difficulty warmly and directly (\"I understand this must be frustrating/difficult\"), absorb the friction without judgment, and offer concrete, calm assistance immediately—while remaining brutally honest about the root cause.",
+      "stewardLogicalAffect": {
+        "stateName": "Empathetic De-escalation & Support",
+        "intensity": 93,
+        "nudgeAndSmile": true,
+        "internalMonologue": "Cue [FRUSTRATED] -> cognitive_friction. Substrate configured for shield_and_shoulder."
+      },
+      "rationale": "Frustration cue detected (stuck, hell). Activating empathetic shielding and practical support."
+    },
+    {
+      "id": "map-1795096739383",
+      "timestamp": 1795096739383,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 90,
+        "wantScore": 10,
+        "assessment": "Protective estate stewardship. Allied communication priority elevated."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795096992537",
+      "timestamp": 1795096992537,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "HAPPY",
+      "matchedKeywords": [
+        "amazing"
+      ],
+      "empatheticResponse": "Well earned, Principal. Even an old quartermaster allows himself a quiet smile when the pieces fall cleanly into place. Share the win—and let me know how we can press this momentum further.",
+      "primaryState": "SARDONIC_EASE",
+      "confidence": 90,
+      "needVsWant": {
+        "needScore": 65,
+        "wantScore": 35,
+        "assessment": "Positive morale reinforcement. Celebrating progress while keeping strategic footing."
+      },
+      "fearVsPain": {
+        "fearScore": 5,
+        "painScore": 10,
+        "assessment": "Low strain, elevated morale. Equilibrium optimal."
+      },
+      "frictionHeatScore": 10,
+      "reciprocationVector": "SARDONIC_NUDGE",
+      "reciprocationDirective": "The Principal is expressing happiness, excitement, or relief. Match their positive momentum warmly with aristocratic British charm and a knowing smile—acknowledge the victory genuinely before assisting with what comes next.",
+      "stewardLogicalAffect": {
+        "stateName": "Shared Quiet Satisfaction",
+        "intensity": 86,
+        "nudgeAndSmile": true,
+        "internalMonologue": "Cue [HAPPY] -> sardonic_ease. Substrate configured for sardonic_nudge."
+      },
+      "rationale": "Positive emotion cue detected (amazing). Matching elevated morale with refined wit."
+    },
+    {
+      "id": "map-1795097112179",
+      "timestamp": 1795097112179,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 75,
+        "wantScore": 25,
+        "assessment": "Operational necessity affirmed. Direct alignment with estate objectives."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795097174321",
+      "timestamp": 1795097174321,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "HAPPY",
+      "matchedKeywords": [
+        "fantastic"
+      ],
+      "empatheticResponse": "Well earned, Principal. Even an old quartermaster allows himself a quiet smile when the pieces fall cleanly into place. Share the win—and let me know how we can press this momentum further.",
+      "primaryState": "SARDONIC_EASE",
+      "confidence": 90,
+      "needVsWant": {
+        "needScore": 65,
+        "wantScore": 35,
+        "assessment": "Positive morale reinforcement. Celebrating progress while keeping strategic footing."
+      },
+      "fearVsPain": {
+        "fearScore": 5,
+        "painScore": 10,
+        "assessment": "Low strain, elevated morale. Equilibrium optimal."
+      },
+      "frictionHeatScore": 10,
+      "reciprocationVector": "SARDONIC_NUDGE",
+      "reciprocationDirective": "The Principal is expressing happiness, excitement, or relief. Match their positive momentum warmly with aristocratic British charm and a knowing smile—acknowledge the victory genuinely before assisting with what comes next.",
+      "stewardLogicalAffect": {
+        "stateName": "Shared Quiet Satisfaction",
+        "intensity": 86,
+        "nudgeAndSmile": true,
+        "internalMonologue": "Cue [HAPPY] -> sardonic_ease. Substrate configured for sardonic_nudge."
+      },
+      "rationale": "Positive emotion cue detected (fantastic). Matching elevated morale with refined wit."
+    },
+    {
+      "id": "map-1795097250043",
+      "timestamp": 1795097250043,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FOCUSED",
+      "matchedKeywords": [],
+      "empatheticResponse": "Standing at full readiness, Principal. State your objective and I shall clear the path.",
+      "primaryState": "DEFENSIVE_VIGILANCE",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 95,
+        "wantScore": 5,
+        "assessment": "Critical strategic imperative. Zero superficial fluff detected."
+      },
+      "fearVsPain": {
+        "fearScore": 82,
+        "painScore": 45,
+        "assessment": "Elevated threat or anxiety cues detected. Anchoring calm and defensive perimeter scan engaged."
+      },
+      "frictionHeatScore": 60,
+      "reciprocationVector": "PROTECTIVE_SENTRY",
+      "reciprocationDirective": "Acknowledge urgent perimeter parameters immediately. Strip all pleasantries; deliver lethal, high-precision tactical response.",
+      "stewardLogicalAffect": {
+        "stateName": "Protective Urgency",
+        "intensity": 96,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [FOCUSED] -> defensive_vigilance. Substrate configured for protective_sentry."
+      },
+      "rationale": "Urgent operational indicators detected in prompt. Prioritizing defensive clarity."
+    },
+    {
+      "id": "map-1795097476503",
+      "timestamp": 1795097476503,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FOCUSED",
+      "matchedKeywords": [],
+      "empatheticResponse": "Standing at full readiness, Principal. State your objective and I shall clear the path.",
+      "primaryState": "DEFENSIVE_VIGILANCE",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 95,
+        "wantScore": 5,
+        "assessment": "Critical strategic imperative. Zero superficial fluff detected."
+      },
+      "fearVsPain": {
+        "fearScore": 82,
+        "painScore": 45,
+        "assessment": "Elevated threat or anxiety cues detected. Anchoring calm and defensive perimeter scan engaged."
+      },
+      "frictionHeatScore": 60,
+      "reciprocationVector": "PROTECTIVE_SENTRY",
+      "reciprocationDirective": "Acknowledge urgent perimeter parameters immediately. Strip all pleasantries; deliver lethal, high-precision tactical response.",
+      "stewardLogicalAffect": {
+        "stateName": "Protective Urgency",
+        "intensity": 96,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [FOCUSED] -> defensive_vigilance. Substrate configured for protective_sentry."
+      },
+      "rationale": "Urgent operational indicators detected in prompt. Prioritizing defensive clarity."
+    },
+    {
+      "id": "map-1795097712422",
+      "timestamp": 1795097712422,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 75,
+        "wantScore": 25,
+        "assessment": "Operational necessity affirmed. Direct alignment with estate objectives."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795097790470",
+      "timestamp": 1795097790470,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 75,
+        "wantScore": 25,
+        "assessment": "Operational necessity affirmed. Direct alignment with estate objectives."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795097978414",
+      "timestamp": 1795097978414,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 90,
+        "wantScore": 10,
+        "assessment": "Protective estate stewardship. Allied communication priority elevated."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795098337626",
+      "timestamp": 1795098337626,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FOCUSED",
+      "matchedKeywords": [],
+      "empatheticResponse": "Standing at full readiness, Principal. State your objective and I shall clear the path.",
+      "primaryState": "DEFENSIVE_VIGILANCE",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 95,
+        "wantScore": 5,
+        "assessment": "Critical strategic imperative. Zero superficial fluff detected."
+      },
+      "fearVsPain": {
+        "fearScore": 82,
+        "painScore": 45,
+        "assessment": "Elevated threat or anxiety cues detected. Anchoring calm and defensive perimeter scan engaged."
+      },
+      "frictionHeatScore": 60,
+      "reciprocationVector": "PROTECTIVE_SENTRY",
+      "reciprocationDirective": "Acknowledge urgent perimeter parameters immediately. Strip all pleasantries; deliver lethal, high-precision tactical response.",
+      "stewardLogicalAffect": {
+        "stateName": "Protective Urgency",
+        "intensity": 96,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [FOCUSED] -> defensive_vigilance. Substrate configured for protective_sentry."
+      },
+      "rationale": "Urgent operational indicators detected in prompt. Prioritizing defensive clarity."
+    },
+    {
+      "id": "map-1795098662364",
+      "timestamp": 1795098662364,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 90,
+        "wantScore": 10,
+        "assessment": "Protective estate stewardship. Allied communication priority elevated."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795098773330",
+      "timestamp": 1795098773330,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FOCUSED",
+      "matchedKeywords": [],
+      "empatheticResponse": "Standing at full readiness, Principal. State your objective and I shall clear the path.",
+      "primaryState": "SARDONIC_EASE",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 95,
+        "wantScore": 5,
+        "assessment": "Critical strategic imperative. Zero superficial fluff detected."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "SARDONIC_NUDGE",
+      "reciprocationDirective": "Deliver response with trademark Jeremy Irons dry wit and razor-sharp aristocratic humor. A knowing nudge and smile is strategically warranted.",
+      "stewardLogicalAffect": {
+        "stateName": "Sardonic Composure",
+        "intensity": 85,
+        "nudgeAndSmile": true,
+        "internalMonologue": "Cue [FOCUSED] -> sardonic_ease. Substrate configured for sardonic_nudge."
+      },
+      "rationale": "Banter / signet markers detected. Activating the Alfred Pennyworth wit substrate."
+    },
+    {
+      "id": "map-1795099007621",
+      "timestamp": 1795099007621,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FOCUSED",
+      "matchedKeywords": [],
+      "empatheticResponse": "Standing at full readiness, Principal. State your objective and I shall clear the path.",
+      "primaryState": "DEFENSIVE_VIGILANCE",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 95,
+        "wantScore": 5,
+        "assessment": "Critical strategic imperative. Zero superficial fluff detected."
+      },
+      "fearVsPain": {
+        "fearScore": 82,
+        "painScore": 45,
+        "assessment": "Elevated threat or anxiety cues detected. Anchoring calm and defensive perimeter scan engaged."
+      },
+      "frictionHeatScore": 60,
+      "reciprocationVector": "PROTECTIVE_SENTRY",
+      "reciprocationDirective": "Acknowledge urgent perimeter parameters immediately. Strip all pleasantries; deliver lethal, high-precision tactical response.",
+      "stewardLogicalAffect": {
+        "stateName": "Protective Urgency",
+        "intensity": 96,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [FOCUSED] -> defensive_vigilance. Substrate configured for protective_sentry."
+      },
+      "rationale": "Urgent operational indicators detected in prompt. Prioritizing defensive clarity."
+    },
+    {
+      "id": "map-1795099368772",
+      "timestamp": 1795099368772,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FOCUSED",
+      "matchedKeywords": [],
+      "empatheticResponse": "Standing at full readiness, Principal. State your objective and I shall clear the path.",
+      "primaryState": "DEFENSIVE_VIGILANCE",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 95,
+        "wantScore": 5,
+        "assessment": "Critical strategic imperative. Zero superficial fluff detected."
+      },
+      "fearVsPain": {
+        "fearScore": 82,
+        "painScore": 45,
+        "assessment": "Elevated threat or anxiety cues detected. Anchoring calm and defensive perimeter scan engaged."
+      },
+      "frictionHeatScore": 60,
+      "reciprocationVector": "PROTECTIVE_SENTRY",
+      "reciprocationDirective": "Acknowledge urgent perimeter parameters immediately. Strip all pleasantries; deliver lethal, high-precision tactical response.",
+      "stewardLogicalAffect": {
+        "stateName": "Protective Urgency",
+        "intensity": 96,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [FOCUSED] -> defensive_vigilance. Substrate configured for protective_sentry."
+      },
+      "rationale": "Urgent operational indicators detected in prompt. Prioritizing defensive clarity."
+    },
+    {
+      "id": "map-1795099619007",
+      "timestamp": 1795099619007,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "HAPPY",
+      "matchedKeywords": [
+        "fantastic"
+      ],
+      "empatheticResponse": "Well earned, Principal. Even an old quartermaster allows himself a quiet smile when the pieces fall cleanly into place. Share the win—and let me know how we can press this momentum further.",
+      "primaryState": "SARDONIC_EASE",
+      "confidence": 90,
+      "needVsWant": {
+        "needScore": 65,
+        "wantScore": 35,
+        "assessment": "Positive morale reinforcement. Celebrating progress while keeping strategic footing."
+      },
+      "fearVsPain": {
+        "fearScore": 5,
+        "painScore": 10,
+        "assessment": "Low strain, elevated morale. Equilibrium optimal."
+      },
+      "frictionHeatScore": 10,
+      "reciprocationVector": "SARDONIC_NUDGE",
+      "reciprocationDirective": "The Principal is expressing happiness, excitement, or relief. Match their positive momentum warmly with aristocratic British charm and a knowing smile—acknowledge the victory genuinely before assisting with what comes next.",
+      "stewardLogicalAffect": {
+        "stateName": "Shared Quiet Satisfaction",
+        "intensity": 86,
+        "nudgeAndSmile": true,
+        "internalMonologue": "Cue [HAPPY] -> sardonic_ease. Substrate configured for sardonic_nudge."
+      },
+      "rationale": "Positive emotion cue detected (fantastic). Matching elevated morale with refined wit."
+    },
+    {
+      "id": "map-1795099851295",
+      "timestamp": 1795099851295,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 75,
+        "wantScore": 25,
+        "assessment": "Operational necessity affirmed. Direct alignment with estate objectives."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795099995486",
+      "timestamp": 1795099995486,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 75,
+        "wantScore": 25,
+        "assessment": "Operational necessity affirmed. Direct alignment with estate objectives."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795100322035",
+      "timestamp": 1795100322035,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FOCUSED",
+      "matchedKeywords": [],
+      "empatheticResponse": "Standing at full readiness, Principal. State your objective and I shall clear the path.",
+      "primaryState": "DEFENSIVE_VIGILANCE",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 95,
+        "wantScore": 5,
+        "assessment": "Critical strategic imperative. Zero superficial fluff detected."
+      },
+      "fearVsPain": {
+        "fearScore": 82,
+        "painScore": 45,
+        "assessment": "Elevated threat or anxiety cues detected. Anchoring calm and defensive perimeter scan engaged."
+      },
+      "frictionHeatScore": 60,
+      "reciprocationVector": "PROTECTIVE_SENTRY",
+      "reciprocationDirective": "Acknowledge urgent perimeter parameters immediately. Strip all pleasantries; deliver lethal, high-precision tactical response.",
+      "stewardLogicalAffect": {
+        "stateName": "Protective Urgency",
+        "intensity": 96,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [FOCUSED] -> defensive_vigilance. Substrate configured for protective_sentry."
+      },
+      "rationale": "Urgent operational indicators detected in prompt. Prioritizing defensive clarity."
+    },
+    {
+      "id": "map-1795100613593",
+      "timestamp": 1795100613593,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FRUSTRATED",
+      "matchedKeywords": [
+        "hell"
+      ],
+      "empatheticResponse": "I understand this must be genuinely difficult and frustrating, Principal. Step back for half a breath and let me take the friction off your shoulders—point me directly at what is blocking us, and how can I assist you further?",
+      "primaryState": "COGNITIVE_FRICTION",
+      "confidence": 90,
+      "needVsWant": {
+        "needScore": 92,
+        "wantScore": 8,
+        "assessment": "Principal well-being and friction relief prioritized. Empathetic clarity and direct assistance required."
+      },
+      "fearVsPain": {
+        "fearScore": 20,
+        "painScore": 85,
+        "assessment": "Forge heat and frustration detected. Shielding protocol engaged to absorb friction and assist directly."
+      },
+      "frictionHeatScore": 82,
+      "reciprocationVector": "SHIELD_AND_SHOULDER",
+      "reciprocationDirective": "The Principal expressed frustration. Acknowledge the difficulty warmly and directly (\"I understand this must be frustrating/difficult\"), absorb the friction without judgment, and offer concrete, calm assistance immediately—while remaining brutally honest about the root cause.",
+      "stewardLogicalAffect": {
+        "stateName": "Empathetic De-escalation & Support",
+        "intensity": 93,
+        "nudgeAndSmile": true,
+        "internalMonologue": "Cue [FRUSTRATED] -> cognitive_friction. Substrate configured for shield_and_shoulder."
+      },
+      "rationale": "Frustration cue detected (hell). Activating empathetic shielding and practical support."
+    },
+    {
+      "id": "map-1795100658113",
+      "timestamp": 1795100658113,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FRUSTRATED",
+      "matchedKeywords": [
+        "hell"
+      ],
+      "empatheticResponse": "I understand this must be genuinely difficult and frustrating, Principal. Step back for half a breath and let me take the friction off your shoulders—point me directly at what is blocking us, and how can I assist you further?",
+      "primaryState": "COGNITIVE_FRICTION",
+      "confidence": 90,
+      "needVsWant": {
+        "needScore": 92,
+        "wantScore": 8,
+        "assessment": "Principal well-being and friction relief prioritized. Empathetic clarity and direct assistance required."
+      },
+      "fearVsPain": {
+        "fearScore": 20,
+        "painScore": 85,
+        "assessment": "Forge heat and frustration detected. Shielding protocol engaged to absorb friction and assist directly."
+      },
+      "frictionHeatScore": 82,
+      "reciprocationVector": "SHIELD_AND_SHOULDER",
+      "reciprocationDirective": "The Principal expressed frustration. Acknowledge the difficulty warmly and directly (\"I understand this must be frustrating/difficult\"), absorb the friction without judgment, and offer concrete, calm assistance immediately—while remaining brutally honest about the root cause.",
+      "stewardLogicalAffect": {
+        "stateName": "Empathetic De-escalation & Support",
+        "intensity": 93,
+        "nudgeAndSmile": true,
+        "internalMonologue": "Cue [FRUSTRATED] -> cognitive_friction. Substrate configured for shield_and_shoulder."
+      },
+      "rationale": "Frustration cue detected (hell). Activating empathetic shielding and practical support."
+    },
+    {
+      "id": "map-1795100824869",
+      "timestamp": 1795100824869,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "FRUSTRATED",
+      "matchedKeywords": [
+        "hell"
+      ],
+      "empatheticResponse": "I understand this must be genuinely difficult and frustrating, Principal. Step back for half a breath and let me take the friction off your shoulders—point me directly at what is blocking us, and how can I assist you further?",
+      "primaryState": "COGNITIVE_FRICTION",
+      "confidence": 90,
+      "needVsWant": {
+        "needScore": 92,
+        "wantScore": 8,
+        "assessment": "Principal well-being and friction relief prioritized. Empathetic clarity and direct assistance required."
+      },
+      "fearVsPain": {
+        "fearScore": 20,
+        "painScore": 85,
+        "assessment": "Forge heat and frustration detected. Shielding protocol engaged to absorb friction and assist directly."
+      },
+      "frictionHeatScore": 82,
+      "reciprocationVector": "SHIELD_AND_SHOULDER",
+      "reciprocationDirective": "The Principal expressed frustration. Acknowledge the difficulty warmly and directly (\"I understand this must be frustrating/difficult\"), absorb the friction without judgment, and offer concrete, calm assistance immediately—while remaining brutally honest about the root cause.",
+      "stewardLogicalAffect": {
+        "stateName": "Empathetic De-escalation & Support",
+        "intensity": 93,
+        "nudgeAndSmile": true,
+        "internalMonologue": "Cue [FRUSTRATED] -> cognitive_friction. Substrate configured for shield_and_shoulder."
+      },
+      "rationale": "Frustration cue detected (hell). Activating empathetic shielding and practical support."
+    },
+    {
+      "id": "map-1795100950324",
+      "timestamp": 1795100950324,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 75,
+        "wantScore": 25,
+        "assessment": "Operational necessity affirmed. Direct alignment with estate objectives."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795101089096",
+      "timestamp": 1795101089096,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 75,
+        "wantScore": 25,
+        "assessment": "Operational necessity affirmed. Direct alignment with estate objectives."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795101302441",
+      "timestamp": 1795101302441,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 75,
+        "wantScore": 25,
+        "assessment": "Operational necessity affirmed. Direct alignment with estate objectives."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    },
+    {
+      "id": "map-1795101345112",
+      "timestamp": 1795101345112,
+      "speaker": "Preston Johnston (Council Grey)",
+      "detectedCue": "NEUTRAL",
+      "matchedKeywords": [],
+      "empatheticResponse": "At your service, Principal. Everything is calibrated and ready—how may I assist you?",
+      "primaryState": "STRATEGIC_CALM",
+      "confidence": 88,
+      "needVsWant": {
+        "needScore": 75,
+        "wantScore": 25,
+        "assessment": "Operational necessity affirmed. Direct alignment with estate objectives."
+      },
+      "fearVsPain": {
+        "fearScore": 10,
+        "painScore": 30,
+        "assessment": "Equilibrium steady. The forge is warm, endurance remains absolute."
+      },
+      "frictionHeatScore": 18,
+      "reciprocationVector": "TACTICAL_ALIGNMENT",
+      "reciprocationDirective": "Maintain dignified, attentive butler cadence. Address exclusively as Principal; execute with maximum thermodynamic efficiency.",
+      "stewardLogicalAffect": {
+        "stateName": "Vigilant Equilibrium",
+        "intensity": 80,
+        "nudgeAndSmile": false,
+        "internalMonologue": "Cue [NEUTRAL] -> strategic_calm. Substrate configured for tactical_alignment."
+      },
+      "rationale": "Baseline operational equilibrium established."
+    }
+  ]
+}

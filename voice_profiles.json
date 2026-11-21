@@ -1,6 +1,57 @@
 {
-  "activeProfileId": "iron-adaptive",
+  "activeProfileId": "jeremy-irons-signature",
   "profiles": [
+    {
+      "id": "jeremy-irons-signature",
+      "name": "Jeremy Irons (Vocal Signature)",
+      "tagline": "Vocal Signature • Formant-Shifted Aristocratic Baritone",
+      "description": "The dedicated Jeremy Irons vocal signature and default speech tone. Formant-shifted Web Audio DSP core simulating his extended vocal tract length (1.14x), deep pharyngeal resonance (F1: 380Hz, +6.2dB), lingual retraction (F2: 1350Hz, -3.0dB), and piercing actor projection (F3: 2680Hz, +6.5dB).",
+      "accent": "british_aristocrat",
+      "isCanonical": true,
+      "isDefault": true,
+      "badge": "Vocal Signature • Default",
+      "accentColor": "amber",
+      "clips": [
+        {
+          "id": "clip-irons-sig-1",
+          "name": "The 1911s Loaded & Silver Polished",
+          "transcription": "The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your command.",
+          "durationSeconds": 4.8,
+          "uploadedAt": 1725840000000,
+          "source": "canonical_preset",
+          "mimeType": "audio/webm"
+        }
+      ],
+      "dspConfig": {
+        "pitchMultiplier": 0.86,
+        "speechRate": 0.88,
+        "chestResonanceDb": 6.8,
+        "thoracicWarmthDb": 2.6,
+        "articulationBoostDb": 5.2,
+        "gravelSaturation": 0.88,
+        "antiBoxNotchDb": -2.5,
+        "roomAmbience": 0.18,
+        "formantPresetName": "sovereign-gravitas",
+        "formants": {
+          "f1Hz": 380,
+          "f1GainDb": 6.2,
+          "f2Hz": 1350,
+          "f2GainDb": -3.0,
+          "f3Hz": 2680,
+          "f3GainDb": 6.5,
+          "vocalTractLengthFactor": 1.14,
+          "description": "Canonical Jeremy Irons Formant Shifting Network"
+        }
+      },
+      "speechSynthesisConfig": {
+        "pitch": 0.62,
+        "rate": 0.80,
+        "priorityLocales": ["en-GB", "en_GB", "en-UK", "en-US"],
+        "preferredVoiceNames": ["Daniel", "Oliver", "George", "Arthur", "Ryan", "Google UK English Male", "Microsoft George", "Alfred", "Alex"]
+      },
+      "systemPromptStyle": "dry, gravelly, aristocratic British baritone, unhurried measured cadence, sharp sardonic wit",
+      "auditionSample": "The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your absolute command."
+    },
     {
       "id": "iron-adaptive",
       "name": "Jeremy Irons (Canonical)",
@@ -8,7 +59,7 @@
       "description": "The definitive Jeremy Irons vocal signature. Unhurried cadence, heavy sub-harmonic chest resonance, dry sardonic British inflection, and gravelly aristocratic authority.",
       "accent": "british_aristocrat",
       "isCanonical": true,
-      "isDefault": true,
+      "isDefault": false,
       "badge": "Identity Canonical",
       "accentColor": "amber",
       "clips": [
@@ -56,7 +107,7 @@
         "priorityLocales": ["en-GB", "en_GB", "en-UK"],
         "preferredVoiceNames": ["Daniel", "Oliver", "George", "Arthur", "Ryan", "Google UK English Male", "Microsoft George", "Alfred"]
       },
-      "systemPromptStyle": "Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth):",
+      "systemPromptStyle": "dry, gravelly, aristocratic British baritone, unhurried cadence, understated authority",
       "auditionSample": "The 1911s are loaded and the silver is polished, Principal. All systems operational without friction."
     },
     {
@@ -96,7 +147,7 @@
         "priorityLocales": ["en-GB", "en_GB", "en-UK"],
         "preferredVoiceNames": ["Oliver", "Daniel", "George", "Google UK English Male"]
       },
-      "systemPromptStyle": "Say in a crisp, silky, refined British Received Pronunciation accent with aristocratic clarity:",
+      "systemPromptStyle": "crisp, refined British Received Pronunciation baritone, calm aristocratic clarity",
       "auditionSample": "Telemetry confirmed, Principal. Estates networks synchronized with zero logical drift."
     },
     {
@@ -136,7 +187,7 @@
         "priorityLocales": ["en-US", "en-GB"],
         "preferredVoiceNames": ["Alex", "David", "Fred", "Guy"]
       },
-      "systemPromptStyle": "Say in a heavy, commanding, low-frequency tactical combat baritone:",
+      "systemPromptStyle": "low, firm, commanding baritone, clipped tactical precision",
       "auditionSample": "Perimeter secured, Principal. Tactical array active and monitoring all ingress vectors."
     }
   ]

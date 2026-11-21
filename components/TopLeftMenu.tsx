@@ -42,7 +42,10 @@ import {
   Camera,
   Wrench,
   Cpu,
-  Music
+  Music,
+  Paperclip,
+  Globe,
+  Home
 } from 'lucide-react';
 import { ChatThread, AppTab, EmotionalMap, KnowledgeOfUseItem, KnowledgeCategory } from '../types';
 import ButlerAvatar from './ButlerAvatar';
@@ -83,6 +86,7 @@ interface TopLeftMenuProps {
   onTriggerArtModal?: () => void;
   onTriggerCamera?: () => void;
   onTriggerPhoto?: () => void;
+  onTriggerFile?: () => void;
   ttsEnabled?: boolean;
   onToggleTTS?: () => void;
 }
@@ -124,6 +128,7 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
   onTriggerArtModal,
   onTriggerCamera,
   onTriggerPhoto,
+  onTriggerFile,
   ttsEnabled = true,
   onToggleTTS
 }) => {
@@ -557,27 +562,45 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                     </span>
                   </button>
 
-                  {/* Take Photo & Photo Library Actions */}
-                  <div className="grid grid-cols-2 gap-2">
+                  {/* Take Photo, Photo Library & Upload File Actions */}
+                  <div className="grid grid-cols-3 gap-2">
                     <button
+                      type="button"
                       onClick={() => {
                         if (onTriggerCamera) onTriggerCamera();
-                        onClose();
+                        setTimeout(() => onClose(), 180);
                       }}
-                      className="flex items-center justify-center gap-2 p-2.5 rounded-2xl bg-black/60 hover:bg-red-950/40 border border-red-900/30 hover:border-amber-500/40 text-zinc-300 hover:text-amber-300 transition-all text-xs font-mono font-bold cursor-pointer"
+                      className="flex flex-col sm:flex-row items-center justify-center gap-1.5 p-2.5 rounded-2xl bg-black/60 hover:bg-red-950/40 border border-red-900/30 hover:border-amber-500/40 text-zinc-300 hover:text-amber-300 transition-all text-[11px] font-mono font-bold cursor-pointer"
                     >
-                      <Camera className="w-4 h-4 text-amber-400" />
+                      <Camera className="w-4 h-4 text-amber-400 flex-shrink-0" />
                       <span>Take Photo</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => {
                         if (onTriggerPhoto) onTriggerPhoto();
-                        onClose();
+                        setTimeout(() => onClose(), 180);
                       }}
-                      className="flex items-center justify-center gap-2 p-2.5 rounded-2xl bg-black/60 hover:bg-red-950/40 border border-red-900/30 hover:border-amber-500/40 text-zinc-300 hover:text-amber-300 transition-all text-xs font-mono font-bold cursor-pointer"
+                      className="flex flex-col sm:flex-row items-center justify-center gap-1.5 p-2.5 rounded-2xl bg-black/60 hover:bg-red-950/40 border border-red-900/30 hover:border-amber-500/40 text-zinc-300 hover:text-amber-300 transition-all text-[11px] font-mono font-bold cursor-pointer"
                     >
-                      <ImageIcon className="w-4 h-4 text-amber-400" />
-                      <span>Photo Library</span>
+                      <ImageIcon className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                      <span>Upload Photo</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onTriggerFile) {
+                          onTriggerFile();
+                          setTimeout(() => onClose(), 180);
+                        } else if (onNavigate) {
+                          onNavigate(AppTab.FILES);
+                          onClose();
+                        }
+                      }}
+                      className="flex flex-col sm:flex-row items-center justify-center gap-1.5 p-2.5 rounded-2xl bg-black/60 hover:bg-red-950/40 border border-red-900/30 hover:border-amber-500/40 text-zinc-300 hover:text-amber-300 transition-all text-[11px] font-mono font-bold cursor-pointer"
+                    >
+                      <Paperclip className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                      <span>Upload File</span>
                     </button>
                   </div>
                 </div>
@@ -990,11 +1013,39 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                       color: 'from-zinc-900/60 to-black',
                       border: 'border-red-900/30',
                       textColor: 'text-zinc-200'
+                    },
+                    {
+                      id: AppTab.GROUNDING,
+                      name: 'Grounding Intel',
+                      tagline: 'Search & geospatial verification telemetry',
+                      icon: Globe,
+                      color: 'from-zinc-900/60 to-black',
+                      border: 'border-red-900/30',
+                      textColor: 'text-zinc-200'
+                    },
+                    {
+                      id: AppTab.SHARE,
+                      name: 'Share ZereØ',
+                      tagline: 'Authorized ally portal links & access',
+                      icon: Share2,
+                      color: 'from-zinc-900/60 to-black',
+                      border: 'border-red-900/30',
+                      textColor: 'text-zinc-200'
+                    },
+                    {
+                      id: AppTab.HOME,
+                      name: 'Command Home',
+                      tagline: 'System overview & status hub',
+                      icon: Home,
+                      color: 'from-zinc-900/60 to-black',
+                      border: 'border-red-900/30',
+                      textColor: 'text-zinc-200'
                     }
                   ].map((tab) => {
                     const IconComp = tab.icon;
                     return (
                       <button
+                        type="button"
                         key={tab.id}
                         onClick={() => {
                           if (onNavigate) onNavigate(tab.id);
@@ -1052,16 +1103,34 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                 {/* Live Affect & Reciprocation Engine Dashboard */}
                 {emotionalMap && (
                   <div className="space-y-4 bg-black/60 border border-red-900/40 rounded-2xl p-4 sm:p-5 shadow-xl">
-                    <div className="flex items-center justify-between border-b border-red-900/30 pb-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-red-900/30 pb-3">
                       <div>
                         <span className="text-[8px] text-zinc-500 uppercase font-mono tracking-widest block">Active Speaker Decoded</span>
                         <h4 className="text-xs font-black text-zinc-100 uppercase">{emotionalMap.speaker}</h4>
                       </div>
-                      <div className="text-right">
-                        <span className="text-[8px] text-zinc-500 uppercase font-mono tracking-widest block">Primary State</span>
-                        <span className="px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                          {emotionalMap.primaryState.replace(/_/g, ' ')}
-                        </span>
+                      <div className="flex items-center gap-2 text-right">
+                        {emotionalMap.detectedCue && (
+                          <div>
+                            <span className="text-[8px] text-zinc-500 uppercase font-mono tracking-widest block">Emotion Cue</span>
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase border ${
+                              emotionalMap.detectedCue === 'HAPPY' || emotionalMap.detectedCue === 'GRATEFUL'
+                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                : emotionalMap.detectedCue === 'SAD' || emotionalMap.detectedCue === 'ANXIOUS'
+                                ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                                : emotionalMap.detectedCue === 'FRUSTRATED'
+                                ? 'bg-orange-500/20 text-orange-300 border-orange-500/40'
+                                : 'bg-zinc-800 text-zinc-300 border-zinc-700'
+                            }`}>
+                              {emotionalMap.detectedCue}
+                            </span>
+                          </div>
+                        )}
+                        <div>
+                          <span className="text-[8px] text-zinc-500 uppercase font-mono tracking-widest block">Primary State</span>
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                            {emotionalMap.primaryState.replace(/_/g, ' ')}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
@@ -1116,9 +1185,25 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                       </div>
                     </div>
 
-                    <div className="p-2.5 bg-black/40 rounded-xl border border-zinc-800/80 text-[10px] text-zinc-400 italic">
-                      " {emotionalMap.reciprocationDirective} "
+                    <div className="p-2.5 bg-black/40 rounded-xl border border-zinc-800/80 text-[10px] text-zinc-400 italic space-y-1.5">
+                      <div>" {emotionalMap.reciprocationDirective} "</div>
+                      {emotionalMap.matchedKeywords && emotionalMap.matchedKeywords.length > 0 && (
+                        <div className="text-[9px] font-mono not-italic text-amber-400/80">
+                          Detected cues: {emotionalMap.matchedKeywords.join(', ')}
+                        </div>
+                      )}
                     </div>
+
+                    {emotionalMap.empatheticResponse && (
+                      <div className="p-3 bg-gradient-to-r from-amber-950/30 via-black/60 to-amber-950/20 rounded-xl border border-amber-500/30 space-y-1">
+                        <span className="text-[8px] font-mono uppercase tracking-widest text-amber-400 font-bold block">
+                          Steward Empathetic & Supportive Response
+                        </span>
+                        <p className="text-[11px] text-zinc-200 leading-relaxed">
+                          "{emotionalMap.empatheticResponse}"
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1171,10 +1256,12 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                   {/* Preset Test Prompts */}
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {[
+                      "I'm so frustrated, nothing seems to be working right now.",
+                      "Feeling really sad and weighed down today.",
+                      "I'm genuinely happy — that breakthrough finally worked!",
+                      "I'm anxious and overwhelmed with everything piling up.",
                       "Are the 1911's loaded and silver polished???",
-                      "Critical perimeter breach detected, lock down immediately!",
-                      "Tired of this external bureaucratic idiocy and friction",
-                      "Architect the full neural matrix with deep mathematical proofs"
+                      "Critical perimeter breach detected, lock down immediately!"
                     ].map((sample, sIdx) => (
                       <button
                         key={sIdx}
@@ -1804,77 +1891,84 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
             {/* Bottom Quick Navigation Bar */}
             <div className="p-4 border-t border-red-900/20 bg-black/60 flex items-center justify-between text-[8px] font-black uppercase tracking-widest text-zinc-500 flex-shrink-0">
               <button
+                type="button"
                 onClick={() => {
                   if (onNavigate) onNavigate(AppTab.CHAT);
                   onClose();
                 }}
-                className="hover:text-amber-400 transition-colors flex items-center gap-1"
+                className="hover:text-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
               >
                 <MessageSquare className="w-3 h-3" />
                 <span>Chat</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => {
                   if (onNavigate) onNavigate(AppTab.FILES);
                   onClose();
                 }}
-                className="hover:text-amber-400 text-amber-300/80 transition-colors flex items-center gap-1"
+                className="hover:text-amber-400 text-amber-300/80 transition-colors flex items-center gap-1 cursor-pointer"
               >
                 <FolderOpen className="w-3 h-3 text-amber-400" />
                 <span>Files</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => {
                   if (onNavigate) onNavigate(AppTab.VOICE);
                   onClose();
                 }}
-                className="hover:text-amber-400 transition-colors flex items-center gap-1"
+                className="hover:text-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
               >
                 <Mic className="w-3 h-3" />
                 <span>Voice</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => {
                   if (onNavigate) onNavigate(AppTab.ACOUSTIC_ROOM);
                   onClose();
                 }}
-                className="hover:text-amber-400 text-amber-300 transition-colors flex items-center gap-1 font-bold"
+                className="hover:text-amber-400 text-amber-300 transition-colors flex items-center gap-1 font-bold cursor-pointer"
               >
                 <Music className="w-3 h-3 text-amber-400" />
                 <span>Lattice</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => {
                   if (onNavigate) onNavigate(AppTab.VOICE_EMULATOR);
                   onClose();
                 }}
-                className="hover:text-amber-400 transition-colors flex items-center gap-1"
+                className="hover:text-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
               >
                 <Headphones className="w-3 h-3" />
                 <span>Emulator</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => {
                   if (onNavigate) onNavigate(AppTab.MEMORY);
                   onClose();
                 }}
-                className="hover:text-amber-400 transition-colors flex items-center gap-1"
+                className="hover:text-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
               >
                 <Database className="w-3 h-3" />
                 <span>Memory</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => {
                   if (onNavigate) onNavigate(AppTab.SYSTEM);
                   onClose();
                 }}
-                className="hover:text-amber-400 transition-colors flex items-center gap-1"
+                className="hover:text-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
               >
                 <Settings className="w-3 h-3" />
                 <span>System</span>

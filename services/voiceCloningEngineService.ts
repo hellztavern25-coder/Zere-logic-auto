@@ -23,6 +23,11 @@ import {
   STTAnalysisResult
 } from '../types';
 import { jeremyIronsVoice } from './jeremyIronsVoiceService';
+import {
+  clampLowEPitchRate,
+  clampLowESpeechPitch,
+  LOW_E2_HZ
+} from './voiceCalibration';
 import { generateTTS, decodeBase64, decodeAudioData } from './geminiService';
 
 export const CANONICAL_IRONS_TONAL_MODEL: PersistentTonalModel = {
@@ -44,21 +49,21 @@ export const CANONICAL_IRONS_TONAL_MODEL: PersistentTonalModel = {
     elocutionNotes: ['Deliberate pause after Principal address', 'Aristocratic dry iron cadence', 'Oxford consonant bite']
   },
   acousticDNA: {
-    fundamentalF0Hz: 98.4,
-    pitchVariance: 6.8,
+    fundamentalF0Hz: LOW_E2_HZ,
+    pitchVariance: 4.2,
     f0Confidence: 0.96,
-    jitterPercent: 1.12,
-    shimmerPercent: 2.74,
-    harmonicsToNoiseRatioDb: 18.2,
-    gravelSaturation: 0.85,
+    jitterPercent: 1.05,
+    shimmerPercent: 2.45,
+    harmonicsToNoiseRatioDb: 18.8,
+    gravelSaturation: 0.86,
     formants: {
-      f1Hz: 520,
-      f2Hz: 1450,
-      f3Hz: 2650
+      f1Hz: 375,
+      f2Hz: 1320,
+      f3Hz: 2640
     },
-    spectralCentroidHz: 1180,
-    spectralTiltDb: -4.2,
-    chestResonanceDb: 6.0,
+    spectralCentroidHz: 1120,
+    spectralTiltDb: -4.6,
+    chestResonanceDb: 5.8,
     warmthDb: 2.5,
     articulationDb: 4.5
   },
@@ -70,21 +75,21 @@ export const CANONICAL_IRONS_TONAL_MODEL: PersistentTonalModel = {
     elocutionCrispness: 0.92,
     drawlCoefficient: 0.84
   },
-  systemPromptStyle: 'Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth):',
+  systemPromptStyle: 'dry, gravelly, aristocratic British baritone, steady low-E 82Hz chest register, unhurried measured cadence, crisp Oxford plosives',
   dspConfig: {
-    pitchMultiplier: 0.78,
+    pitchMultiplier: 0.84,
     speechRate: 0.88,
-    chestResonanceDb: 6.0,
+    chestResonanceDb: 5.8,
     thoracicWarmthDb: 2.5,
     articulationBoostDb: 4.5,
-    gravelSaturation: 0.85,
+    gravelSaturation: 0.86,
     antiBoxNotchDb: -2.4,
-    roomAmbience: 0.20
+    roomAmbience: 0.18
   },
   speechSynthesisConfig: {
-    pitch: 0.65,
-    rate: 0.82,
-    preferredVoiceNames: ['Daniel', 'Oliver', 'George', 'Arthur', 'Ryan', 'Google UK English Male', 'Microsoft George', 'Alfred'],
+    pitch: 0.82,
+    rate: 0.84,
+    preferredVoiceNames: ['George', 'Microsoft George', 'Daniel', 'Arthur', 'Oliver', 'Ryan', 'Google UK English Male', 'Alfred'],
     priorityLocales: ['en-GB', 'en_GB', 'en-UK']
   },
   isActive: true,
@@ -289,15 +294,15 @@ class VoiceCloningEngineService {
     const safeIntensity = Math.min(2.0, Math.max(0.2, intensity));
 
     if (safeIntensity >= 1.55) {
-      return 'Deliver with maximum lethal gravitas, profound theatrical menace, razor-sharp sarcastic iron inflection, and deep deliberate aristocratic pauses in the definitive manner of Jeremy Irons (Alfred Pennyworth):';
+      return 'deep, dry, gravelly aristocratic British baritone, heightened gravitas, razor-sharp sarcasm, deliberate pauses';
     } else if (safeIntensity >= 1.20) {
-      return 'Deliver with heightened theatrical gravitas, deep razor-sharp sarcastic iron inflection, deliberate dramatic cadence, and heavy aristocratic weight in the manner of Jeremy Irons (Alfred Pennyworth):';
+      return 'dry, gravelly, aristocratic British baritone, heightened dramatic cadence, sharp dry wit';
     } else if (safeIntensity >= 0.85) {
-      return 'Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth):';
+      return basePrompt || 'dry, gravelly, aristocratic British baritone, unhurried measured cadence, sharp dry wit';
     } else if (safeIntensity >= 0.55) {
-      return 'Say with a tempered, dry British aristocratic baritone cadence, measured conversational calm and understated gravitas in the manner of Jeremy Irons (Alfred Pennyworth):';
+      return 'tempered, dry British aristocratic baritone, measured conversational calm, understated gravitas';
     } else {
-      return 'Deliver with a quiet, subtle, dry British aristocratic baritone, calm analytical restraint in the manner of Jeremy Irons:';
+      return 'quiet, subtle, dry British aristocratic baritone, calm analytical restraint';
     }
   }
 
@@ -667,10 +672,11 @@ class VoiceCloningEngineService {
     // Formulate the permanent AI system prompt directive
     const f0Rounded = Math.round(acousticDNA.fundamentalF0Hz);
     const gravelPercent = Math.round(acousticDNA.gravelSaturation * 100);
-    const promptDirective = `Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth). Fundamental pitch ${f0Rounded}Hz, ${gravelPercent}% vocal fold rasp, unhurried aristocratic pacing at ${prosodyDNA.speechRateWpm} WPM, and razor-sharp Oxford consonant bite:`;
+    const promptDirective = `dry, gravelly, aristocratic British baritone, ${f0Rounded}Hz chest floor, ${gravelPercent}% vocal rasp, ${prosodyDNA.speechRateWpm} WPM unhurried cadence, crisp Oxford plosives`;
 
-    // Calibrate DSP parameters to lock into the Web Audio synthesis engine
-    const pitchMultiplier = Math.min(1.1, Math.max(0.70, Math.round((acousticDNA.fundamentalF0Hz / 125) * 100) / 100));
+    // Calibrate DSP parameters to stay anchored around Low E2 (82.4 Hz)
+    const rawPitchRatio = acousticDNA.fundamentalF0Hz / 98.0;
+    const pitchMultiplier = clampLowEPitchRate(rawPitchRatio);
 
     const dspConfig: VoiceDSPConfig = {
       pitchMultiplier,
@@ -698,9 +704,9 @@ class VoiceCloningEngineService {
       systemPromptStyle: promptDirective,
       dspConfig,
       speechSynthesisConfig: {
-        pitch: Math.min(1.0, Math.max(0.55, pitchMultiplier * 0.85)),
-        rate: Math.min(1.1, Math.max(0.75, prosodyDNA.cadenceMultiplier)),
-        preferredVoiceNames: ['Daniel', 'Oliver', 'George', 'Arthur', 'Ryan', 'Google UK English Male', 'Microsoft George', 'Alfred'],
+        pitch: clampLowESpeechPitch(undefined, pitchMultiplier),
+        rate: Math.min(0.96, Math.max(0.78, prosodyDNA.cadenceMultiplier)),
+        preferredVoiceNames: ['George', 'Microsoft George', 'Daniel', 'Arthur', 'Oliver', 'Ryan', 'Google UK English Male', 'Alfred'],
         priorityLocales: ['en-GB', 'en_GB', 'en-UK']
       },
       isActive: true,

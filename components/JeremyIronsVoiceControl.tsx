@@ -6,8 +6,10 @@ import {
   JeremyIronsConfig,
   DEFAULT_JEREMY_IRONS_CONFIG,
   VoiceModulationProfile,
-  VOICE_MODULATION_PROFILES
+  VOICE_MODULATION_PROFILES,
+  clampLowEPitchRate
 } from '../services/jeremyIronsVoiceService';
+import { getTtsQuotaNotice } from '../services/geminiService';
 
 interface JeremyIronsVoiceControlProps {
   ttsEnabled: boolean;
@@ -29,11 +31,26 @@ export const JeremyIronsVoiceControl: React.FC<JeremyIronsVoiceControlProps> = (
   const [config, setConfig] = useState<JeremyIronsConfig>(() => {
     try {
       const saved = localStorage.getItem('ZEREO_JEREMY_IRONS_CONFIG');
-      return saved ? JSON.parse(saved) : DEFAULT_JEREMY_IRONS_CONFIG;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const migratedBaseVoice =
+          parsed?.baseVoice === 'Charon' || parsed?.baseVoice === 'Fenrir' || parsed?.baseVoice === 'Orus'
+            ? parsed.baseVoice
+            : 'Charon';
+        return {
+          ...DEFAULT_JEREMY_IRONS_CONFIG,
+          ...parsed,
+          baseVoice: migratedBaseVoice,
+          pitchRate: clampLowEPitchRate(parsed?.pitchRate)
+        };
+      }
+      return DEFAULT_JEREMY_IRONS_CONFIG;
     } catch {
       return DEFAULT_JEREMY_IRONS_CONFIG;
     }
   });
+
+  const [ttsQuotaNotice, setTtsQuotaNotice] = useState<string | null>(() => getTtsQuotaNotice());
 
   useEffect(() => {
     const unsub = jeremyIronsVoice.subscribe(({ isSpeaking, text, legacyProfile }) => {
@@ -41,7 +58,15 @@ export const JeremyIronsVoiceControl: React.FC<JeremyIronsVoiceControlProps> = (
       setCurrentText(text);
       if (legacyProfile) setActiveProfile(legacyProfile);
     });
-    return unsub;
+    const onTtsNotice = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      setTtsQuotaNotice(detail?.quotaExhausted ? (detail?.message || getTtsQuotaNotice()) : null);
+    };
+    window.addEventListener('zereo:tts_notice', onTtsNotice);
+    return () => {
+      unsub();
+      window.removeEventListener('zereo:tts_notice', onTtsNotice);
+    };
   }, []);
 
   const handleProfileSelect = (p: VoiceModulationProfile) => {
@@ -142,11 +167,21 @@ export const JeremyIronsVoiceControl: React.FC<JeremyIronsVoiceControlProps> = (
                   </h4>
                 </div>
                 <span className="text-[8px] font-mono px-2 py-0.5 rounded bg-red-950/80 text-amber-500/80 border border-red-900/50">
-                  Charon DSP
+                  {config.baseVoice || 'Charon'} DSP
                 </span>
               </div>
 
               <div className="space-y-3.5 py-3 text-xs">
+                {ttsQuotaNotice && (
+                  <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/40 text-[10px] leading-relaxed text-amber-200">
+                    <span className="font-bold uppercase tracking-wider text-amber-400 block mb-0.5">
+                      Cloud Neural TTS Free Quota Reached
+                    </span>
+                    {ttsQuotaNotice} Select a billing-enabled Gemini API key in{' '}
+                    <span className="font-semibold text-amber-300">Settings &gt; Secrets</span> to restore cloud neural voices.
+                  </div>
+                )}
+
                 {/* Voice Modulation Profile Presets */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
@@ -161,7 +196,6 @@ export const JeremyIronsVoiceControl: React.FC<JeremyIronsVoiceControlProps> = (
                     {(['Jeremy-Irons-Signature', 'Iron-Adaptive', 'Clinical-Analytical', 'Subtle-Steward'] as VoiceModulationProfile[]).map((pKey) => {
                       const isCur = activeProfile === pKey;
                       const label = pKey === 'Jeremy-Irons-Signature' ? 'Signature' : pKey === 'Iron-Adaptive' ? 'Canonical' : pKey === 'Clinical-Analytical' ? 'Clinical' : 'Subtle';
-                      const sub = pKey === 'Jeremy-Irons-Signature' ? 'Gravitas ★' : pKey === 'Iron-Adaptive' ? 'Adaptive' : pKey === 'Clinical-Analytical' ? 'Analytical' : 'Intimate';
                       return (
                         <button
                           key={pKey}
@@ -188,51 +222,62 @@ export const JeremyIronsVoiceControl: React.FC<JeremyIronsVoiceControlProps> = (
                   <label className="text-[9px] font-mono uppercase text-zinc-400 block mb-1.5 tracking-wider">
                     Harmonic Substrate
                   </label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-1.5">
                     <button
                       onClick={() => handleConfigChange({ baseVoice: 'Charon' })}
-                      className={`px-3 py-1.5 rounded-xl border text-[10px] font-bold uppercase transition-all flex items-center justify-center gap-1.5 ${
+                      className={`px-2 py-1.5 rounded-xl border text-[9px] font-bold uppercase transition-all flex items-center justify-center gap-1 ${
                         config.baseVoice === 'Charon'
                           ? 'bg-amber-500 text-black border-amber-400 shadow'
                           : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:border-zinc-700'
                       }`}
                     >
-                      {config.baseVoice === 'Charon' && <Check className="w-3 h-3" />}
-                      Charon (Deep Baritone)
+                      {config.baseVoice === 'Charon' && <Check className="w-3 h-3 shrink-0" />}
+                      Charon (Deep)
+                    </button>
+                    <button
+                      onClick={() => handleConfigChange({ baseVoice: 'Orus' })}
+                      className={`px-2 py-1.5 rounded-xl border text-[9px] font-bold uppercase transition-all flex items-center justify-center gap-1 ${
+                        config.baseVoice === 'Orus'
+                          ? 'bg-amber-500 text-black border-amber-400 shadow'
+                          : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:border-zinc-700'
+                      }`}
+                    >
+                      {config.baseVoice === 'Orus' && <Check className="w-3 h-3 shrink-0" />}
+                      Orus (Firm)
                     </button>
                     <button
                       onClick={() => handleConfigChange({ baseVoice: 'Fenrir' })}
-                      className={`px-3 py-1.5 rounded-xl border text-[10px] font-bold uppercase transition-all flex items-center justify-center gap-1.5 ${
+                      className={`px-2 py-1.5 rounded-xl border text-[9px] font-bold uppercase transition-all flex items-center justify-center gap-1 ${
                         config.baseVoice === 'Fenrir'
                           ? 'bg-amber-500 text-black border-amber-400 shadow'
                           : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:border-zinc-700'
                       }`}
                     >
-                      {config.baseVoice === 'Fenrir' && <Check className="w-3 h-3" />}
-                      Fenrir (Resonant)
+                      {config.baseVoice === 'Fenrir' && <Check className="w-3 h-3 shrink-0" />}
+                      Fenrir (Tone)
                     </button>
                   </div>
                 </div>
 
-                {/* Pitch / Drawl Cadence */}
+                {/* Pitch / Low-E Register Calibration */}
                 <div>
                   <div className="flex items-center justify-between text-[9px] font-mono uppercase text-zinc-400 mb-1">
-                    <span>Deliberate Cadence (Pitch)</span>
-                    <span className="text-amber-400">{config.pitchRate.toFixed(2)}x</span>
+                    <span>Register Lock (Low E2 ~82.4 Hz)</span>
+                    <span className="text-amber-400">{clampLowEPitchRate(config.pitchRate).toFixed(2)}x</span>
                   </div>
                   <input
                     type="range"
-                    min="0.88"
-                    max="1.05"
+                    min="0.84"
+                    max="0.92"
                     step="0.01"
-                    value={config.pitchRate}
-                    onChange={(e) => handleConfigChange({ pitchRate: parseFloat(e.target.value) })}
+                    value={clampLowEPitchRate(config.pitchRate)}
+                    onChange={(e) => handleConfigChange({ pitchRate: clampLowEPitchRate(parseFloat(e.target.value)) })}
                     className="w-full accent-amber-500 h-1 bg-zinc-800 rounded-lg cursor-pointer"
                   />
                   <div className="flex justify-between text-[8px] text-zinc-600 font-mono mt-0.5">
-                    <span>Heavy Drawl (0.88x)</span>
-                    <span>Jeremy Standard (0.94x)</span>
-                    <span>Brisk (1.05x)</span>
+                    <span>Anchor E2 (0.84x)</span>
+                    <span>Target E2 (0.87x)</span>
+                    <span>Crisp F2 (0.92x)</span>
                   </div>
                 </div>
 

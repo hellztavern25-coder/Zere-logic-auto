@@ -6,6 +6,40 @@ let cachedConfig: { hasGeminiKey?: boolean; isPrincipalActive?: boolean; coreDir
   isPrincipalActive: true
 };
 
+let ttsClientCooldownUntil = 0;
+let lastTtsQuotaNotice: string | null = null;
+
+export const getTtsQuotaNotice = () => lastTtsQuotaNotice;
+
+export const markTtsQuotaExhausted = (message?: string, retryAfterSeconds?: number) => {
+  const retrySec = Math.min(Math.max(Number(retryAfterSeconds) || 300, 30), 900);
+  ttsClientCooldownUntil = Date.now() + retrySec * 1000;
+  lastTtsQuotaNotice =
+    message ||
+    'Cloud neural TTS reached its Free Tier daily quota. British DSP Speech synthesis is active.';
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('zereo:tts_notice', {
+        detail: { quotaExhausted: true, message: lastTtsQuotaNotice }
+      })
+    );
+  }
+};
+
+export const clearTtsQuotaNotice = () => {
+  ttsClientCooldownUntil = 0;
+  if (lastTtsQuotaNotice !== null) {
+    lastTtsQuotaNotice = null;
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('zereo:tts_notice', {
+          detail: { quotaExhausted: false, message: null }
+        })
+      );
+    }
+  }
+};
+
 export const isServerPrincipalActive = () => {
   return !!cachedConfig.isPrincipalActive;
 };
@@ -83,6 +117,7 @@ export const testApiKey = async (): Promise<{ success: boolean; message: string 
 export const saveApiKey = (key: string) => {
   if (typeof window !== 'undefined') {
     localStorage.setItem('ZEREO_API_KEY', key.trim());
+    clearTtsQuotaNotice();
     refreshConfig();
   }
 };
@@ -135,14 +170,44 @@ export const encodeBase64 = (bytes: Uint8Array): string => {
   return btoa(binary);
 };
 
+let sharedDecodeCtx: AudioContext | null = null;
+
+function getSharedDecodeAudioContext(): AudioContext {
+  if (!sharedDecodeCtx || sharedDecodeCtx.state === 'closed') {
+    const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+    sharedDecodeCtx = new AudioCtxClass({ sampleRate: 24000 });
+  }
+  return sharedDecodeCtx;
+}
+
 export async function decodeAudioData(
   data: Uint8Array,
   ctx: AudioContext,
   sampleRate: number = 24000,
   numChannels: number = 1,
 ): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
+  // Handle RIFF/WAVE container payloads cleanly if upstream returns wrapped WAV
+  if (
+    data.byteLength >= 44 &&
+    data[0] === 0x52 && // R
+    data[1] === 0x49 && // I
+    data[2] === 0x46 && // F
+    data[3] === 0x46    // F
+  ) {
+    try {
+      const cloned = data.slice().buffer;
+      return await ctx.decodeAudioData(cloned);
+    } catch {
+      // Fall through to raw PCM stripping 44-byte WAV header
+      data = data.subarray(44);
+    }
+  }
+
+  const alignedByteLen = data.byteLength - (data.byteLength % 2);
+  const alignedCopy = new Uint8Array(alignedByteLen);
+  alignedCopy.set(data.subarray(0, alignedByteLen));
+  const dataInt16 = new Int16Array(alignedCopy.buffer);
+  const frameCount = Math.max(1, Math.floor(dataInt16.length / numChannels));
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
 
   for (let channel = 0; channel < numChannels; channel++) {
@@ -172,6 +237,10 @@ export async function generateTTS(
   stylePrompt?: string,
   accent?: string
 ): Promise<AudioBuffer | null> {
+  if (Date.now() < ttsClientCooldownUntil) {
+    return null;
+  }
+
   const localKey = typeof window !== 'undefined' ? localStorage.getItem('ZEREO_API_KEY') : null;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
@@ -193,15 +262,23 @@ export async function generateTTS(
     });
 
     const contentType = res.headers.get('content-type') || '';
-    if (!res.ok || !contentType.includes('application/json')) {
+    if (!contentType.includes('application/json')) {
       console.warn('TTS response non-JSON or status:', res.status);
       return null;
     }
 
     const data = await res.json().catch(() => null);
-    if (!data || !data.audioData) return null;
+    if (res.status === 429 || data?.quotaExhausted) {
+      markTtsQuotaExhausted(data?.error, data?.retryAfterSeconds);
+      return null;
+    }
 
-    const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    if (!res.ok || !data || !data.audioData) {
+      return null;
+    }
+
+    clearTtsQuotaNotice();
+    const outputAudioContext = getSharedDecodeAudioContext();
     const audioBuffer = await decodeAudioData(
       decodeBase64(data.audioData),
       outputAudioContext,
@@ -267,7 +344,7 @@ export const safeGenerateContent = async (params: any) => {
       if (res.status === 403 || msg.includes('403') || msg.includes('PERMISSION_DENIED') || msg.includes('invalid')) {
         throw new Error("AUTH_ERROR: Principal, our neural authorization has been rejected. The current API key is invalid or has been revoked.");
       }
-      if (res.status === 504 || res.status === 502 || rawText.includes('<!doctype') || rawText.includes('<html>')) {
+      if (res.status === 504 || res.status === 502 || msg.includes('UPSTREAM_TIMEOUT') || msg.includes('GATEWAY_TIMEOUT') || msg.includes('DEADLINE_EXCEEDED') || rawText.includes('<!doctype') || rawText.includes('<html>')) {
         throw new Error("GATEWAY_TIMEOUT: Upstream neural bridge latency spike detected. Failover engaged.");
       }
       throw new Error(msg || "SERVER_RESPONSE_INVALID: Upstream server returned non-JSON data. Please retry directive.");

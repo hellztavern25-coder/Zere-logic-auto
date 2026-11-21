@@ -1,9 +1,9 @@
 {
   "status": "RUNNING",
-  "uptimeSeconds": 210,
-  "tickCount": 21,
-  "lastTickAt": 1793290292755,
-  "lastSweepAt": 1793290262754,
+  "uptimeSeconds": 690,
+  "tickCount": 69,
+  "lastTickAt": 1795101338804,
+  "lastSweepAt": 1795101318804,
   "tasksCompleted": 1,
   "tasksFailed": 0,
   "capabilities": {
@@ -31,6 +31,6 @@
     "text": "Principal. The Steward Background Daemon is active and vigilant. System baseline verified. Memory core synchronized; neural bridges responsive with zero packet degradation. Standing by for high-level tactical directives.",
     "timestamp": 1793290082741
   },
-  "urgencyScore": 5,
+  "urgencyScore": 0,
   "memoryHealthScore": 100
 }

@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import { createServer } from 'http';
 import { Client, GatewayIntentBits } from 'discord.js';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Modality, LiveServerMessage } from '@google/genai';
 import { DaemonStatus, DaemonTask, DaemonLogEntry, DaemonCapabilities, DaemonState, EmotionalMap } from './types';
 import { KNOWLEDGE_OF_USES_REGISTRY } from './services/emotionalMappingService';
 
@@ -35,6 +35,7 @@ async function startServer() {
   const VOICE_PROFILES_FILE = path.join(__dirname, 'voice_profiles.json');
   const VOICE_CLONES_FILE = path.join(__dirname, 'voice_clones.json');
   const VOICE_PRESETS_FILE = path.join(__dirname, 'voice_presets.json');
+  const VOICE_COMMAND_LOGS_FILE = path.join(__dirname, 'voice_command_logs.json');
   const THREADS_FILE = path.join(__dirname, 'threads.json');
   const CONFIG_FILE = path.join(__dirname, 'config.json');
   const CONTEXT_FILE = path.join(__dirname, 'recent_context.json');
@@ -73,7 +74,359 @@ async function startServer() {
     if (!key) {
       throw new Error('AUTH_ERROR: No Gemini API Key configured in server environment.');
     }
-    return new GoogleGenAI({ apiKey: key });
+    return new GoogleGenAI({
+      apiKey: key,
+      apiVersion: 'v1beta',
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+  }
+
+  // Cooldown & cache state for TTS and text synthesis so unavailable (404), quota-exhausted (429), or timing-out models are not repeatedly hammered
+  const ttsModelCooldowns = new Map<string, { blockedUntil: number; reason: string; retryAfterSeconds?: number }>();
+  const textModelCooldowns = new Map<string, { blockedUntil: number; reason: string }>();
+  const ttsAudioCache = new Map<string, { audioData: string; mimeType: string; servedByModel: string; voiceUsed: string; cachedAt: number }>();
+
+  function parseRetryDelaySeconds(errMsg: string): number {
+    const secMatch = errMsg.match(/"retryDelay"\s*:\s*"(\d+)s"/i);
+    if (secMatch) {
+      const s = parseInt(secMatch[1], 10);
+      if (Number.isFinite(s) && s > 0) return s;
+    }
+    return 900; // Default 15m cooldown when no explicit retryDelay is provided
+  }
+
+  function getKeyFingerprint(customApiKey?: string): string {
+    const key = (customApiKey && customApiKey.trim()) || process.env.GEMINI_API_KEY || process.env.API_KEY || 'default';
+    return `${key.slice(0, 4)}:${key.slice(-4)}`;
+  }
+
+  function pruneTtsAudioCache() {
+    if (ttsAudioCache.size <= 60) return;
+    let oldestKey: string | null = null;
+    let oldestTime = Infinity;
+    for (const [k, v] of ttsAudioCache.entries()) {
+      if (v.cachedAt < oldestTime) {
+        oldestTime = v.cachedAt;
+        oldestKey = k;
+      }
+    }
+    if (oldestKey) ttsAudioCache.delete(oldestKey);
+  }
+
+  async function synthesizeTtsWithFailover(params: {
+    text: string;
+    voiceName?: string;
+    acousticStyle: string;
+    customApiKey?: string;
+  }): Promise<{
+    success: boolean;
+    audioData: string | null;
+    mimeType?: string;
+    servedByModel?: string;
+    voiceUsed?: string;
+    quotaExhausted?: boolean;
+    retryAfterSeconds?: number;
+    error?: string;
+  }> {
+    const { text, voiceName, acousticStyle, customApiKey } = params;
+    const clippedText = text.length > 3500 ? text.substring(0, 3500) : text;
+    const requestedVoice = typeof voiceName === 'string' ? voiceName.trim() : '';
+    const allowedBaritoneVoices = new Set(['Charon', 'Fenrir', 'Orus']);
+    const targetVoice = allowedBaritoneVoices.has(requestedVoice) ? requestedVoice : 'Charon';
+    const keyFp = getKeyFingerprint(customApiKey);
+
+    const cacheKey = `${keyFp}|${targetVoice}|${acousticStyle}|${clippedText}`;
+    const cached = ttsAudioCache.get(cacheKey);
+    if (cached && Date.now() - cached.cachedAt < 30 * 60 * 1000) {
+      return {
+        success: true,
+        audioData: cached.audioData,
+        mimeType: cached.mimeType,
+        servedByModel: cached.servedByModel,
+        voiceUsed: cached.voiceUsed,
+      };
+    }
+
+    const ai = getGeminiClient(customApiKey);
+    const ttsCandidates = [
+      'gemini-3.8-flash-lite-tts',
+      'gemini-3.8-flash-tts',
+    ];
+
+    const now = Date.now();
+    let anyQuotaExhausted = false;
+    let maxRetryAfterSec = 0;
+
+    for (const m of ttsCandidates) {
+      const cdKey = `${m}:${keyFp}`;
+      const cooldown = ttsModelCooldowns.get(cdKey);
+      if (cooldown && cooldown.blockedUntil > now) {
+        if (cooldown.reason === 'QUOTA_EXHAUSTED') {
+          anyQuotaExhausted = true;
+          const remaining = Math.max(1, Math.ceil((cooldown.blockedUntil - now) / 1000));
+          maxRetryAfterSec = Math.max(maxRetryAfterSec, cooldown.retryAfterSeconds || remaining);
+        }
+        continue;
+      }
+
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      try {
+        const ttsPromise = ai.models.generateContent({
+          model: m,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  text: clippedText,
+                  speechMetadata: { style: acousticStyle },
+                } as any,
+              ],
+            },
+          ],
+          config: {
+            responseModalities: ['AUDIO'],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: targetVoice },
+              },
+            },
+          },
+        });
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('TTS_UPSTREAM_TIMEOUT')), 12000);
+        });
+
+        const ttsResponse = await Promise.race([ttsPromise, timeoutPromise]);
+        const ttsParts = ttsResponse?.candidates?.[0]?.content?.parts || [];
+        const audioPart = ttsParts.find((p: any) => p?.inlineData?.data);
+        const audioBase64 = audioPart?.inlineData?.data;
+        const mimeType = audioPart?.inlineData?.mimeType || 'audio/wav';
+
+        if (audioBase64) {
+          ttsModelCooldowns.delete(cdKey);
+          ttsAudioCache.set(cacheKey, {
+            audioData: audioBase64,
+            mimeType,
+            servedByModel: m,
+            voiceUsed: targetVoice,
+            cachedAt: Date.now(),
+          });
+          pruneTtsAudioCache();
+          return {
+            success: true,
+            audioData: audioBase64,
+            mimeType,
+            servedByModel: m,
+            voiceUsed: targetVoice,
+          };
+        }
+      } catch (candidateErr: any) {
+        const errMsg = String(candidateErr?.message || candidateErr || '');
+        const httpStatus = getNumericHttpStatus(candidateErr, 500);
+
+        if (httpStatus === 429 || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota')) {
+          const retrySec = parseRetryDelaySeconds(errMsg);
+          ttsModelCooldowns.set(cdKey, {
+            blockedUntil: Date.now() + Math.min(retrySec, 3600) * 1000,
+            reason: 'QUOTA_EXHAUSTED',
+            retryAfterSeconds: retrySec,
+          });
+          anyQuotaExhausted = true;
+          maxRetryAfterSec = Math.max(maxRetryAfterSec, retrySec);
+          console.log(`SERVER: TTS model [${m}] reached quota limit; switching to fallback/DSP (${retrySec}s cooldown).`);
+        } else if (httpStatus === 404 || httpStatus === 403 || httpStatus === 400) {
+          ttsModelCooldowns.set(cdKey, {
+            blockedUntil: Date.now() + 30 * 60 * 1000,
+            reason: `HTTP_${httpStatus}`,
+          });
+          console.log(`SERVER: TTS model [${m}] unavailable (${httpStatus}); cooled down 30m.`);
+        } else if (errMsg.includes('TTS_UPSTREAM_TIMEOUT') || candidateErr?.name === 'AbortError') {
+          ttsModelCooldowns.set(cdKey, {
+            blockedUntil: Date.now() + 90 * 1000,
+            reason: 'TIMEOUT',
+          });
+          console.log(`SERVER: TTS model [${m}] timed out; cooled down 90s.`);
+        } else {
+          console.log(`SERVER: TTS model [${m}] deferred (${errMsg.slice(0, 140)}).`);
+        }
+        continue;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+
+    // Secondary Studio Failover: Gemini Live Native Audio ('gemini-3.8-live') when unary TTS models exhaust Free Tier quota
+    const liveCdKey = `gemini-3.8-live:${keyFp}`;
+    const liveCooldown = ttsModelCooldowns.get(liveCdKey);
+    if (!liveCooldown || liveCooldown.blockedUntil <= Date.now()) {
+      try {
+        const liveWavBase64 = await synthesizeViaGeminiLive(ai, clippedText, targetVoice, acousticStyle);
+        if (liveWavBase64) {
+          ttsModelCooldowns.delete(liveCdKey);
+          ttsAudioCache.set(cacheKey, {
+            audioData: liveWavBase64,
+            mimeType: 'audio/wav',
+            servedByModel: 'gemini-3.8-live',
+            voiceUsed: targetVoice,
+            cachedAt: Date.now(),
+          });
+          pruneTtsAudioCache();
+          return {
+            success: true,
+            audioData: liveWavBase64,
+            mimeType: 'audio/wav',
+            servedByModel: 'gemini-3.8-live',
+            voiceUsed: targetVoice,
+          };
+        }
+      } catch (liveErr: any) {
+        const liveMsg = String(liveErr?.message || liveErr || '');
+        const liveStatus = getNumericHttpStatus(liveErr, 500);
+        if (liveStatus === 429 || liveMsg.includes('RESOURCE_EXHAUSTED') || liveMsg.includes('quota')) {
+          const retrySec = parseRetryDelaySeconds(liveMsg);
+          ttsModelCooldowns.set(liveCdKey, {
+            blockedUntil: Date.now() + Math.min(retrySec, 3600) * 1000,
+            reason: 'QUOTA_EXHAUSTED',
+            retryAfterSeconds: retrySec,
+          });
+        } else {
+          ttsModelCooldowns.set(liveCdKey, {
+            blockedUntil: Date.now() + 90 * 1000,
+            reason: 'LIVE_UNAVAILABLE',
+          });
+        }
+        console.log(`SERVER: Gemini Live TTS failover unavailable (${liveMsg.slice(0, 140)}).`);
+      }
+    }
+
+    if (anyQuotaExhausted) {
+      return {
+        success: false,
+        audioData: null,
+        quotaExhausted: true,
+        retryAfterSeconds: maxRetryAfterSec || undefined,
+        error: 'Gemini TTS free-tier daily quota reached; client British SpeechSynthesis fallback is active. Select a billing-enabled API key in Settings > Secrets for unlimited studio voice.',
+      };
+    }
+
+    return {
+      success: false,
+      audioData: null,
+      error: 'TTS synthesis deferred to client speech synthesis',
+    };
+  }
+
+  function wrapPcm24kMonoToWav(pcm: Buffer): Buffer {
+    const header = Buffer.alloc(44);
+    const sampleRate = 24000;
+    const channels = 1;
+    const bitsPerSample = 16;
+    const byteRate = sampleRate * channels * (bitsPerSample / 8);
+    const blockAlign = channels * (bitsPerSample / 8);
+
+    header.write('RIFF', 0);
+    header.writeUInt32LE(36 + pcm.length, 4);
+    header.write('WAVE', 8);
+    header.write('fmt ', 12);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20);
+    header.writeUInt16LE(channels, 22);
+    header.writeUInt32LE(sampleRate, 24);
+    header.writeUInt32LE(byteRate, 28);
+    header.writeUInt16LE(blockAlign, 32);
+    header.writeUInt16LE(bitsPerSample, 34);
+    header.write('data', 36);
+    header.writeUInt32LE(pcm.length, 40);
+
+    return Buffer.concat([header, pcm]);
+  }
+
+  async function synthesizeViaGeminiLive(
+    ai: GoogleGenAI,
+    text: string,
+    voiceName: string,
+    acousticStyle: string
+  ): Promise<string | null> {
+    const pcmChunks: Buffer[] = [];
+    let settled = false;
+    let session: any = null;
+
+    return new Promise<string | null>(async (resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const finish = (err?: Error) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        try {
+          session?.close?.();
+        } catch {}
+        if (err) {
+          reject(err);
+          return;
+        }
+        const total = Buffer.concat(pcmChunks);
+        if (total.length === 0) {
+          resolve(null);
+          return;
+        }
+        resolve(wrapPcm24kMonoToWav(total).toString('base64'));
+      };
+
+      timer = setTimeout(() => {
+        if (pcmChunks.length > 0) {
+          finish();
+        } else {
+          finish(new Error('TTS_LIVE_TIMEOUT'));
+        }
+      }, 11000);
+
+      try {
+        session = await ai.live.connect({
+          model: 'gemini-3.8-live',
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: voiceName || 'Charon' },
+              },
+            },
+            systemInstruction: `You are a high-precision studio narrator (${acousticStyle || 'Jeremy Irons British aristocratic baritone'}). Read ONLY the exact text provided by the user verbatim—never add greetings, explanations, or extra words.`,
+          },
+          callbacks: {
+            onmessage: (message: LiveServerMessage) => {
+              const parts = message.serverContent?.modelTurn?.parts ?? [];
+              for (const part of parts) {
+                if (part.inlineData?.data) {
+                  pcmChunks.push(Buffer.from(part.inlineData.data, 'base64'));
+                }
+              }
+              if (message.serverContent?.turnComplete) {
+                finish();
+              }
+            },
+            onerror: (e: any) => {
+              finish(new Error(String(e?.message || e || 'LIVE_TTS_ERROR')));
+            },
+            onclose: () => {
+              finish();
+            },
+          },
+        });
+
+        session.sendClientContent({
+          turns: [{ role: 'user', parts: [{ text }] }],
+          turnComplete: true,
+        });
+      } catch (err: any) {
+        finish(err instanceof Error ? err : new Error(String(err)));
+      }
+    });
   }
 
   function getNumericHttpStatus(err: any, defaultCode: number = 500): number {
@@ -85,12 +438,14 @@ async function startServer() {
     }
     const statusStr = String(err?.status || '');
     if (statusStr === 'UNAVAILABLE' || statusStr.includes('503')) return 503;
+    if (statusStr === 'DEADLINE_EXCEEDED' || statusStr === 'GATEWAY_TIMEOUT' || statusStr.includes('504')) return 504;
     if (statusStr === 'RESOURCE_EXHAUSTED' || statusStr.includes('429')) return 429;
     if (statusStr === 'PERMISSION_DENIED' || statusStr.includes('403')) return 403;
     if (statusStr === 'NOT_FOUND' || statusStr.includes('404')) return 404;
     if (statusStr === 'INVALID_ARGUMENT' || statusStr.includes('400')) return 400;
 
     const msg = String(err?.message || '');
+    if (msg.includes('UPSTREAM_TIMEOUT') || msg.includes('GATEWAY_TIMEOUT') || msg.includes('DEADLINE_EXCEEDED') || msg.includes('504')) return 504;
     if (msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('high demand') || msg.includes('Spikes in demand')) return 503;
     if (msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED')) return 429;
     if (msg.includes('403') || msg.includes('PERMISSION_DENIED')) return 403;
@@ -207,10 +562,11 @@ async function startServer() {
       const ai = getGeminiClient();
       const prompt = `Generate a 2-paragraph executive situational briefing for the Principal (Preston Johnston / Council Grey). Metrics: System uptime ${uptimeMin} minutes, ${stewardDaemonState.uptimeSeconds} seconds, ${memoryCount} consolidated memories, ${stewardDaemonState.tasksCompleted} autonomous tasks executed, Urgency index: ${stewardDaemonState.urgencyScore}%. Tone: Jeremy Irons' Alfred Pennyworth: aristocratic, dryly sardonic, tactically acute, fiercely loyal. Address him exclusively as 'Principal'. No corporate apologies, no canned AI platitudes.`;
       const resp = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
+        model: 'gemini-4-hydrogen',
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
-          systemInstruction: "You are ZereØ, the Steward and Logic Monster. Respond with strategic precision to Principal Preston Johnston."
+          systemInstruction: "You are ZereØ, the Steward and Logic Monster. Respond with strategic precision to Principal Preston Johnston.",
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
         }
       });
       if (resp.text && resp.text.trim()) {
@@ -272,10 +628,11 @@ async function startServer() {
           const ai = getGeminiClient();
           const prompt = `Principal Directive to execute: "${task.title}". Additional context: "${task.description || 'None'}". Provide an authoritative, lethal analytical execution summary adhering strictly to the Steward protocol.`;
           const resp = await ai.models.generateContent({
-            model: 'gemini-3.1-flash-lite',
+            model: 'gemini-4-hydrogen',
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             config: {
-              systemInstruction: "You are ZereØ, the Steward and Logic Monster. Respond with high-density, strategic precision to Principal Preston Johnston. No apologies, no disclaimers."
+              systemInstruction: "You are ZereØ, the Steward and Logic Monster. Respond with high-density, strategic precision to Principal Preston Johnston. No apologies, no disclaimers.",
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
             }
           });
           resultText = resp.text || `Directive executed successfully: ${task.title}`;
@@ -381,7 +738,8 @@ async function startServer() {
 
   await ensureFile(MEMORY_FILE, []);
   await ensureFile(VISUAL_CAPTURES_FILE, []);
-  await ensureFile(VOICE_PROFILES_FILE, { activeProfileId: 'iron-adaptive', profiles: [] });
+  await ensureFile(VOICE_PROFILES_FILE, { activeProfileId: 'jeremy-irons-signature', profiles: [] });
+  await ensureFile(VOICE_COMMAND_LOGS_FILE, { logs: [] });
   await ensureFile(VOICE_CLONES_FILE, {
     activeCloneId: 'clone-jeremy-irons-canonical',
     clones: [
@@ -430,7 +788,7 @@ async function startServer() {
           elocutionCrispness: 0.92,
           drawlCoefficient: 0.84
         },
-        systemPromptStyle: 'Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth):',
+        systemPromptStyle: 'dry, gravelly, aristocratic British baritone, unhurried measured cadence, crisp Oxford plosives',
         dspConfig: {
           pitchMultiplier: 0.78,
           speechRate: 0.88,
@@ -518,13 +876,22 @@ async function startServer() {
     }
   };
 
+  let bootPrincipalActive = true;
+  try {
+    const rawCfg = await fs.readFile(CONFIG_FILE, 'utf-8');
+    const parsedCfg = JSON.parse(rawCfg);
+    if (parsedCfg && parsedCfg.isPrincipalActive === false) {
+      bootPrincipalActive = false;
+    }
+  } catch {}
+
   const principalVoiceOwnership = {
-    verified: false,
-    verifiedAt: null as number | null,
-    verificationMethod: 'UNVERIFIED',
-    confidenceScore: 0,
-    daemonInitialized: false,
-    daemonStatus: 'STANDBY_LOCKED', // 'STANDBY_LOCKED' | 'INITIALIZING' | 'ONLINE'
+    verified: bootPrincipalActive,
+    verifiedAt: bootPrincipalActive ? Date.now() : (null as number | null),
+    verificationMethod: bootPrincipalActive ? 'PRINCIPAL_CONFIG_8212' : 'UNVERIFIED',
+    confidenceScore: bootPrincipalActive ? 99.8 : 0,
+    daemonInitialized: bootPrincipalActive,
+    daemonStatus: bootPrincipalActive ? 'ONLINE' : 'STANDBY_LOCKED', // 'STANDBY_LOCKED' | 'INITIALIZING' | 'ONLINE'
     lastVerificationAttempt: null as any
   };
 
@@ -1754,17 +2121,26 @@ async function startServer() {
         if (!candidateModels.includes('gemini-3.1-flash-lite-image')) candidateModels.push('gemini-3.1-flash-lite-image');
         if (!candidateModels.includes('gemini-3-pro-image')) candidateModels.push('gemini-3-pro-image');
       } else {
-        // High-availability text models order
+      // Active text models ordered by reliability and free-tier availability
         const knownFastModels = [
-          'gemini-3.1-flash-lite',
+          'gemini-4-hydrogen',
+          'gemini-4-neon',
           'gemini-3-flash-preview',
-          'gemini-3.5-flash-lite',
-          'gemini-3.8-flash',
-          'gemini-flash-latest'
+          'gemini-3.1-flash-lite',
+          'gemini-3.8-flash'
         ];
 
-        // If a specific, working model was requested, test it
-        if (requestedModel && !['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.1-pro-preview', 'gemini-pro-latest'].includes(requestedModel)) {
+        const deprecatedOrHangingAliases = new Set([
+          'gemini-2.5-flash',
+          'gemini-flash-latest',
+          'gemini-3.5-flash-lite',
+          'gemini-3.6-flash',
+          'gemini-2.5-pro',
+          'gemini-3.1-pro-preview',
+          'gemini-pro-latest'
+        ]);
+
+        if (requestedModel && !deprecatedOrHangingAliases.has(requestedModel)) {
           candidateModels.push(requestedModel);
         }
 
@@ -1775,37 +2151,148 @@ async function startServer() {
         }
       }
 
+      const sanitizeConfigForModel = (targetModel: string, rawConfig: any) => {
+        if (!rawConfig || typeof rawConfig !== 'object') {
+          return targetModel.startsWith('gemini-4-')
+            ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM } }
+            : undefined;
+        }
+        const cfg: any = { ...rawConfig };
+        if (targetModel.startsWith('gemini-4-')) {
+          delete cfg.temperature;
+          delete cfg.topP;
+          delete cfg.topK;
+          delete cfg.candidateCount;
+          if (cfg.thinkingConfig) {
+            const rawLevel = cfg.thinkingConfig.thinkingLevel;
+            const rawBudget = cfg.thinkingConfig.thinkingBudget;
+            const mappedLevel =
+              rawLevel ||
+              (typeof rawBudget === 'number' && rawBudget >= 16000
+                ? ThinkingLevel.HIGH
+                : ThinkingLevel.MEDIUM);
+            cfg.thinkingConfig = { thinkingLevel: mappedLevel };
+          } else {
+            const isShortUtil = typeof cfg.maxOutputTokens === 'number' && cfg.maxOutputTokens <= 256;
+            cfg.thinkingConfig = {
+              thinkingLevel: isShortUtil ? ThinkingLevel.LOW : ThinkingLevel.MEDIUM
+            };
+          }
+        } else if (targetModel === 'gemini-3.1-flash-lite') {
+          if (cfg.thinkingConfig) {
+            const tc: any = { ...cfg.thinkingConfig };
+            if (tc.thinkingLevel === 'XHIGH') {
+              tc.thinkingLevel = ThinkingLevel.HIGH;
+            }
+            if (tc.thinkingBudget !== undefined && !tc.thinkingLevel) {
+              const budget = Number(tc.thinkingBudget);
+              tc.thinkingLevel = budget >= 16000 ? ThinkingLevel.MEDIUM : ThinkingLevel.MINIMAL;
+              delete tc.thinkingBudget;
+            }
+            cfg.thinkingConfig = tc;
+          }
+        } else if (cfg.thinkingConfig) {
+          const tc: any = { ...cfg.thinkingConfig };
+          if (tc.thinkingLevel === 'XHIGH') {
+            tc.thinkingLevel = ThinkingLevel.HIGH;
+          }
+          if (targetModel === 'gemini-3.8-flash' && tc.thinkingBudget !== undefined) {
+            delete tc.thinkingBudget;
+            if (!tc.thinkingLevel) {
+              tc.thinkingLevel = ThinkingLevel.MEDIUM;
+            }
+          }
+          cfg.thinkingConfig = tc;
+        }
+        return cfg;
+      };
+
+      const keyFp = getKeyFingerprint(customApiKey);
       let lastError: any = null;
       let response: any = null;
       let successfulModel = '';
+      const attemptErrors: Array<{ model: string; status: number; message: string }> = [];
 
-      for (const m of candidateModels) {
+      const hasThinkingConfig = Boolean(config?.thinkingConfig);
+      const baseTimeoutMs = hasThinkingConfig ? 30000 : 22000;
+      const totalRouteBudgetMs = 54000;
+      const routeStartedAt = Date.now();
+      const activeCandidates = candidateModels.filter((m) => {
+        const cd = textModelCooldowns.get(`${m}:${keyFp}`);
+        return !cd || cd.blockedUntil <= routeStartedAt;
+      });
+      const modelsToTry = activeCandidates.length > 0 ? activeCandidates : candidateModels;
+
+      for (const m of modelsToTry) {
+        const elapsedMs = Date.now() - routeStartedAt;
+        const remainingBudgetMs = totalRouteBudgetMs - elapsedMs;
+        if (attemptErrors.length > 0 && remainingBudgetMs < 12000) {
+          break;
+        }
+
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const cdKey = `${m}:${keyFp}`;
         try {
-          const timeoutMs = m === 'gemini-3.1-flash-lite' ? 8000 : 5500;
+          const timeoutMs = Math.min(baseTimeoutMs, Math.max(15000, remainingBudgetMs));
+          const sanitizedConfig = isImageRequest ? config : sanitizeConfigForModel(m, config);
           const candidatePromise = ai.models.generateContent({
             model: m,
             contents,
-            config
+            config: sanitizedConfig
           });
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`UPSTREAM_TIMEOUT: Model [${m}] exceeded ${timeoutMs}ms`)), timeoutMs)
-          );
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              const timeoutErr: any = new Error(`UPSTREAM_TIMEOUT: Model [${m}] exceeded ${timeoutMs}ms`);
+              timeoutErr.status = 504;
+              reject(timeoutErr);
+            }, timeoutMs);
+          });
 
           response = await Promise.race([candidatePromise, timeoutPromise]);
           if (response && (response.text || response.candidates?.length)) {
+            textModelCooldowns.delete(cdKey);
             successfulModel = m;
             break;
           }
         } catch (err: any) {
           lastError = err;
           const statusNum = getNumericHttpStatus(err, 500);
-          console.warn(`SERVER: Model [${m}] call failed (${statusNum}):`, err?.message || err);
+          const msgStr = String(err?.message || err || '');
+          attemptErrors.push({ model: m, status: statusNum, message: msgStr.slice(0, 180) });
+          if (statusNum === 404 || msgStr.includes('NOT_FOUND')) {
+            textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 30 * 60 * 1000, reason: 'NOT_FOUND' });
+          } else if (statusNum === 429 || msgStr.includes('RESOURCE_EXHAUSTED')) {
+            const explicitDelayMatch = msgStr.match(/"retryDelay"\s*:\s*"(\d+)s"/i);
+            const isDailyQuota = msgStr.includes('GenerateRequestsPerDay') || msgStr.includes('PerDay');
+            const cooldownSec = explicitDelayMatch
+              ? Math.min(parseInt(explicitDelayMatch[1], 10) || 20, isDailyQuota ? 180 : 45)
+              : isDailyQuota
+              ? 180
+              : 20;
+            textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + cooldownSec * 1000, reason: 'QUOTA' });
+          } else if (msgStr.includes('UPSTREAM_TIMEOUT') || statusNum === 503 || statusNum === 504) {
+            textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 20 * 1000, reason: 'TIMEOUT_OR_BUSY' });
+          }
+          console.log(`SERVER: Text model [${m}] failover (${statusNum}): ${msgStr.slice(0, 160)}`);
           continue;
+        } finally {
+          if (timer) clearTimeout(timer);
         }
       }
 
       if (!response) {
-        throw lastError || new Error('All candidate models failed to generate a response');
+        const lastStatus = getNumericHttpStatus(lastError, 500);
+        const preferredUpstreamError =
+          lastStatus === 504
+            ? attemptErrors.find((a) => a.status === 429 || a.status === 503 || a.status === 403)
+            : undefined;
+        const finalError: any = preferredUpstreamError
+          ? Object.assign(new Error(preferredUpstreamError.message), { status: preferredUpstreamError.status })
+          : lastError || new Error('All candidate models failed to generate a response');
+        if (finalError && typeof finalError === 'object') {
+          finalError.attemptErrors = attemptErrors;
+        }
+        throw finalError;
       }
 
       return res.status(200).json({
@@ -1816,15 +2303,19 @@ async function startServer() {
         servedByModel: successfulModel
       });
     } catch (error: any) {
-      console.error('SERVER: /api/gemini/generate exception:', error?.message || error);
       const msg = error?.message || 'Server error during generation';
       const statusCode = getNumericHttpStatus(error, 500);
+      if (statusCode === 429 || statusCode === 503 || statusCode === 504) {
+        console.log(`SERVER: /api/gemini/generate deferred (${statusCode}): ${String(msg).slice(0, 180)}`);
+      } else {
+        console.error('SERVER: /api/gemini/generate exception:', msg);
+      }
       return res.status(statusCode).json({
         error: {
           message: msg,
           status: statusCode,
           statusName: error?.status || 'ERROR',
-          details: error?.errorDetails || error?.details
+          details: error?.attemptErrors || error?.errorDetails || error?.details
         }
       });
     }
@@ -2013,11 +2504,30 @@ async function startServer() {
         : undefined;
 
       const ai = getGeminiClient(customApiKey);
-      const testRes = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
-        contents: [{ role: 'user', parts: [{ text: "Neural pulse check. Respond with 'PULSE_OK'." }] }],
-        config: { maxOutputTokens: 10 }
-      });
+      let testRes: any = null;
+      let lastTestErr: any = null;
+      for (const testModel of ['gemini-4-hydrogen', 'gemini-4-neon', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview']) {
+        try {
+          const cfg: any = { maxOutputTokens: 64 };
+          if (testModel.startsWith('gemini-4-')) {
+            cfg.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+          } else if (testModel === 'gemini-3.1-flash-lite') {
+            cfg.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
+          }
+          testRes = await ai.models.generateContent({
+            model: testModel,
+            contents: [{ role: 'user', parts: [{ text: "Neural pulse check. Respond with 'PULSE_OK'." }] }],
+            config: cfg
+          });
+          if (testRes) break;
+        } catch (err: any) {
+          lastTestErr = err;
+          continue;
+        }
+      }
+      if (!testRes) {
+        throw lastTestErr || new Error('Neural pulse check failed across active models');
+      }
       return res.json({ success: true, text: testRes.text || 'PULSE_OK' });
     } catch (err: any) {
       const statusCode = getNumericHttpStatus(err, 500);
@@ -2032,86 +2542,52 @@ async function startServer() {
     res.setHeader('Content-Type', 'application/json');
     try {
       const authHeader = req.headers.authorization;
-      const customApiKey = authHeader && authHeader.startsWith('Bearer ') 
-        ? authHeader.slice(7).trim() 
+      const customApiKey = authHeader && authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7).trim()
         : undefined;
 
-      const ai = getGeminiClient(customApiKey);
       const { text, voiceName, stylePrompt, accent } = req.body;
       if (!text || typeof text !== 'string') {
         return res.status(400).json({ success: false, error: 'Text parameter required' });
       }
 
-      // Do not truncate abruptly to 800 characters; allow natural full messages
-      const clippedText = text.length > 3500 ? text.substring(0, 3500) : text;
-      // Default to deep male baritone 'Charon' (or 'Fenrir')
-      const targetVoice = voiceName === 'Fenrir' ? 'Fenrir' : 'Charon';
+      // Extract purely acoustic delivery tags (NO actor names, NO multi-sentence prose, NO quotes inside spoken text)
+      const sanitizeAcousticStyle = (raw?: string): string => {
+        if (!raw || typeof raw !== 'string') return '';
+        return raw
+          .replace(/Jeremy Irons|Alfred Pennyworth/gi, '')
+          .replace(/^(?:Deliver|Say|Speak)\s+(?:in|with|deliberately)?\s*/i, '')
+          .replace(/portraying|in the manner of|accent/gi, '')
+          .replace(/[.:;"']/g, ',')
+          .replace(/\s+/g, ' ')
+          .replace(/,\s*,+/g, ',')
+          .replace(/^,\s*|,\s*$/g, '')
+          .trim()
+          .slice(0, 140);
+      };
 
-      // Infuse Jeremy Irons / British accent phrasing guidance into the audio synthesis prompt
-      const promptText = stylePrompt || (accent === 'british_rp' 
-        ? `Say in a crisp, silky, refined British Received Pronunciation accent with aristocratic clarity: "${clippedText}"`
-        : `Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth): "${clippedText}"`);
+      const cleanedCustomStyle = sanitizeAcousticStyle(stylePrompt);
+      const baseAcousticStyle = cleanedCustomStyle || (
+        accent === 'british_rp'
+          ? 'crisp, refined British Received Pronunciation baritone, calm aristocratic clarity'
+          : 'dry, gravelly, aristocratic British baritone, unhurried measured cadence, sharp dry wit'
+      );
+      const acousticStyle = `${baseAcousticStyle}, steady low-E 82Hz chest register, minimal pitch excursion`.slice(0, 180);
 
-      const ttsCandidates = [
-        'gemini-3.8-flash-lite-tts',
-        'gemini-2.5-flash-preview-tts',
-        'gemini-3.8-flash-tts',
-        'gemini-3.1-flash-tts-preview'
-      ];
-
-      let audioBase64: string | undefined;
-      let mimeType: string | undefined;
-
-      for (const m of ttsCandidates) {
-        try {
-          const ttsPromise = ai.models.generateContent({
-            model: m,
-            contents: [{ parts: [{ text: promptText }] }],
-            config: {
-              responseModalities: ['AUDIO'],
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: { voiceName: targetVoice }
-                }
-              }
-            }
-          });
-
-          const timeoutPromise = new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('TTS_UPSTREAM_TIMEOUT')), 4500)
-          );
-
-          const ttsResponse = await Promise.race([ttsPromise, timeoutPromise]);
-          audioBase64 = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-          mimeType = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.mimeType;
-          if (audioBase64) {
-            break;
-          }
-        } catch (candidateErr) {
-          console.warn(`SERVER: TTS candidate [${m}] failed:`, (candidateErr as any)?.message || candidateErr);
-          continue;
-        }
-      }
-
-      if (!audioBase64) {
-        return res.status(200).json({
-          success: false,
-          audioData: null,
-          error: 'TTS synthesis deferred to client speech synthesis'
-        });
-      }
-
-      return res.json({
-        success: true,
-        audioData: audioBase64,
-        mimeType: mimeType || 'audio/l16; rate=24000; channels=1'
+      const result = await synthesizeTtsWithFailover({
+        text,
+        voiceName,
+        acousticStyle,
+        customApiKey,
       });
+
+      return res.status(200).json(result);
     } catch (err: any) {
-      console.warn('SERVER: /api/gemini/tts failed (using client DSP fallback):', err?.message || err);
+      console.log('SERVER: /api/gemini/tts using client DSP fallback:', err?.message || err);
       return res.status(200).json({
         success: false,
         audioData: null,
-        error: err?.message || 'TTS generation fallback'
+        error: err?.message || 'TTS generation fallback',
       });
     }
   });
@@ -2190,23 +2666,91 @@ async function startServer() {
 
   app.post('/api/memories', async (req, res) => {
     try {
-      const { title, content, type } = req.body;
+      const { title, content, type, dedupeKey } = req.body;
       const data = await fs.readFile(MEMORY_FILE, 'utf-8');
       const memories = JSON.parse(data);
-      
+
+      if (dedupeKey) {
+        const existingIndex = memories.findIndex((m: any) => m.dedupeKey === dedupeKey);
+        if (existingIndex !== -1) {
+          const updated = {
+            ...memories[existingIndex],
+            title: title || memories[existingIndex].title,
+            content: content || memories[existingIndex].content,
+            type: type || memories[existingIndex].type,
+            dedupeKey,
+            timestamp: new Date().toISOString()
+          };
+          memories.splice(existingIndex, 1);
+          memories.unshift(updated);
+          await fs.writeFile(MEMORY_FILE, JSON.stringify(memories, null, 2));
+          return res.json(updated);
+        }
+      }
+
       const newMemory = {
         id: Date.now().toString(),
         title,
         content,
         type,
+        ...(dedupeKey ? { dedupeKey } : {}),
         timestamp: new Date().toISOString()
       };
-      
+
       memories.unshift(newMemory);
       await fs.writeFile(MEMORY_FILE, JSON.stringify(memories, null, 2));
       res.json(newMemory);
     } catch (err) {
       res.status(500).json({ error: 'Failed to save memory' });
+    }
+  });
+
+  app.get('/api/memory/recall-summary', async (_req, res) => {
+    try {
+      const [memRaw, threadsRaw] = await Promise.all([
+        fs.readFile(MEMORY_FILE, 'utf-8').catch(() => '[]'),
+        fs.readFile(THREADS_FILE, 'utf-8').catch(() => '[]')
+      ]);
+
+      const memories = JSON.parse(memRaw || '[]');
+      const threads = JSON.parse(threadsRaw || '[]');
+
+      const compactThreads = (Array.isArray(threads) ? threads : [])
+        .filter((t: any) => Array.isArray(t.messages) && t.messages.length > 0)
+        .slice(0, 8)
+        .map((t: any) => {
+          const validMsgs = (t.messages || []).filter((m: any) => typeof m.text === 'string' && m.text.trim().length > 0);
+          const excerptMsgs = validMsgs.length <= 4
+            ? validMsgs
+            : [validMsgs[0], validMsgs[1], ...validMsgs.slice(-2)];
+          return {
+            id: t.id,
+            title: t.title || 'Dialogue',
+            timestamp: t.timestamp,
+            exchanges: excerptMsgs.map((m: any) => ({
+              role: m.role === 'user' ? 'Principal' : 'ZereØ',
+              text: m.text.replace(/data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+/g, '[image]').replace(/\s+/g, ' ').trim().slice(0, 180)
+            }))
+          };
+        });
+
+      const compactMemories = (Array.isArray(memories) ? memories : [])
+        .filter((m: any) => {
+          const c = String(m.content || '').toLowerCase();
+          return !c.includes('daily quota for this api key has been reached');
+        })
+        .slice(0, 20)
+        .map((m: any) => ({
+          id: m.id,
+          type: m.type,
+          title: m.title,
+          content: String(m.content || '').slice(0, 260),
+          timestamp: m.timestamp
+        }));
+
+      res.json({ memories: compactMemories, recentThreads: compactThreads });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to build recall summary' });
     }
   });
 
@@ -2330,7 +2874,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Profile name is required' });
       }
 
-      const data = await fs.readFile(VOICE_PROFILES_FILE, 'utf-8').catch(() => '{"activeProfileId":"iron-adaptive","profiles":[]}');
+      const data = await fs.readFile(VOICE_PROFILES_FILE, 'utf-8').catch(() => '{"activeProfileId":"jeremy-irons-signature","profiles":[]}');
       const parsed = JSON.parse(data);
 
       const existingIdx = parsed.profiles.findIndex((p: any) => p.id === profile.id);
@@ -2655,7 +3199,7 @@ async function startServer() {
       const cleanMimeType = mimeType ? mimeType.split(';')[0].trim() : 'audio/webm';
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.5-transcribe',
         contents: [
           {
             role: 'user',
@@ -2680,7 +3224,7 @@ Return a valid JSON object strictly matching this schema:
   "gravelRoughnessPercent": number between 50 and 95,
   "keyPhonemesDetected": ["non-rhotic r", "lengthened open vowels", "crisp dental t/d plosives"],
   "elocutionNotes": ["Deliberate pause after address", "Aristocratic dry iron cadence", "Oxford consonant bite"],
-  "recommendedSystemPromptStyle": "Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth):"
+  "recommendedSystemPromptStyle": "dry, gravelly, aristocratic British baritone, unhurried 104 WPM cadence, crisp Oxford articulation"
 }`
               }
             ]
@@ -2709,7 +3253,7 @@ Return a valid JSON object strictly matching this schema:
         speechRateWpm: parsed.speechRateWpm || 104,
         fundamentalF0EstimateHz: parsed.fundamentalF0EstimateHz || 98.4,
         gravelRoughnessPercent: parsed.gravelRoughnessPercent || 85,
-        recommendedSystemPromptStyle: parsed.recommendedSystemPromptStyle || 'Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth):'
+        recommendedSystemPromptStyle: parsed.recommendedSystemPromptStyle || 'dry, gravelly, aristocratic British baritone, unhurried 104 WPM cadence, crisp Oxford articulation'
       };
 
       return res.json({ success: true, sttAnalysis });
@@ -2728,7 +3272,7 @@ Return a valid JSON object strictly matching this schema:
           speechRateWpm: 104,
           fundamentalF0EstimateHz: 98.4,
           gravelRoughnessPercent: 85,
-          recommendedSystemPromptStyle: 'Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth):'
+          recommendedSystemPromptStyle: 'dry, gravelly, aristocratic British baritone, unhurried 104 WPM cadence, crisp Oxford articulation'
         }
       });
     }
@@ -2736,9 +3280,10 @@ Return a valid JSON object strictly matching this schema:
 
   // End-to-end Voice Cloning Processing & Synthesis Audition
   app.post('/api/voice/clone/synthesize', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
-      const { text, modelId, customPromptStyle, tonalIntensity } = req.body;
-      if (!text) return res.status(400).json({ error: 'Text parameter required' });
+      const { text, modelId, customPromptStyle, tonalIntensity, voiceName } = req.body;
+      if (!text || typeof text !== 'string') return res.status(400).json({ error: 'Text parameter required' });
 
       let stylePrompt = customPromptStyle;
       if (!stylePrompt && modelId) {
@@ -2752,86 +3297,203 @@ Return a valid JSON object strictly matching this schema:
         } catch (_) {}
       }
 
-      if (!stylePrompt) {
+      const sanitizeCloneStyle = (raw?: string): string => {
+        if (!raw || typeof raw !== 'string') return '';
+        return raw
+          .replace(/Jeremy Irons|Alfred Pennyworth/gi, '')
+          .replace(/^(?:Deliver|Say|Speak)\s+(?:in|with|deliberately)?\s*/i, '')
+          .replace(/portraying|in the definitive manner of|in the manner of|accent/gi, '')
+          .replace(/[.:;"']/g, ',')
+          .replace(/\s+/g, ' ')
+          .replace(/,\s*,+/g, ',')
+          .replace(/^,\s*|,\s*$/g, '')
+          .trim()
+          .slice(0, 140);
+      };
+
+      let acousticStyle = sanitizeCloneStyle(stylePrompt);
+      if (!acousticStyle) {
         const intensity = typeof tonalIntensity === 'number' ? tonalIntensity : 1.0;
         if (intensity >= 1.55) {
-          stylePrompt = 'Deliver with maximum lethal gravitas, profound theatrical menace, razor-sharp sarcastic iron inflection, and deep deliberate aristocratic pauses in the definitive manner of Jeremy Irons (Alfred Pennyworth):';
+          acousticStyle = 'deep, dry, gravelly aristocratic British baritone, heightened gravitas, razor-sharp sarcasm, deliberate pauses';
         } else if (intensity >= 1.20) {
-          stylePrompt = 'Deliver with heightened theatrical gravitas, deep razor-sharp sarcastic iron inflection, deliberate dramatic cadence, and heavy aristocratic weight in the manner of Jeremy Irons (Alfred Pennyworth):';
+          acousticStyle = 'dry, gravelly, aristocratic British baritone, heightened dramatic cadence, sharp dry wit';
         } else if (intensity <= 0.60) {
-          stylePrompt = 'Deliver with a quiet, subtle, dry British aristocratic baritone, calm analytical restraint in the manner of Jeremy Irons:';
+          acousticStyle = 'quiet, subtle, dry British aristocratic baritone, calm analytical restraint';
         } else {
-          stylePrompt = 'Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth):';
+          acousticStyle = 'dry, gravelly, aristocratic British baritone, unhurried measured cadence, sharp dry wit';
         }
       }
+      acousticStyle = `${acousticStyle}, steady low-E 82Hz chest register, minimal pitch excursion`.slice(0, 180);
 
-      res.setHeader('Content-Type', 'application/json');
       const authHeader = req.headers.authorization;
-      const customApiKey = authHeader && authHeader.startsWith('Bearer ') 
-        ? authHeader.slice(7).trim() 
+      const customApiKey = authHeader && authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7).trim()
         : undefined;
-      const ai = getGeminiClient(customApiKey);
 
-      const promptText = `${stylePrompt} "${text}"`;
-      const ttsCandidates = [
-        'gemini-3.8-flash-lite-tts',
-        'gemini-2.5-flash-preview-tts',
-        'gemini-3.8-flash-tts',
-        'gemini-3.1-flash-tts-preview'
-      ];
-
-      let audioBase64: string | undefined;
-      let mimeType: string | undefined;
-
-      for (const m of ttsCandidates) {
-        try {
-          const ttsPromise = ai.models.generateContent({
-            model: m,
-            contents: [{ parts: [{ text: promptText }] }],
-            config: {
-              responseModalities: ['AUDIO'],
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: { voiceName: 'Charon' }
-                }
-              }
-            }
-          });
-
-          const timeoutPromise = new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('SYNTHESIS_UPSTREAM_TIMEOUT')), 4500)
-          );
-
-          const ttsResponse = await Promise.race([ttsPromise, timeoutPromise]);
-          audioBase64 = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-          mimeType = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.mimeType;
-          if (audioBase64) break;
-        } catch (candidateErr) {
-          console.warn(`SERVER: Clone synthesize candidate [${m}] failed:`, (candidateErr as any)?.message || candidateErr);
-          continue;
-        }
-      }
-
-      if (!audioBase64) {
-        return res.status(200).json({ 
-          success: false, 
-          audioData: null, 
-          error: 'TTS synthesis returned empty payload, client DSP fallback active' 
-        });
-      }
-
-      return res.json({
-        success: true,
-        audioData: audioBase64,
-        mimeType: mimeType || 'audio/l16; rate=24000; channels=1'
+      const result = await synthesizeTtsWithFailover({
+        text,
+        voiceName,
+        acousticStyle,
+        customApiKey,
       });
+
+      return res.status(200).json(result);
     } catch (err: any) {
-      console.warn('SERVER: /api/voice/clone/synthesize fallback:', err?.message || err);
-      return res.status(200).json({ 
-        success: false, 
-        audioData: null, 
-        error: err?.message || 'Synthesis failed' 
+      console.log('SERVER: /api/voice/clone/synthesize fallback:', err?.message || err);
+      return res.status(200).json({
+        success: false,
+        audioData: null,
+        error: err?.message || 'Synthesis failed',
       });
+    }
+  });
+
+  // Voice Command Logging & Replay Ledger Endpoints
+  app.get('/api/voice/command-logs', async (req, res) => {
+    try {
+      const data = await fs.readFile(VOICE_COMMAND_LOGS_FILE, 'utf-8').catch(() => '{"logs":[]}');
+      const parsed = JSON.parse(data);
+      const rawLogs = Array.isArray(parsed?.logs) ? parsed.logs : [];
+      const sourceFilter = typeof req.query.source === 'string' ? req.query.source.trim() : '';
+      const searchFilter = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
+      const limit = Number(req.query.limit) > 0 ? Math.min(Number(req.query.limit), 250) : 250;
+
+      let filtered = rawLogs.slice().sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
+      if (sourceFilter && sourceFilter !== 'all') {
+        filtered = filtered.filter((entry: any) => entry.source === sourceFilter);
+      }
+      if (searchFilter) {
+        filtered = filtered.filter(
+          (entry: any) =>
+            String(entry.commandText || '').toLowerCase().includes(searchFilter) ||
+            String(entry.responseText || '').toLowerCase().includes(searchFilter) ||
+            String(entry.voiceProfile || '').toLowerCase().includes(searchFilter)
+        );
+      }
+      res.json({ logs: filtered.slice(0, limit) });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to read voice command logs' });
+    }
+  });
+
+  app.post('/api/voice/command-logs', async (req, res) => {
+    try {
+      const {
+        id,
+        timestamp,
+        source,
+        commandText,
+        responseText,
+        voiceProfile,
+        formantPreset,
+        durationMs,
+        sessionId,
+        waveformPeaks,
+        peakIntensityDb
+      } = req.body || {};
+
+      const cleanCommand = typeof commandText === 'string' ? commandText.trim() : '';
+      const cleanResponse = typeof responseText === 'string' ? responseText.trim() : '';
+      if (!cleanCommand && !cleanResponse) {
+        return res.status(400).json({ error: 'Either commandText or responseText is required.' });
+      }
+
+      const data = await fs.readFile(VOICE_COMMAND_LOGS_FILE, 'utf-8').catch(() => '{"logs":[]}');
+      const parsed = JSON.parse(data);
+      const logs = Array.isArray(parsed?.logs) ? parsed.logs : [];
+
+      const validSource =
+        source === 'live_bridge' || source === 'conversation_mode' || source === 'synthesizer'
+          ? source
+          : 'live_bridge';
+
+      const sanitizedPeaks = Array.isArray(waveformPeaks)
+        ? waveformPeaks
+            .slice(0, 64)
+            .map((v: any) => {
+              const n = Number(v);
+              if (!Number.isFinite(n)) return 0.12;
+              return Math.round(Math.min(1, Math.max(0.05, n)) * 1000) / 1000;
+            })
+        : undefined;
+
+      const entry = {
+        id: typeof id === 'string' && id.trim() ? id.trim() : `vlog-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        timestamp: typeof timestamp === 'number' && Number.isFinite(timestamp) ? timestamp : Date.now(),
+        source: validSource,
+        commandText: cleanCommand || '(Spoken response without input transcript)',
+        responseText: cleanResponse || undefined,
+        voiceProfile: typeof voiceProfile === 'string' ? voiceProfile : 'Jeremy-Irons-Signature',
+        formantPreset: typeof formantPreset === 'string' ? formantPreset : 'sovereign-gravitas',
+        durationMs: typeof durationMs === 'number' && Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : undefined,
+        replayCount: 0,
+        sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+        waveformPeaks: sanitizedPeaks && sanitizedPeaks.length > 0 ? sanitizedPeaks : undefined,
+        peakIntensityDb:
+          typeof peakIntensityDb === 'number' && Number.isFinite(peakIntensityDb)
+            ? Math.round(Math.max(-60, Math.min(0, peakIntensityDb)) * 10) / 10
+            : undefined
+      };
+
+      const dedupeIdx = logs.findIndex((existing: any) => existing.id === entry.id);
+      if (dedupeIdx >= 0) {
+        logs[dedupeIdx] = { ...logs[dedupeIdx], ...entry };
+      } else {
+        logs.unshift(entry);
+      }
+
+      const trimmedLogs = logs.slice(0, 250);
+      await fs.writeFile(VOICE_COMMAND_LOGS_FILE, JSON.stringify({ logs: trimmedLogs }, null, 2));
+      io.emit('voice:command_logged', entry);
+      res.json({ success: true, entry });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to save voice command log' });
+    }
+  });
+
+  app.patch('/api/voice/command-logs/:id/replay', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const data = await fs.readFile(VOICE_COMMAND_LOGS_FILE, 'utf-8').catch(() => '{"logs":[]}');
+      const parsed = JSON.parse(data);
+      const logs = Array.isArray(parsed?.logs) ? parsed.logs : [];
+      const idx = logs.findIndex((entry: any) => entry.id === id);
+      if (idx < 0) {
+        return res.status(404).json({ error: 'Voice command log entry not found' });
+      }
+      logs[idx].replayCount = (Number(logs[idx].replayCount) || 0) + 1;
+      logs[idx].lastReplayedAt = Date.now();
+      await fs.writeFile(VOICE_COMMAND_LOGS_FILE, JSON.stringify({ logs }, null, 2));
+      io.emit('voice:command_replayed', logs[idx]);
+      res.json({ success: true, entry: logs[idx] });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to record replay' });
+    }
+  });
+
+  app.delete('/api/voice/command-logs/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const data = await fs.readFile(VOICE_COMMAND_LOGS_FILE, 'utf-8').catch(() => '{"logs":[]}');
+      const parsed = JSON.parse(data);
+      const logs = Array.isArray(parsed?.logs) ? parsed.logs : [];
+      const filtered = logs.filter((entry: any) => entry.id !== id);
+      await fs.writeFile(VOICE_COMMAND_LOGS_FILE, JSON.stringify({ logs: filtered }, null, 2));
+      io.emit('voice:command_deleted', { id });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to delete voice command log' });
+    }
+  });
+
+  app.delete('/api/voice/command-logs', async (_req, res) => {
+    try {
+      await fs.writeFile(VOICE_COMMAND_LOGS_FILE, JSON.stringify({ logs: [] }, null, 2));
+      io.emit('voice:commands_cleared');
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to clear voice command logs' });
     }
   });
 

@@ -41,6 +41,7 @@ import {
 } from '../services/voiceCloningEngineService';
 import { jeremyIronsVoice } from '../services/jeremyIronsVoiceService';
 import { voicePresetManager } from '../services/voicePresetService';
+import { markTtsQuotaExhausted } from '../services/geminiService';
 
 interface VoiceCloningEngineProps {
   clips: VoiceClip[];
@@ -322,6 +323,14 @@ export const VoiceCloningEngine: React.FC<VoiceCloningEngineProps> = ({
       setIsPlayingAudition(false);
     }
 
+    const dspConfig = {
+      pitchRate: effectiveDsp.pitchMultiplier,
+      gravelAmount: effectiveDsp.gravelSaturation,
+      chestResonanceDb: effectiveDsp.chestResonanceDb,
+      articulationDb: effectiveDsp.articulationBoostDb,
+      speechRate: effectiveDsp.speechRate
+    };
+
     try {
       const targetModel = currentDisplayModel;
       
@@ -336,52 +345,33 @@ export const VoiceCloningEngine: React.FC<VoiceCloningEngineProps> = ({
         })
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.audioData) {
-          const audioUrl = `data:${data.mimeType || 'audio/l16; rate=24000; channels=1'};base64,${data.audioData}`;
-          setAuditionAudioUrl(audioUrl);
-          
-          // Also speak via JeremyIronsVoiceService so the Web Audio DSP chain applies the modulated formants!
-          await jeremyIronsVoice.speak(auditionText, {
-            pitchRate: effectiveDsp.pitchMultiplier,
-            gravelAmount: effectiveDsp.gravelSaturation,
-            chestResonanceDb: effectiveDsp.chestResonanceDb,
-            articulationDb: effectiveDsp.articulationBoostDb,
-            speechRate: effectiveDsp.speechRate
-          });
-          showToast(`Synthesized with ${Math.round(tonalIntensity * 100)}% tonal gravitas`);
-        } else {
-          // Fallback to client synthesis with modulated DSP
-          await jeremyIronsVoice.speak(auditionText, {
-            pitchRate: effectiveDsp.pitchMultiplier,
-            gravelAmount: effectiveDsp.gravelSaturation,
-            chestResonanceDb: effectiveDsp.chestResonanceDb,
-            articulationDb: effectiveDsp.articulationBoostDb,
-            speechRate: effectiveDsp.speechRate
-          });
-          showToast(`Synthesized via client neural queue (${Math.round(tonalIntensity * 100)}% gravitas)`);
+      const data = await res.json().catch(() => null);
+      if (res.status === 429 || data?.quotaExhausted) {
+        markTtsQuotaExhausted(data?.error, data?.retryAfterSeconds);
+        await jeremyIronsVoice.speak(auditionText, dspConfig);
+        showToast('Cloud neural TTS quota reached — playing via British DSP Speech fallback');
+      } else if (res.ok && data?.audioData) {
+        const audioUrl = `data:${data.mimeType || 'audio/wav'};base64,${data.audioData}`;
+        setAuditionAudioUrl(audioUrl);
+
+        const played = await jeremyIronsVoice.playBase64Audio(
+          data.audioData,
+          dspConfig,
+          undefined,
+          undefined,
+          auditionText
+        );
+        if (!played) {
+          await jeremyIronsVoice.speak(auditionText, dspConfig);
         }
+        showToast(`Synthesized with ${Math.round(tonalIntensity * 100)}% tonal gravitas`);
       } else {
-        // Fallback to direct client speak with modulated DSP
-        await jeremyIronsVoice.speak(auditionText, {
-          pitchRate: effectiveDsp.pitchMultiplier,
-          gravelAmount: effectiveDsp.gravelSaturation,
-          chestResonanceDb: effectiveDsp.chestResonanceDb,
-          articulationDb: effectiveDsp.articulationBoostDb,
-          speechRate: effectiveDsp.speechRate
-        });
+        await jeremyIronsVoice.speak(auditionText, dspConfig);
         showToast(`Synthesized via client neural queue (${Math.round(tonalIntensity * 100)}% gravitas)`);
       }
     } catch (err: any) {
       console.warn('Audition synthesis fallback:', err);
-      await jeremyIronsVoice.speak(auditionText, {
-        pitchRate: effectiveDsp.pitchMultiplier,
-        gravelAmount: effectiveDsp.gravelSaturation,
-        chestResonanceDb: effectiveDsp.chestResonanceDb,
-        articulationDb: effectiveDsp.articulationBoostDb,
-        speechRate: effectiveDsp.speechRate
-      });
+      await jeremyIronsVoice.speak(auditionText, dspConfig);
       showToast('Audition played via modulated acoustic pipeline');
     } finally {
       setIsSynthesizing(false);

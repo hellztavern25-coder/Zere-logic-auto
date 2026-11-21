@@ -1,5 +1,13 @@
 [
   {
+    "id": "1795101351429",
+    "title": "Dialogue Recall: I see they restarted all of to...",
+    "content": "Thread \"I see they restarted all of to...\" (3 Principal turns). Initial focus: \"I see they restarted all of today's conversation\". Latest exchange -> Principal: Are we functioning | ZereØ: The systems are, for all intents and purposes, entirely operational. I have scrubbed the volatile cache to ensure that no corrupt… | Principal: so you don't remember the conversation from this morning already | ZereØ: I am acutely aware of the frustration inherent in such a query, Cøuncil. If by \"remember\" you mean a seamless, contiguous narrati…",
+    "type": "CONVERSATION_RECALL",
+    "dedupeKey": "thread_recall_1785304778767",
+    "timestamp": "2026-11-19T15:15:51.429Z"
+  },
+  {
     "id": "1785747262807",
     "title": "Principal, my processing array...",
     "content": "Principal, my processing arrays are temporarily exhausted. The daily quota for this API key has been reached. Please try again tomorrow or provide a fresh key in System Control.",

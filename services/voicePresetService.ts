@@ -1,6 +1,7 @@
 import { VoiceTonalPreset, PresetPersonaType, PersistentTonalModel, VoiceDSPConfig } from '../types';
 import { jeremyIronsVoice } from './jeremyIronsVoiceService';
 import { voiceCloningEngine, CANONICAL_IRONS_TONAL_MODEL } from './voiceCloningEngineService';
+import { markTtsQuotaExhausted } from './geminiService';
 
 const PRESETS_STORAGE_KEY = 'zere0_voice_presets_v1';
 const ACTIVE_PRESET_KEY = 'zere0_voice_active_preset_id_v1';
@@ -18,20 +19,20 @@ export const FACTORY_VOICE_PRESETS: VoiceTonalPreset[] = [
     sourceModelId: 'clone-jeremy-irons-canonical',
     sourceModelName: 'Jeremy Irons (Canonical Aristocrat)',
     dspConfig: {
-      pitchMultiplier: 0.91,
+      pitchMultiplier: 0.87,
       speechRate: 0.90,
-      chestResonanceDb: 6.0,
-      thoracicWarmthDb: 3.5,
-      articulationBoostDb: 5.0,
-      gravelSaturation: 0.85,
-      antiBoxNotchDb: -3.0,
+      chestResonanceDb: 5.2,
+      thoracicWarmthDb: 2.6,
+      articulationBoostDb: 1.6,
+      gravelSaturation: 0.42,
+      antiBoxNotchDb: -2.4,
       roomAmbience: 0.18
     },
-    systemPromptDirective: 'Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth):',
+    systemPromptDirective: 'dry, gravelly, aristocratic British baritone, steady low-E chest register, unhurried measured cadence, crisp Oxford bite',
     speechSynthesisConfig: {
-      pitch: 0.88,
-      rate: 0.90,
-      preferredVoiceNames: ['Daniel', 'Oliver', 'George', 'Arthur', 'en-GB'],
+      pitch: 0.81,
+      rate: 0.86,
+      preferredVoiceNames: ['George', 'Daniel', 'Oliver', 'Arthur'],
       priorityLocales: ['en-GB', 'en_GB', 'en-UK']
     },
     tags: ['Adaptive', 'Canonical', 'Alfred', 'Gravitas', 'RP'],
@@ -52,26 +53,26 @@ export const FACTORY_VOICE_PRESETS: VoiceTonalPreset[] = [
     name: 'Iron-Menace-V2',
     codeName: 'IRON-MENACE-V2',
     tagline: 'Theatrical Menace & Razor Sarcasm — Maximum Lethal Gravitas',
-    description: 'Deepened sub-harmonic chest resonance (+8.5dB shelf), aggressive vocal fold rasp (95%), and heavy deliberate cadence for uncompromising lethal authority.',
+    description: 'Deepened sub-harmonic chest resonance, controlled analog texture, and heavy deliberate cadence for uncompromising lethal authority.',
     targetPersona: 'theatrical_menace',
     tonalIntensity: 1.55,
     sourceModelId: 'clone-jeremy-irons-canonical',
     sourceModelName: 'Jeremy Irons (Canonical Aristocrat)',
     dspConfig: {
-      pitchMultiplier: 0.86,
-      speechRate: 0.85,
-      chestResonanceDb: 8.5,
-      thoracicWarmthDb: 4.5,
-      articulationBoostDb: 6.8,
-      gravelSaturation: 0.95,
-      antiBoxNotchDb: -3.5,
-      roomAmbience: 0.22
+      pitchMultiplier: 0.85,
+      speechRate: 0.87,
+      chestResonanceDb: 5.8,
+      thoracicWarmthDb: 3.0,
+      articulationBoostDb: 2.0,
+      gravelSaturation: 0.48,
+      antiBoxNotchDb: -2.6,
+      roomAmbience: 0.20
     },
-    systemPromptDirective: 'Deliver with maximum lethal gravitas, profound theatrical menace, razor-sharp sarcastic iron inflection, and deep deliberate aristocratic pauses in the definitive manner of Jeremy Irons (Alfred Pennyworth):',
+    systemPromptDirective: 'deep, dry, gravelly aristocratic British baritone, steady low-E chest register, razor-sharp sarcasm, deliberate pauses',
     speechSynthesisConfig: {
-      pitch: 0.82,
+      pitch: 0.79,
       rate: 0.84,
-      preferredVoiceNames: ['Daniel', 'George', 'Oliver', 'en-GB'],
+      preferredVoiceNames: ['George', 'Daniel', 'Oliver'],
       priorityLocales: ['en-GB', 'en_GB', 'en-UK']
     },
     tags: ['Menace', 'Sarcasm', 'Theatrical', 'Lethal-Weight', 'Heavy-Bass'],
@@ -98,20 +99,20 @@ export const FACTORY_VOICE_PRESETS: VoiceTonalPreset[] = [
     sourceModelId: 'clone-jeremy-irons-canonical',
     sourceModelName: 'Jeremy Irons (Canonical Aristocrat)',
     dspConfig: {
-      pitchMultiplier: 0.93,
-      speechRate: 0.92,
-      chestResonanceDb: 4.5,
-      thoracicWarmthDb: 3.2,
-      articulationBoostDb: 4.2,
-      gravelSaturation: 0.65,
-      antiBoxNotchDb: -2.5,
+      pitchMultiplier: 0.87,
+      speechRate: 0.90,
+      chestResonanceDb: 4.8,
+      thoracicWarmthDb: 2.4,
+      articulationBoostDb: 1.4,
+      gravelSaturation: 0.35,
+      antiBoxNotchDb: -2.4,
       roomAmbience: 0.15
     },
-    systemPromptDirective: 'Say with a tempered, dry British aristocratic baritone cadence, measured conversational calm and understated gravitas in the manner of Jeremy Irons (Alfred Pennyworth):',
+    systemPromptDirective: 'tempered, dry British aristocratic baritone, steady low-E register, measured conversational calm, understated gravitas',
     speechSynthesisConfig: {
-      pitch: 0.90,
-      rate: 0.92,
-      preferredVoiceNames: ['Oliver', 'Daniel', 'en-GB'],
+      pitch: 0.82,
+      rate: 0.88,
+      preferredVoiceNames: ['George', 'Oliver', 'Daniel'],
       priorityLocales: ['en-GB', 'en_GB', 'en-UK']
     },
     tags: ['Subtle', 'Domestic', 'Steward', 'Calm', 'Conversational'],
@@ -132,26 +133,26 @@ export const FACTORY_VOICE_PRESETS: VoiceTonalPreset[] = [
     name: 'Iron-Tactical-Command',
     codeName: 'IRON-TACTICAL-CMD',
     tagline: '13th MEU Steel — Razor Articulation & Rapid Decisiveness',
-    description: 'Snapping consonant articulation (+7.2dB bite), compressed pause durations, and hard-edged delivery forged for high-clock-speed operational execution.',
+    description: 'Clean consonant articulation, compressed pause durations, and hard-edged delivery forged for high-clock-speed operational execution.',
     targetPersona: 'tactical_command',
     tonalIntensity: 1.30,
     sourceModelId: 'clone-jeremy-irons-canonical',
     sourceModelName: 'Jeremy Irons (Canonical Aristocrat)',
     dspConfig: {
-      pitchMultiplier: 0.89,
-      speechRate: 0.96,
-      chestResonanceDb: 7.0,
-      thoracicWarmthDb: 3.8,
-      articulationBoostDb: 7.2,
-      gravelSaturation: 0.88,
-      antiBoxNotchDb: -3.0,
+      pitchMultiplier: 0.86,
+      speechRate: 0.92,
+      chestResonanceDb: 5.5,
+      thoracicWarmthDb: 2.6,
+      articulationBoostDb: 2.0,
+      gravelSaturation: 0.40,
+      antiBoxNotchDb: -2.4,
       roomAmbience: 0.14
     },
-    systemPromptDirective: 'Deliver with tactical military precision, crisp razor-sharp Oxford consonant bite, unyielding authority, and decisive baritone cadence in the manner of Jeremy Irons (Alfred Pennyworth):',
+    systemPromptDirective: 'dry, gravelly British baritone, steady low-E register, tactical precision, crisp Oxford consonant bite, decisive cadence',
     speechSynthesisConfig: {
-      pitch: 0.86,
-      rate: 0.95,
-      preferredVoiceNames: ['Daniel', 'George', 'en-GB'],
+      pitch: 0.80,
+      rate: 0.90,
+      preferredVoiceNames: ['George', 'Daniel'],
       priorityLocales: ['en-GB', 'en_GB', 'en-UK']
     },
     tags: ['Tactical', '13th-MEU', 'Command', 'Crisp', 'Decisive'],
@@ -178,20 +179,20 @@ export const FACTORY_VOICE_PRESETS: VoiceTonalPreset[] = [
     sourceModelId: 'clone-jeremy-irons-canonical',
     sourceModelName: 'Jeremy Irons (Canonical Aristocrat)',
     dspConfig: {
-      pitchMultiplier: 0.90,
-      speechRate: 0.88,
-      chestResonanceDb: 6.5,
-      thoracicWarmthDb: 4.2,
-      articulationBoostDb: 5.5,
-      gravelSaturation: 0.82,
-      antiBoxNotchDb: -3.0,
+      pitchMultiplier: 0.88,
+      speechRate: 0.90,
+      chestResonanceDb: 5.4,
+      thoracicWarmthDb: 2.8,
+      articulationBoostDb: 2.0,
+      gravelSaturation: 0.36,
+      antiBoxNotchDb: -2.4,
       roomAmbience: 0.25
     },
-    systemPromptDirective: 'Deliver with classical Oxford Shakespearian elocution, lengthened open vowels, dry aristocratic irony, and rich resonant theatrical dignity in the manner of Jeremy Irons:',
+    systemPromptDirective: 'classical Oxford British baritone, lengthened open vowels, dry aristocratic irony, resonant dignity',
     speechSynthesisConfig: {
-      pitch: 0.88,
+      pitch: 0.84,
       rate: 0.88,
-      preferredVoiceNames: ['Oliver', 'Arthur', 'Daniel', 'en-GB'],
+      preferredVoiceNames: ['Oliver', 'Arthur', 'Daniel'],
       priorityLocales: ['en-GB', 'en_GB', 'en-UK']
     },
     tags: ['Oxford', 'RP', 'Dignitary', 'Classical', 'Theater'],
@@ -391,7 +392,7 @@ class VoicePresetManagerService {
         antiBoxNotchDb: -3.0,
         roomAmbience: 0.18
       },
-      systemPromptDirective: presetData.systemPromptDirective || 'Say deliberately with an authentic, dry, gravelly British aristocratic baritone accent in the manner of Jeremy Irons (Alfred Pennyworth):',
+      systemPromptDirective: presetData.systemPromptDirective || 'dry, gravelly, aristocratic British baritone, unhurried measured cadence, crisp Oxford bite',
       speechSynthesisConfig: presetData.speechSynthesisConfig || {
         pitch: 0.88,
         rate: 0.90,
@@ -545,6 +546,13 @@ class VoicePresetManagerService {
     samplePhrase?: string
   ): Promise<void> {
     const text = samplePhrase || `Preset ${preset.name} active. Systems nominal with zero logical drift, Principal.`;
+    const dspConfig = {
+      pitchRate: preset.dspConfig.pitchMultiplier,
+      gravelAmount: preset.dspConfig.gravelSaturation,
+      chestResonanceDb: preset.dspConfig.chestResonanceDb,
+      articulationDb: preset.dspConfig.articulationBoostDb,
+      speechRate: preset.dspConfig.speechRate
+    };
 
     try {
       // First try server synthesis
@@ -559,29 +567,23 @@ class VoicePresetManagerService {
         })
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.audioData) {
-          await jeremyIronsVoice.speak(text, {
-            pitchRate: preset.dspConfig.pitchMultiplier,
-            gravelAmount: preset.dspConfig.gravelSaturation,
-            chestResonanceDb: preset.dspConfig.chestResonanceDb,
-            articulationDb: preset.dspConfig.articulationBoostDb,
-            speechRate: preset.dspConfig.speechRate
-          });
-          return;
-        }
+      const data = await res.json().catch(() => null);
+      if (res.status === 429 || data?.quotaExhausted) {
+        markTtsQuotaExhausted(data?.error, data?.retryAfterSeconds);
+      } else if (res.ok && data?.audioData) {
+        const played = await jeremyIronsVoice.playBase64Audio(
+          data.audioData,
+          dspConfig,
+          undefined,
+          undefined,
+          text
+        );
+        if (played) return;
       }
     } catch (_) {}
 
     // Fallback to client synthesis with preset's exact DSP chain
-    await jeremyIronsVoice.speak(text, {
-      pitchRate: preset.dspConfig.pitchMultiplier,
-      gravelAmount: preset.dspConfig.gravelSaturation,
-      chestResonanceDb: preset.dspConfig.chestResonanceDb,
-      articulationDb: preset.dspConfig.articulationBoostDb,
-      speechRate: preset.dspConfig.speechRate
-    });
+    await jeremyIronsVoice.speak(text, dspConfig);
   }
 }
 
