@@ -106,7 +106,8 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
 
   const stopListening = (dispatchFinal: boolean = true) => {
     clearTimers();
-    suppressNextEndDispatchRef.current = !dispatchFinal;
+    // Always suppress duplicate onEnd dispatch once stopListening handles the final transcript
+    suppressNextEndDispatchRef.current = true;
     if (recognizerRef.current) {
       try { recognizerRef.current.stop(); } catch (_) {}
       recognizerRef.current = null;
@@ -168,23 +169,28 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
         recognizerRef.current = null;
         updateListeningState(false);
 
-        const code = String(err || '').toLowerCase();
+        const rawCode = typeof err === 'string' ? err : err?.error || err?.message || '';
+        const code = String(rawCode).toLowerCase();
         if (code === 'not-allowed' || code === 'service-not-allowed') {
           setStatusNote('Microphone permission denied');
           return;
         }
+        if (code === 'audio-capture') {
+          setStatusNote('No active microphone detected');
+          return;
+        }
 
         if (
-          code === 'no-speech' &&
+          (code === 'no-speech' || code === 'network' || code === 'aborted') &&
           conversationModeRef.current &&
           !isMicPausedRef.current &&
           !isThinkingRef.current &&
           !isSpeakingRef.current &&
-          noSpeechRetriesRef.current < 1
+          noSpeechRetriesRef.current < 5
         ) {
           noSpeechRetriesRef.current += 1;
           suppressNextEndDispatchRef.current = true;
-          setStatusNote('Listening for your voice…');
+          setStatusNote(code === 'network' ? 'Reconnecting voice recognition…' : 'Listening for your voice…');
           retryTimerRef.current = setTimeout(() => {
             if (
               conversationModeRef.current &&
@@ -194,7 +200,7 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
             ) {
               beginRecognitionSession();
             }
-          }, 350);
+          }, code === 'network' ? 900 : 420);
           return;
         }
 
@@ -252,11 +258,18 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
     if (externalTriggerCount > prevTriggerRef.current) {
       prevTriggerRef.current = externalTriggerCount;
       noSpeechRetriesRef.current = 0;
+      const attemptArm = () => {
+        if (!isListeningRef.current && !isThinkingRef.current && !isSpeakingRef.current && !isMicPausedRef.current && hasSupport) {
+          beginRecognitionSession();
+        }
+      };
       if (!isListeningRef.current && !isThinkingRef.current && !isSpeakingRef.current && !isMicPausedRef.current && hasSupport) {
-        beginRecognitionSession();
+        attemptArm();
+      } else if (conversationModeRef.current && !isMicPaused && !isThinking && !isSpeaking && hasSupport) {
+        retryTimerRef.current = setTimeout(attemptArm, 120);
       }
     }
-  }, [externalTriggerCount, hasSupport]);
+  }, [externalTriggerCount, hasSupport, isSpeaking, isThinking, isMicPaused]);
 
   // Ensure mic is never open while ZereØ is speaking or while mic is explicitly paused
   useEffect(() => {

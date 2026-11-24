@@ -1,9 +1,9 @@
 {
   "status": "RUNNING",
-  "uptimeSeconds": 690,
-  "tickCount": 69,
-  "lastTickAt": 1795101338804,
-  "lastSweepAt": 1795101318804,
+  "uptimeSeconds": 1620,
+  "tickCount": 162,
+  "lastTickAt": 1795525107650,
+  "lastSweepAt": 1795525087647,
   "tasksCompleted": 1,
   "tasksFailed": 0,
   "capabilities": {

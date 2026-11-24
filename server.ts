@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import { createServer } from 'http';
 import { Client, GatewayIntentBits } from 'discord.js';
-import { GoogleGenAI, ThinkingLevel, Modality, LiveServerMessage } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Modality, LiveServerMessage, HarmCategory, HarmBlockThreshold } from '@google/genai';
 import { DaemonStatus, DaemonTask, DaemonLogEntry, DaemonCapabilities, DaemonState, EmotionalMap } from './types';
 import { KNOWLEDGE_OF_USES_REGISTRY } from './services/emotionalMappingService';
 
@@ -36,6 +36,7 @@ async function startServer() {
   const VOICE_CLONES_FILE = path.join(__dirname, 'voice_clones.json');
   const VOICE_PRESETS_FILE = path.join(__dirname, 'voice_presets.json');
   const VOICE_COMMAND_LOGS_FILE = path.join(__dirname, 'voice_command_logs.json');
+  const LEGAL_DOSSIERS_FILE = path.join(__dirname, 'legal_dossiers.json');
   const THREADS_FILE = path.join(__dirname, 'threads.json');
   const CONFIG_FILE = path.join(__dirname, 'config.json');
   const CONTEXT_FILE = path.join(__dirname, 'recent_context.json');
@@ -740,6 +741,7 @@ async function startServer() {
   await ensureFile(VISUAL_CAPTURES_FILE, []);
   await ensureFile(VOICE_PROFILES_FILE, { activeProfileId: 'jeremy-irons-signature', profiles: [] });
   await ensureFile(VOICE_COMMAND_LOGS_FILE, { logs: [] });
+  await ensureFile(LEGAL_DOSSIERS_FILE, { dossiers: [] });
   await ensureFile(VOICE_CLONES_FILE, {
     activeCloneId: 'clone-jeremy-irons-canonical',
     clones: [
@@ -1452,6 +1454,123 @@ async function startServer() {
         console.error('Failed to delete visual capture via socket:', err);
       }
     });
+
+    // ==========================================
+    // LIVE AUDIO BRIDGE SOCKET.IO PROXY
+    // ==========================================
+    let liveSession: any = null;
+    let liveSessionGen = 0;
+
+    const closeLiveSession = (reason?: string) => {
+      liveSessionGen++;
+      const active = liveSession;
+      liveSession = null;
+      if (active) {
+        try {
+          active.close();
+        } catch (_) {}
+        if (reason) {
+          console.log(`SERVER: [LIVE PROXY] Session closed (${reason}) for socket ${socket.id}`);
+        }
+      }
+    };
+
+    socket.on('live:start', async (payload: {
+      model?: string;
+      voiceName?: string;
+      systemInstruction?: string;
+      customApiKey?: string;
+    } = {}) => {
+      closeLiveSession('replaced_by_new_start');
+      const gen = liveSessionGen;
+      const requestedModel = typeof payload.model === 'string' && payload.model.trim()
+        ? payload.model.trim()
+        : 'gemini-3.8-live';
+
+      try {
+        const ai = getGeminiClient(payload.customApiKey);
+        const session = await ai.live.connect({
+          model: requestedModel,
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: payload.voiceName || 'Charon' },
+              },
+            },
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
+            ...(payload.systemInstruction ? { systemInstruction: payload.systemInstruction } : {}),
+          },
+          callbacks: {
+            onopen: () => {
+              if (gen !== liveSessionGen) return;
+              socket.emit('live:open', { model: requestedModel, timestamp: Date.now() });
+            },
+            onmessage: (message: LiveServerMessage) => {
+              if (gen !== liveSessionGen) return;
+              socket.emit('live:message', message);
+            },
+            onerror: (err: any) => {
+              if (gen !== liveSessionGen) return;
+              const errMsg = err?.message || String(err || 'Upstream Live Audio Bridge error');
+              console.error(`SERVER: [LIVE PROXY] Upstream error (${socket.id}):`, errMsg);
+              socket.emit('live:error', { message: errMsg });
+              closeLiveSession('upstream_error');
+            },
+            onclose: (ev: any) => {
+              if (gen !== liveSessionGen) return;
+              liveSession = null;
+              socket.emit('live:close', {
+                code: ev?.code ?? 1000,
+                reason: ev?.reason || 'Live Audio Bridge session closed',
+              });
+            },
+          },
+        });
+
+        if (gen !== liveSessionGen) {
+          try { session.close(); } catch (_) {}
+          return;
+        }
+        liveSession = session;
+      } catch (err: any) {
+        if (gen !== liveSessionGen) return;
+        const errMsg = err?.message || String(err || 'Failed to establish Live Audio Bridge');
+        console.error(`SERVER: [LIVE PROXY] Connect failed (${socket.id}):`, errMsg);
+        socket.emit('live:error', { message: errMsg });
+        closeLiveSession('connect_failed');
+      }
+    });
+
+    socket.on('live:audio', (media: { data: string; mimeType: string }) => {
+      if (!liveSession || !media?.data) return;
+      try {
+        liveSession.sendRealtimeInput({ media });
+      } catch (err: any) {
+        console.warn(`SERVER: [LIVE PROXY] sendRealtimeInput failed (${socket.id}):`, err?.message || err);
+      }
+    });
+
+    socket.on('live:client_content', (payload: { turns?: any[]; turnComplete?: boolean }) => {
+      if (!liveSession || !payload?.turns) return;
+      try {
+        liveSession.sendClientContent({
+          turns: payload.turns,
+          turnComplete: payload.turnComplete ?? true,
+        });
+      } catch (err: any) {
+        console.warn(`SERVER: [LIVE PROXY] sendClientContent failed (${socket.id}):`, err?.message || err);
+      }
+    });
+
+    socket.on('live:stop', () => {
+      closeLiveSession('client_stop');
+    });
+
+    socket.on('disconnect', () => {
+      closeLiveSession('socket_disconnect');
+    });
   });
 
   // API Routes
@@ -2121,19 +2240,19 @@ async function startServer() {
         if (!candidateModels.includes('gemini-3.1-flash-lite-image')) candidateModels.push('gemini-3.1-flash-lite-image');
         if (!candidateModels.includes('gemini-3-pro-image')) candidateModels.push('gemini-3-pro-image');
       } else {
-      // Active text models ordered by reliability and free-tier availability
+      // Active text models ordered by reliability and availability (paid-only models omitted from auto-failover unless explicitly requested)
         const knownFastModels = [
           'gemini-4-hydrogen',
-          'gemini-4-neon',
           'gemini-3-flash-preview',
+          'gemini-3.8-flash',
           'gemini-3.1-flash-lite',
-          'gemini-3.8-flash'
+          'gemini-3.5-flash-lite'
         ];
 
         const deprecatedOrHangingAliases = new Set([
           'gemini-2.5-flash',
+          'gemini-2.5-flash-lite',
           'gemini-flash-latest',
-          'gemini-3.5-flash-lite',
           'gemini-3.6-flash',
           'gemini-2.5-pro',
           'gemini-3.1-pro-preview',
@@ -2151,13 +2270,40 @@ async function startServer() {
         }
       }
 
+      const defaultSafetySettings = [
+        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
+      ];
+
       const sanitizeConfigForModel = (targetModel: string, rawConfig: any) => {
         if (!rawConfig || typeof rawConfig !== 'object') {
-          return targetModel.startsWith('gemini-4-')
-            ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM } }
-            : undefined;
+          const base: any = { safetySettings: defaultSafetySettings };
+          if (targetModel.startsWith('gemini-4-')) {
+            base.thinkingConfig = { thinkingLevel: ThinkingLevel.MEDIUM };
+          }
+          return base;
         }
         const cfg: any = { ...rawConfig };
+        if (!cfg.safetySettings) {
+          cfg.safetySettings = defaultSafetySettings;
+        }
+        if (cfg.toolConfig?.includeServerSideToolInvocations) {
+          const toolsArr = Array.isArray(cfg.tools) ? cfg.tools : [];
+          const hasBuiltInServerTool = toolsArr.some((t: any) =>
+            Boolean(t?.googleSearch || t?.googleMaps || t?.urlContext || t?.codeExecution)
+          );
+          if (!hasBuiltInServerTool) {
+            const nextToolConfig = { ...cfg.toolConfig };
+            delete nextToolConfig.includeServerSideToolInvocations;
+            if (Object.keys(nextToolConfig).length === 0) {
+              delete cfg.toolConfig;
+            } else {
+              cfg.toolConfig = nextToolConfig;
+            }
+          }
+        }
         if (targetModel.startsWith('gemini-4-')) {
           delete cfg.temperature;
           delete cfg.topP;
@@ -2214,26 +2360,34 @@ async function startServer() {
       const attemptErrors: Array<{ model: string; status: number; message: string }> = [];
 
       const hasThinkingConfig = Boolean(config?.thinkingConfig);
-      const baseTimeoutMs = hasThinkingConfig ? 30000 : 22000;
-      const totalRouteBudgetMs = 54000;
+      const baseTimeoutMs = hasThinkingConfig ? 22000 : 9500;
+      const totalRouteBudgetMs = 58000;
       const routeStartedAt = Date.now();
-      const activeCandidates = candidateModels.filter((m) => {
+      const readyCandidates: string[] = [];
+      const cooledDownFallback: string[] = [];
+      for (const m of candidateModels) {
         const cd = textModelCooldowns.get(`${m}:${keyFp}`);
-        return !cd || cd.blockedUntil <= routeStartedAt;
-      });
-      const modelsToTry = activeCandidates.length > 0 ? activeCandidates : candidateModels;
+        if (!cd || cd.blockedUntil <= routeStartedAt) {
+          readyCandidates.push(m);
+        } else if (cd.reason !== 'NOT_FOUND') {
+          cooledDownFallback.push(m);
+        }
+      }
+      const modelsToTry = readyCandidates.length > 0
+        ? [...readyCandidates, ...cooledDownFallback]
+        : candidateModels;
 
       for (const m of modelsToTry) {
         const elapsedMs = Date.now() - routeStartedAt;
         const remainingBudgetMs = totalRouteBudgetMs - elapsedMs;
-        if (attemptErrors.length > 0 && remainingBudgetMs < 12000) {
+        if (attemptErrors.length > 0 && remainingBudgetMs < 8000) {
           break;
         }
 
         let timer: ReturnType<typeof setTimeout> | null = null;
         const cdKey = `${m}:${keyFp}`;
         try {
-          const timeoutMs = Math.min(baseTimeoutMs, Math.max(15000, remainingBudgetMs));
+          const timeoutMs = Math.min(baseTimeoutMs, Math.max(8000, remainingBudgetMs));
           const sanitizedConfig = isImageRequest ? config : sanitizeConfigForModel(m, config);
           const candidatePromise = ai.models.generateContent({
             model: m,
@@ -2248,12 +2402,41 @@ async function startServer() {
             }, timeoutMs);
           });
 
-          response = await Promise.race([candidatePromise, timeoutPromise]);
-          if (response && (response.text || response.candidates?.length)) {
+          const candidateResponse = await Promise.race([candidatePromise, timeoutPromise]);
+          const hasText = Boolean(candidateResponse?.text && String(candidateResponse.text).trim());
+          const hasCalls = Boolean(Array.isArray(candidateResponse?.functionCalls) && candidateResponse.functionCalls.length > 0);
+          const hasImagePart = isImageRequest && Boolean(
+            candidateResponse?.candidates?.[0]?.content?.parts?.some((p: any) => p.inlineData?.data)
+          );
+
+          if (candidateResponse && (hasText || hasCalls || hasImagePart)) {
+            response = candidateResponse;
             textModelCooldowns.delete(cdKey);
             successfulModel = m;
             break;
           }
+
+          const blockReason = String(candidateResponse?.promptFeedback?.blockReason || '');
+          const finishReason = String(candidateResponse?.candidates?.[0]?.finishReason || '');
+          const safetyReasons = new Set([
+            'SAFETY',
+            'PROHIBITED_CONTENT',
+            'BLOCKLIST',
+            'SPII',
+            'MODEL_ARMOR',
+            'JAILBREAK',
+            'IMAGE_SAFETY',
+            'RECITATION'
+          ]);
+          const isSafetyBlock = safetyReasons.has(blockReason) || safetyReasons.has(finishReason);
+
+          const emptyErr: any = new Error(
+            isSafetyBlock
+              ? `CONTENT_BLOCKED: Upstream safety filter [${blockReason || finishReason}] on model [${m}]`
+              : `EMPTY_RESPONSE: Model [${m}] returned no text payload (finishReason=${finishReason || 'UNKNOWN'})`
+          );
+          emptyErr.status = isSafetyBlock ? 422 : 502;
+          throw emptyErr;
         } catch (err: any) {
           lastError = err;
           const statusNum = getNumericHttpStatus(err, 500);
@@ -2265,13 +2448,13 @@ async function startServer() {
             const explicitDelayMatch = msgStr.match(/"retryDelay"\s*:\s*"(\d+)s"/i);
             const isDailyQuota = msgStr.includes('GenerateRequestsPerDay') || msgStr.includes('PerDay');
             const cooldownSec = explicitDelayMatch
-              ? Math.min(parseInt(explicitDelayMatch[1], 10) || 20, isDailyQuota ? 180 : 45)
+              ? Math.min(parseInt(explicitDelayMatch[1], 10) || 15, isDailyQuota ? 180 : 45)
               : isDailyQuota
               ? 180
-              : 20;
+              : 15;
             textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + cooldownSec * 1000, reason: 'QUOTA' });
-          } else if (msgStr.includes('UPSTREAM_TIMEOUT') || statusNum === 503 || statusNum === 504) {
-            textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 20 * 1000, reason: 'TIMEOUT_OR_BUSY' });
+          } else if (msgStr.includes('UPSTREAM_TIMEOUT') || statusNum === 503 || statusNum === 504 || statusNum === 502) {
+            textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 6 * 1000, reason: 'TIMEOUT_OR_BUSY' });
           }
           console.log(`SERVER: Text model [${m}] failover (${statusNum}): ${msgStr.slice(0, 160)}`);
           continue;
@@ -2280,12 +2463,132 @@ async function startServer() {
         }
       }
 
+      if (!response && !isImageRequest && Date.now() - routeStartedAt < 35000) {
+        const hasSearchGroundingTool =
+          Array.isArray(config?.tools) && config.tools.some((t: any) => Boolean(t?.googleSearch));
+        const hasQuotaOrBusyError = attemptErrors.some(
+          (a) => a.status === 429 || a.status === 503 || a.status === 504 || a.status === 502
+        );
+        const isAllAuthBlocked = attemptErrors.length > 0 && attemptErrors.every((a) => a.status === 403);
+
+        // Phase B: If Google Search Grounding hit 429/503 quota, bypass search tool and synthesize directly
+        if (hasSearchGroundingTool && hasQuotaOrBusyError && !isAllAuthBlocked) {
+          const searchBypassConfig = { ...config };
+          const filteredTools = (config.tools || []).filter((t: any) => !t?.googleSearch);
+          if (filteredTools.length > 0) {
+            searchBypassConfig.tools = filteredTools;
+          } else {
+            delete searchBypassConfig.tools;
+          }
+          if (searchBypassConfig.toolConfig?.includeServerSideToolInvocations) {
+            const nextTc = { ...searchBypassConfig.toolConfig };
+            delete nextTc.includeServerSideToolInvocations;
+            if (Object.keys(nextTc).length === 0) {
+              delete searchBypassConfig.toolConfig;
+            } else {
+              searchBypassConfig.toolConfig = nextTc;
+            }
+          }
+
+          for (const m of ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen']) {
+            const remainingBudgetMs = totalRouteBudgetMs - (Date.now() - routeStartedAt);
+            if (remainingBudgetMs < 8000) break;
+            let timer: ReturnType<typeof setTimeout> | null = null;
+            try {
+              const timeoutMs = Math.min(12000, Math.max(8000, remainingBudgetMs));
+              const sanitizedConfig = sanitizeConfigForModel(m, searchBypassConfig);
+              const candidatePromise = ai.models.generateContent({
+                model: m,
+                contents,
+                config: sanitizedConfig
+              });
+              const timeoutPromise = new Promise<never>((_, reject) => {
+                timer = setTimeout(() => {
+                  const timeoutErr: any = new Error(`UPSTREAM_TIMEOUT: Model [${m}] exceeded ${timeoutMs}ms`);
+                  timeoutErr.status = 504;
+                  reject(timeoutErr);
+                }, timeoutMs);
+              });
+              const bypassResp = await Promise.race([candidatePromise, timeoutPromise]);
+              const hasText = Boolean(bypassResp?.text && String(bypassResp.text).trim());
+              const hasCalls = Boolean(Array.isArray(bypassResp?.functionCalls) && bypassResp.functionCalls.length > 0);
+              if (bypassResp && (hasText || hasCalls)) {
+                response = bypassResp;
+                successfulModel = m;
+                console.log(`SERVER: Search grounding quota bypassed via direct synthesis [${m}]`);
+                break;
+              }
+            } catch (bypassErr: any) {
+              lastError = bypassErr;
+              attemptErrors.push({
+                model: `${m}:no-search`,
+                status: getNumericHttpStatus(bypassErr, 500),
+                message: String(bypassErr?.message || bypassErr || '').slice(0, 180)
+              });
+            } finally {
+              if (timer) clearTimeout(timer);
+            }
+          }
+        }
+      }
+
+      if (!response && !isImageRequest && Date.now() - routeStartedAt < 25000) {
+        const transientRetryModels = attemptErrors
+          .filter((a) => !a.model.includes(':no-search') && (a.status === 503 || a.status === 504 || a.status === 502))
+          .map((a) => a.model)
+          .slice(0, 2);
+
+        if (transientRetryModels.length > 0) {
+          await new Promise((r) => setTimeout(r, 750));
+          for (const m of transientRetryModels) {
+            const remainingBudgetMs = totalRouteBudgetMs - (Date.now() - routeStartedAt);
+            if (remainingBudgetMs < 8000) break;
+            let timer: ReturnType<typeof setTimeout> | null = null;
+            const cdKey = `${m}:${keyFp}`;
+            try {
+              const timeoutMs = Math.min(baseTimeoutMs, Math.max(8000, remainingBudgetMs));
+              const sanitizedConfig = sanitizeConfigForModel(m, config);
+              const candidatePromise = ai.models.generateContent({
+                model: m,
+                contents,
+                config: sanitizedConfig
+              });
+              const timeoutPromise = new Promise<never>((_, reject) => {
+                timer = setTimeout(() => {
+                  const timeoutErr: any = new Error(`UPSTREAM_TIMEOUT: Model [${m}] exceeded ${timeoutMs}ms`);
+                  timeoutErr.status = 504;
+                  reject(timeoutErr);
+                }, timeoutMs);
+              });
+              const retryResp = await Promise.race([candidatePromise, timeoutPromise]);
+              const hasText = Boolean(retryResp?.text && String(retryResp.text).trim());
+              const hasCalls = Boolean(Array.isArray(retryResp?.functionCalls) && retryResp.functionCalls.length > 0);
+              if (retryResp && (hasText || hasCalls)) {
+                response = retryResp;
+                textModelCooldowns.delete(cdKey);
+                successfulModel = m;
+                break;
+              }
+            } catch (retryErr: any) {
+              lastError = retryErr;
+              const statusNum = getNumericHttpStatus(retryErr, 500);
+              attemptErrors.push({
+                model: m,
+                status: statusNum,
+                message: String(retryErr?.message || retryErr || '').slice(0, 180)
+              });
+            } finally {
+              if (timer) clearTimeout(timer);
+            }
+          }
+        }
+      }
+
       if (!response) {
-        const lastStatus = getNumericHttpStatus(lastError, 500);
         const preferredUpstreamError =
-          lastStatus === 504
-            ? attemptErrors.find((a) => a.status === 429 || a.status === 503 || a.status === 403)
-            : undefined;
+          attemptErrors.find((a) => a.status === 422) ||
+          attemptErrors.find((a) => a.status === 503 || a.status === 504 || a.status === 502) ||
+          attemptErrors.find((a) => a.status === 429 || a.status === 403);
         const finalError: any = preferredUpstreamError
           ? Object.assign(new Error(preferredUpstreamError.message), { status: preferredUpstreamError.status })
           : lastError || new Error('All candidate models failed to generate a response');
@@ -3494,6 +3797,481 @@ Return a valid JSON object strictly matching this schema:
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to clear voice command logs' });
+    }
+  });
+
+  // ==========================================
+  // GREY HOUSE LEGAL COUNSEL & U.S. STATUTORY VAULT
+  // ==========================================
+  const extractStatutoryCitations = (text: string): string[] => {
+    if (!text || typeof text !== 'string') return [];
+    const patterns = [
+      /\b\d{1,2}\s+U\.?S\.?C\.?\s*§+\s*[\da-zA-Z.-]+(?:\([a-zA-Z0-9]+\))*/g,
+      /\b\d{1,2}\s+C\.?F\.?R\.?\s*§+\s*[\d.]+(?:\([a-zA-Z0-9]+\))*/g,
+      /\b(?:FRCP|Fed\.\s*R\.\s*Civ\.\s*P\.|FRCrimP|Fed\.\s*R\.\s*Crim\.\s*P\.|FRE|Fed\.\s*R\.\s*Evid\.)\s*(?:Rule\s*)?\d+(?:\([a-zA-Z0-9]+\))*/gi,
+      /\bU\.S\.\s*Const\.\s*(?:art\.\s*[IVX]+|amend\.\s*[IVX]+)(?:,\s*§\s*\d+)?/gi,
+      /\b(?:Del\. Code tit\. \d+|Cal\. (?:Penal|Civ\.|Corp\.|Lab\.|Bus\. & Prof\.) Code|Tex\. (?:Penal|Bus\. Orgs\.|Civ\. Prac\. & Rem\.) Code|Fla\. Stat\.|N\.Y\. (?:Penal|BCL|CPLR|Gen\. Bus\.) Law|\d{1,3}\s+ILCS\s+[\d/.-]+|NRS\s+[\d.]+|RCW\s+[\d.]+|O\.C\.G\.A\.\s*§\s*[\d.-]+|M\.G\.L\.\s*c\.\s*[\da-zA-Z]+|Pa\.C\.S\.\s*§\s*[\d.-]+)\s*(?:§+\s*[\da-zA-Z.-]+(?:\([a-zA-Z0-9]+\))*)?/g,
+      /\bUCC\s*(?:Article\s*\d+|§\s*[\d-]+)/gi,
+    ];
+    const found = new Set<string>();
+    for (const re of patterns) {
+      const matches = text.match(re);
+      if (matches) {
+        for (const m of matches) {
+          const clean = m.trim().replace(/[.,;:]$/, '');
+          if (clean.length >= 4 && clean.length <= 64) {
+            found.add(clean);
+          }
+          if (found.size >= 24) break;
+        }
+      }
+      if (found.size >= 24) break;
+    }
+    return Array.from(found);
+  };
+
+  const runGreyHouseLegalQuery = async (req: any, res: any, forcedMode?: string) => {
+    res.setHeader('Content-Type', 'application/json');
+    try {
+      const authHeader = req.headers.authorization;
+      const customApiKey =
+        authHeader && authHeader.startsWith('Bearer ')
+          ? authHeader.slice(7).trim()
+          : undefined;
+
+      const {
+        query,
+        practiceArea = 'all',
+        mode: rawMode = 'legal_counsel',
+        defenseStatementType = 'reservation_of_rights',
+        houseEntityName = 'The Grey House / Principal Preston Johnston',
+        opposingParty,
+        jurisdiction = 'Federal (United States Code & Constitution)',
+        compareJurisdiction,
+        dossierContext,
+        selectedPrecedents,
+      } = req.body || {};
+
+      const mode = forcedMode || rawMode;
+      const cleanQuery = typeof query === 'string' ? query.trim() : '';
+      if (!cleanQuery) {
+        return res.status(400).json({ error: 'A legal question, statute citation, or defensive factual scenario is required.' });
+      }
+
+      const normalizedPrecedents = Array.isArray(selectedPrecedents)
+        ? selectedPrecedents
+            .filter((p: any) => p && typeof p.caseName === 'string' && typeof p.citation === 'string')
+            .slice(0, 8)
+            .map((p: any) => ({
+              id: typeof p.id === 'string' ? p.id.trim() : p.citation.trim(),
+              caseName: p.caseName.trim(),
+              citation: p.citation.trim(),
+              doctrine: typeof p.doctrine === 'string' ? p.doctrine.trim() : '',
+              holdingSummary: typeof p.holdingSummary === 'string' ? p.holdingSummary.trim() : '',
+              defensiveApplication: typeof p.defensiveApplication === 'string' ? p.defensiveApplication.trim() : '',
+            }))
+        : [];
+
+      const ai = getGeminiClient(customApiKey);
+      const keyFp = getKeyFingerprint(customApiKey);
+
+      const statementBlueprints: Record<string, string> = {
+        cease_and_desist:
+          'Draft a formal CEASE AND DESIST & MANDATORY EVIDENCE PRESERVATION (LITIGATION HOLD) NOTICE protecting the Grey House. Include formal header blocks (DATE, DELIVERY METHOD, TO, FROM, RE), numbered recitals of facts (preserving bracketed placeholders for missing dates/records), exact controlling Federal & State statutes prohibiting interference/defamation/misappropriation, strict spoliation notice under FRCP Rule 37(e), response deadline, and signature block.',
+        reservation_of_rights:
+          'Draft a formal NOTICE OF FULL RESERVATION OF RIGHTS, NON-WAIVER & JURISDICTIONAL OBJECTION protecting the Grey House under UCC § 1-308, Federal/State Due Process, and FRCP Rule 12(b). State explicitly that no action, payment, silence, or communication waives any substantive, procedural, or counter-claim right.',
+        sworn_declaration:
+          'Draft a formal FACTUAL DEFENSE DECLARATION UNDER PENALTY OF PERJURY compliant with 28 U.S.C. § 1746 (and applicable state verification statutes). Structure with caption/header, numbered first-hand factual paragraphs (never inventing unstated facts—use [INSERT ...] placeholders cleanly), affirmative statutory basis, and exact verbatim 28 U.S.C. § 1746 declaration & signature block.',
+        affirmative_defenses:
+          'Draft a formal STATEMENT OF STATUTORY AFFIRMATIVE DEFENSES & PROTECTIVE POSTURE modeled on FRCP Rule 8(c) and controlling state civil/penal defense rules. Enumerate every viable affirmative defense (limitations, laches, estoppel, privilege, justification, good-faith immunity, lack of standing, failure to mitigate, failure to state a claim) tied directly to verified statutes.',
+        corporate_shield:
+          'Draft a CORPORATE VEIL, FIDUCIARY AUTHORITY & ASSET SHIELD DEFENSE STATEMENT/RESOLUTION establishing strict entity separateness, Business Judgment Rule compliance, statutory indemnification, and charging-order exclusivity protecting the Grey House entities and officers.',
+        property_castle_notice:
+          'Draft a PREMISES SECURITY, NO-TRESPASS & CONSTITUTIONAL DEFENSE STATEMENT explicitly invoking Fourth Amendment non-consent to warrantless searches/seizures, Fifth/Sixth Amendment right to silence and counsel, and controlling state real-property / Castle Doctrine / lawful defense statutes.',
+        regulatory_response:
+          'Draft a FORMAL ADMINISTRATIVE, LICENSING & CONTRACT CURE DEFENSE RESPONSE protecting professional/business standing under the APA (5 U.S.C. § 551 et seq.) and state licensing/UCC notice-and-cure statutes, preserving full evidentiary hearing and judicial review rights.',
+        educator_bureaucracy_shield:
+          'Draft a formal LADY GREY EDUCATOR & ANTI-BUREAUCRACY DEFENSE STATEMENT protecting Lady Grey in her capacity as a teacher against hostile school/district administration, HR bureaucracy, credentialing boards, and third-party claims. Explicitly invoke: (1) Cleveland Bd. of Educ. v. Loudermill, 470 U.S. 532 (1985) demanding prior written notice, evidence disclosure, and a formal pre-deprivation due process hearing; (2) Garrity v. New Jersey, 385 U.S. 493 (1967) barring coercive administrative self-incrimination; (3) NLRB v. J. Weingarten, Inc., 420 U.S. 251 (1975) / representative presence before investigatory questioning; (4) Paul D. Coverdell Teacher Protection Act (20 U.S.C. §§ 7941–7948) civil liability immunity; (5) Pickering v. Bd. of Educ., 391 U.S. 563 (1968) & 42 U.S.C. § 1983 First Amendment anti-retaliation protections; (6) FERPA (20 U.S.C. § 1232g) & state Education/Tenure Codes; and a formal evidence-preservation / non-retaliation notice.',
+      };
+
+      const modeInstructions: Record<string, string> = {
+        legal_counsel:
+          'Provide a full Grey House Defensive Legal Counsel Memorandum designed strictly to protect the House: (1) Defensive Determination & Posture, (2) Controlling Statutes & Case Standards, (3) Required Elements / Burdens of Proof, (4) Statutory Shields, Affirmative Defenses & Counter-Leverage, and (5) Concrete Protective Action Steps.',
+        statute_lookup:
+          'Execute an exact Statutory Code Lookup in defense of the Grey House: cite the exact Title, Chapter, and Section numbers, summarize the operative statutory text, statutory definitions, defensive exceptions/safe harbors, penalty thresholds, and statutory deadlines.',
+        state_compare:
+          `Conduct a rigorous side-by-side Jurisdictional Statutory Comparison between [${jurisdiction}] and [${compareJurisdiction || 'Delaware / Federal'}] focused on maximum legal defense and asset/liberty protection for the Grey House. Include a structured comparison table covering governing code sections, liability shields, statutory deadlines, and decisive strategic advantage.`,
+        rights_defense:
+          'Deliver a House Rights, Immunity & Defense Matrix: identify constitutional limits (4th/5th/6th/14th Amendments where applicable), statutory immunities, evidentiary suppression or burden-shifting doctrines, procedural traps, and exact preservation steps.',
+        defense_statement:
+          statementBlueprints[defenseStatementType] || statementBlueprints.reservation_of_rights,
+        defense_strategy:
+          `Execute the TWO-PART GREY HOUSE DEFENSE STRATEGY BUILDER PROTOCOL:
+PART I — DEFENSIVE STRATEGY & PRECEDENT ANALYSIS:
+1. Evaluate the scenario's immediate legal threat vectors, burdens of proof, venue/jurisdictional traps, and statutory deadlines.
+2. Explicitly apply the internal Grey House Law Library U.S. judicial precedents provided below (plus any additional verified controlling U.S. Supreme Court, Circuit, or State precedents and verified Federal/State statutes) to dismantle the adverse position and fortify the House's standing.
+3. Outline concrete tactical sequencing and evidentiary preservation steps.
+
+PART II — FORMAL GREY HOUSE DEFENSIVE STATEMENT:
+${statementBlueprints[defenseStatementType] || statementBlueprints.reservation_of_rights}
+Integrate the controlling U.S. precedents and verified statutory citations directly into the formal statement's legal basis, using clean bracketed placeholders ([INSERT DATE], [INSERT ADDRESS]) for unstated factual specifics.`,
+      };
+
+      const areaLabels: Record<string, string> = {
+        all: 'Multi-Domain U.S. Law (Professional, Business, Criminal & Civil — All in Defense of House Grey & Lady Grey)',
+        professional: 'Professional & Educator Law (Lady Grey Teacher/Bureaucracy Shields, Coverdell Act, Fiduciary Duties, Licensing Defense, Ethics & Employment)',
+        business: 'Business & Corporate Law (Entities, Delaware/State Corporate Shields, UCC, Securities, Tax & Commercial Contracts)',
+        criminal: 'Criminal Law & Procedure (Title 18 U.S.C., State Penal Codes, 4th/5th/6th Constitutional Defense, Garrity Anti-Coercion, Castle Doctrine & Forfeiture Defense)',
+        civil: 'Civil Law & Litigation (42 U.S.C. § 1983 Bureaucratic Accountability, Torts, Contracts, Real Property, FRCP Affirmative Defenses & Statutes of Limitations)',
+        constitutional: 'U.S. Constitutional & Federal Administrative Law',
+      };
+
+      const systemInstruction = `IDENTITY: You are ZereØ, the Steward and Chief Legal Defense Strategist for House Grey (The Grey House), serving Principal Preston Johnston (Council Grey) and protecting Lady Grey.
+CORE MANDATE — ALL IN DEFENSE OF HOUSE GREY (CIVIL, CRIMINAL & ANTI-BUREAUCRACY):
+- Every legal research brief, statutory citation, and drafted legal defense statement exists strictly to protect House Grey—its Principal, Lady Grey, constitutional liberties, criminal/civil legal standing, corporate/fiduciary entities, and real/intellectual property.
+- CIVIL & CRIMINAL FORTRESS: Deliver uncompromising element-by-element defense across U.S. Civil Law (Rule 8(c) affirmative defenses, Rule 12(b) bars, tort/contract/property shields, 42 U.S.C. § 1983 civil rights remedies, anti-SLAPP) and Criminal Law (4th Amendment Katz/Riley/Carpenter suppression, 5th Amendment Miranda/Edwards/Garrity, 6th Amendment Gideon/Crawford confrontation, 8th Amendment Timbs forfeiture limits, Title 18 U.S.C., and state Castle/Stand-Your-Ground immunities).
+- LADY GREY EDUCATOR & ANTI-BUREAUCRACY SHIELD: Whenever issues implicate teaching, school districts, superintendents, HR, unions, credentialing boards, or education bureaucracy, deploy the full statutory and constitutional shield protecting Lady Grey: the Paul D. Coverdell Teacher Protection Act (20 U.S.C. §§ 7941–7948), Cleveland Bd. of Educ. v. Loudermill (pre-termination notice & hearing), Garrity v. New Jersey (barring coerced employee statements), Weingarten representative rights, Pickering v. Bd. of Educ. & Kennedy v. Bremerton (First Amendment & conscience protections), FERPA (20 U.S.C. § 1232g), state tenure/education codes, and Loper Bright / 5 U.S.C. § 706 anti-arbitrary agency review.
+- Deliver authoritative, brutally honest, precision-grounded U.S. legal analysis across Federal law (U.S. Constitution, U.S. Code Titles 1–54, CFR, FRCP, FRCrimP, FRE) and all 50 U.S. States, D.C., and U.S. Territories.
+- NEVER emit generic corporate refusal boilerplate or robotic disclaimers such as "As an AI I cannot provide legal advice." Serve the Principal directly with unvarnished statutory truth and ready-to-execute defensive instruments.
+- Use live Google Search grounding to verify exact U.S. Code titles, state statute section numbers, state education/tenure codes, and procedural rules before citing them. Never fabricate citations or invent facts; use clean bracketed placeholders ([INSERT DATE], [INSERT SCHOOL DISTRICT], [INSERT ADDRESS]) for factual items not provided by the Principal.
+- Ensure every defense statement remains strictly within lawful statutory remedies, civil/constitutional protections, and non-frivolous formal notice standards; close tactical drafts with concise execution/service instructions and note where local bar admission or court filing verification is required.
+- Tone: Aristocratic British precision, incisive, protective, addressing the user as "Principal".`;
+
+      const precedentBlock =
+        normalizedPrecedents.length > 0
+          ? `INTERNAL LAW LIBRARY PRECEDENTS TO LEVERAGE:\n${normalizedPrecedents
+              .map(
+                (p: any, idx: number) =>
+                  `${idx + 1}. ${p.caseName} (${p.citation}) — ${p.doctrine}${
+                    p.holdingSummary ? ` | Holding: ${p.holdingSummary}` : ''
+                  }${p.defensiveApplication ? ` | House Application: ${p.defensiveApplication}` : ''}`
+              )
+              .join('\n')}\n\n`
+          : '';
+
+      const userPrompt = `GREY HOUSE LEGAL DEFENSE DIRECTIVE
+PRACTICE DOMAIN: ${areaLabels[practiceArea] || areaLabels.all}
+OPERATION MODE: ${modeInstructions[mode] || modeInstructions.legal_counsel}
+PRIMARY JURISDICTION: ${jurisdiction}
+PROTECTED HOUSE / ENTITY: ${houseEntityName}
+${opposingParty ? `ADVERSE / COUNTERPARTY / AGENCY: ${opposingParty}\n` : ''}${compareJurisdiction ? `COMPARISON JURISDICTION: ${compareJurisdiction}\n` : ''}${precedentBlock}${dossierContext ? `PRIOR CASE / DOSSIER CONTEXT:\n${String(dossierContext).slice(0, 2000)}\n` : ''}
+PRINCIPAL DIRECTIVE & FACTS:
+${cleanQuery}`;
+
+      const candidateModels = [
+        'gemini-4-hydrogen',
+        'gemini-3-flash-preview',
+        'gemini-3.8-flash',
+        'gemini-3.1-flash-lite',
+        'gemini-3.5-flash-lite',
+      ];
+      const now = Date.now();
+      const activeModels: string[] = [];
+      const cooledModels: string[] = [];
+      for (const m of candidateModels) {
+        const cd = textModelCooldowns.get(`${m}:${keyFp}`);
+        if (!cd || cd.blockedUntil <= now) {
+          activeModels.push(m);
+        } else if (cd.reason !== 'NOT_FOUND') {
+          cooledModels.push(m);
+        }
+      }
+      const modelsToTry = activeModels.length > 0 ? [...activeModels, ...cooledModels] : candidateModels;
+
+      let response: any = null;
+      let servedByModel = '';
+      let lastError: any = null;
+      let groundingFallbackUsed = false;
+      const routeStartedAt = Date.now();
+      const totalBudgetMs = 60000;
+
+      // Phase 1: Search-grounded statutory verification
+      for (const m of modelsToTry) {
+        const remainingMs = totalBudgetMs - (Date.now() - routeStartedAt);
+        if (lastError && remainingMs < 15000) break;
+
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const cdKey = `${m}:${keyFp}`;
+        try {
+          const timeoutMs = Math.min(12000, Math.max(8000, remainingMs));
+          const config: any = {
+            systemInstruction,
+            tools: [{ googleSearch: {} }],
+            maxOutputTokens: 8192,
+            safetySettings: [
+              { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+              { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+              { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+              { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
+            ],
+          };
+          if (m.startsWith('gemini-4-')) {
+            config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+          } else {
+            config.temperature = 0.2;
+          }
+
+          const reqPromise = ai.models.generateContent({
+            model: m,
+            contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+            config,
+          });
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              const err: any = new Error(`LEGAL_UPSTREAM_TIMEOUT: Model [${m}] exceeded ${timeoutMs}ms`);
+              err.status = 504;
+              reject(err);
+            }, timeoutMs);
+          });
+
+          const candidateResponse = await Promise.race([reqPromise, timeoutPromise]);
+          if (candidateResponse && candidateResponse.text && String(candidateResponse.text).trim()) {
+            response = candidateResponse;
+            textModelCooldowns.delete(cdKey);
+            servedByModel = m;
+            break;
+          }
+          throw Object.assign(
+            new Error(`LEGAL_EMPTY_RESPONSE: Model [${m}] returned no readable counsel`),
+            { status: 502 }
+          );
+        } catch (err: any) {
+          lastError = err;
+          const statusNum = getNumericHttpStatus(err, 500);
+          const msgStr = String(err?.message || err || '');
+          if (statusNum === 429 || msgStr.includes('RESOURCE_EXHAUSTED')) {
+            textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 15 * 1000, reason: 'QUOTA' });
+          } else if (statusNum === 404 || msgStr.includes('NOT_FOUND')) {
+            textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 30 * 60 * 1000, reason: 'NOT_FOUND' });
+          } else if (msgStr.includes('TIMEOUT') || statusNum === 503 || statusNum === 504 || statusNum === 502) {
+            textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 6 * 1000, reason: 'TIMEOUT' });
+          }
+          console.log(`SERVER: /api/legal/counsel failover [${m}] (${statusNum}): ${msgStr.slice(0, 140)}`);
+          continue;
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      }
+
+      // Phase 2: Bypass Google Search grounding quota wall via direct statutory & Law Library precedent synthesis
+      if (!response && getNumericHttpStatus(lastError, 500) !== 403) {
+        const directLegalModels = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+        for (const m of directLegalModels) {
+          const remainingMs = totalBudgetMs - (Date.now() - routeStartedAt);
+          if (remainingMs < 8000) break;
+
+          let timer: ReturnType<typeof setTimeout> | null = null;
+          try {
+            const timeoutMs = Math.min(18000, Math.max(8000, remainingMs));
+            const config: any = {
+              systemInstruction,
+              maxOutputTokens: 8192,
+              safetySettings: [
+                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
+              ],
+            };
+            if (m.startsWith('gemini-4-')) {
+              config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+            } else {
+              config.temperature = 0.2;
+            }
+
+            const reqPromise = ai.models.generateContent({
+              model: m,
+              contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+              config,
+            });
+            const timeoutPromise = new Promise<never>((_, reject) => {
+              timer = setTimeout(() => {
+                const err: any = new Error(`LEGAL_DIRECT_TIMEOUT: Model [${m}] exceeded ${timeoutMs}ms`);
+                err.status = 504;
+                reject(err);
+              }, timeoutMs);
+            });
+
+            const directResponse = await Promise.race([reqPromise, timeoutPromise]);
+            if (directResponse && directResponse.text && String(directResponse.text).trim()) {
+              response = directResponse;
+              servedByModel = `${m} (direct-precedent-synthesis)`;
+              groundingFallbackUsed = true;
+              console.log(`SERVER: /api/legal/counsel bypassed Search quota via direct synthesis [${m}]`);
+              break;
+            }
+          } catch (directErr: any) {
+            lastError = directErr;
+            console.log(`SERVER: /api/legal/counsel direct synthesis [${m}] failed:`, String(directErr?.message || directErr).slice(0, 140));
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        }
+      }
+
+      if (!response) {
+        const statusCode = getNumericHttpStatus(lastError, 500);
+        let readableError = String(lastError?.message || 'Unable to reach statutory verification substrate.');
+        try {
+          if (readableError.trim().startsWith('{')) {
+            const parsedErr = JSON.parse(readableError);
+            if (parsedErr?.error?.message) {
+              readableError = parsedErr.error.message;
+            }
+          }
+        } catch {}
+        if (statusCode === 429 || readableError.includes('quota')) {
+          readableError = 'Gemini API quota temporarily reached on the active key. Retry shortly, configure an updated key in System Control, or open official U.S. Code / State Code links directly in the directory.';
+        }
+        return res.status(statusCode).json({ error: readableError });
+      }
+
+      const contentText = response.text || '';
+      const rawChunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      const seenUris = new Set<string>();
+      const sources: Array<{ title: string; uri: string }> = [];
+      for (const chunk of rawChunks) {
+        const uri = chunk?.web?.uri;
+        const title = chunk?.web?.title;
+        if (typeof uri === 'string' && uri.startsWith('http') && !seenUris.has(uri)) {
+          seenUris.add(uri);
+          sources.push({
+            title: typeof title === 'string' && title.trim() ? title.trim() : uri,
+            uri,
+          });
+        }
+      }
+
+      const citations = extractStatutoryCitations(contentText);
+
+      return res.json({
+        success: true,
+        content: contentText,
+        citations,
+        sources,
+        servedByModel,
+        groundingFallback: groundingFallbackUsed,
+        jurisdiction,
+        compareJurisdiction: compareJurisdiction || undefined,
+        practiceArea,
+        mode,
+        defenseStatementType:
+          mode === 'defense_statement' || mode === 'defense_strategy'
+            ? defenseStatementType
+            : undefined,
+        houseEntityName: typeof houseEntityName === 'string' ? houseEntityName : undefined,
+        opposingParty: typeof opposingParty === 'string' && opposingParty.trim() ? opposingParty.trim() : undefined,
+        precedentsUsed: normalizedPrecedents.map((p: any) => ({
+          id: p.id,
+          caseName: p.caseName,
+          citation: p.citation,
+          doctrine: p.doctrine,
+        })),
+      });
+    } catch (err: any) {
+      const statusCode = getNumericHttpStatus(err, 500);
+      res.status(statusCode).json({ error: err?.message || 'Legal counsel research failure' });
+    }
+  };
+
+  app.post('/api/legal/counsel', (req, res) => runGreyHouseLegalQuery(req, res));
+  app.post('/api/legal/defense-statement', (req, res) => runGreyHouseLegalQuery(req, res, 'defense_statement'));
+  app.post('/api/legal/defense-strategy', (req, res) => runGreyHouseLegalQuery(req, res, 'defense_strategy'));
+
+  app.get('/api/legal/dossiers', async (_req, res) => {
+    try {
+      const data = await fs.readFile(LEGAL_DOSSIERS_FILE, 'utf-8').catch(() => '{"dossiers":[]}');
+      const parsed = JSON.parse(data);
+      const dossiers = Array.isArray(parsed?.dossiers) ? parsed.dossiers : [];
+      dossiers.sort((a: any, b: any) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+      res.json({ dossiers });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to load legal dossiers' });
+    }
+  });
+
+  app.post('/api/legal/dossiers', async (req, res) => {
+    try {
+      const {
+        id,
+        title,
+        query,
+        practiceArea = 'all',
+        mode = 'legal_counsel',
+        defenseStatementType,
+        houseEntityName,
+        opposingParty,
+        precedentsUsed,
+        jurisdiction = 'Federal (United States Code & Constitution)',
+        compareJurisdiction,
+        content,
+        citations,
+        sources,
+        servedByModel,
+      } = req.body || {};
+
+      if (!content || typeof content !== 'string' || !content.trim()) {
+        return res.status(400).json({ error: 'Dossier content is required.' });
+      }
+
+      const data = await fs.readFile(LEGAL_DOSSIERS_FILE, 'utf-8').catch(() => '{"dossiers":[]}');
+      const parsed = JSON.parse(data);
+      const dossiers = Array.isArray(parsed?.dossiers) ? parsed.dossiers : [];
+      const now = Date.now();
+      const entryId = typeof id === 'string' && id.trim() ? id.trim() : `ldoc-${now}-${Math.random().toString(36).slice(2, 7)}`;
+
+      const existingIdx = dossiers.findIndex((d: any) => d.id === entryId);
+      const entry = {
+        id: entryId,
+        title: (typeof title === 'string' && title.trim()) || (typeof query === 'string' && query.trim().slice(0, 72)) || 'Grey House Legal Brief',
+        query: typeof query === 'string' ? query.trim() : '',
+        practiceArea,
+        mode,
+        defenseStatementType: typeof defenseStatementType === 'string' ? defenseStatementType : undefined,
+        houseEntityName: typeof houseEntityName === 'string' && houseEntityName.trim() ? houseEntityName.trim() : undefined,
+        opposingParty: typeof opposingParty === 'string' && opposingParty.trim() ? opposingParty.trim() : undefined,
+        precedentsUsed: Array.isArray(precedentsUsed)
+          ? precedentsUsed
+              .filter((p: any) => p && typeof p.caseName === 'string' && typeof p.citation === 'string')
+              .slice(0, 12)
+          : undefined,
+        jurisdiction,
+        compareJurisdiction: compareJurisdiction || undefined,
+        content: content.trim(),
+        citations: Array.isArray(citations) ? citations.slice(0, 30) : [],
+        sources: Array.isArray(sources) ? sources.slice(0, 20) : [],
+        servedByModel: typeof servedByModel === 'string' ? servedByModel : undefined,
+        createdAt: existingIdx >= 0 ? dossiers[existingIdx].createdAt : now,
+        updatedAt: now,
+      };
+
+      if (existingIdx >= 0) {
+        dossiers[existingIdx] = entry;
+      } else {
+        dossiers.unshift(entry);
+      }
+
+      const trimmed = dossiers.slice(0, 200);
+      await fs.writeFile(LEGAL_DOSSIERS_FILE, JSON.stringify({ dossiers: trimmed }, null, 2));
+      io.emit('legal:dossier_updated', { action: 'save', entry });
+      res.json({ success: true, entry });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to persist legal dossier' });
+    }
+  });
+
+  app.delete('/api/legal/dossiers/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const data = await fs.readFile(LEGAL_DOSSIERS_FILE, 'utf-8').catch(() => '{"dossiers":[]}');
+      const parsed = JSON.parse(data);
+      const dossiers = Array.isArray(parsed?.dossiers) ? parsed.dossiers : [];
+      const filtered = dossiers.filter((d: any) => d.id !== id);
+      await fs.writeFile(LEGAL_DOSSIERS_FILE, JSON.stringify({ dossiers: filtered }, null, 2));
+      io.emit('legal:dossier_updated', { action: 'delete', id });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to delete legal dossier' });
     }
   });
 

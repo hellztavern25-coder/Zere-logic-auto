@@ -15,7 +15,8 @@ export enum AppTab {
   SYSTEM = 'System',
   WORKSHOP = 'Workshop',
   SNAPSHOT = 'Snapshot',
-  ACOUSTIC_ROOM = 'AcousticRoom'
+  ACOUSTIC_ROOM = 'AcousticRoom',
+  LEGAL = 'Legal'
 }
 
 export type DaemonStatus = 'RUNNING' | 'PAUSED' | 'SWEEPING' | 'DISPATCHING' | 'IDLE';
@@ -165,6 +166,7 @@ export interface ChatMessage {
   isThinking?: boolean;
   isProactive?: boolean;
   isDoorman?: boolean;
+  isErrorNotice?: boolean;
   imageData?: string;
   imageMime?: string;
   attachmentName?: string;
@@ -602,3 +604,105 @@ export interface VoiceCommandLogEntry {
   waveformPeaks?: number[];
   peakIntensityDb?: number;
 }
+
+// -------------------------------------------------------------
+// 7. GREY HOUSE LEGAL COUNSEL & U.S. STATUTORY VAULT
+// -------------------------------------------------------------
+
+export type LegalPracticeArea =
+  | 'all'
+  | 'professional'
+  | 'business'
+  | 'criminal'
+  | 'civil'
+  | 'constitutional';
+
+export type LegalResearchMode =
+  | 'legal_counsel'
+  | 'statute_lookup'
+  | 'state_compare'
+  | 'rights_defense'
+  | 'defense_statement'
+  | 'defense_strategy';
+
+export type LegalDefenseStatementType =
+  | 'cease_and_desist'
+  | 'reservation_of_rights'
+  | 'sworn_declaration'
+  | 'affirmative_defenses'
+  | 'corporate_shield'
+  | 'property_castle_notice'
+  | 'regulatory_response'
+  | 'educator_bureaucracy_shield';
+
+export interface LawLibraryPrecedent {
+  id: string;
+  caseName: string;
+  citation: string;
+  court: string;
+  year: number;
+  domain: LegalPracticeArea;
+  doctrine: string;
+  holdingSummary: string;
+  defensiveApplication: string;
+  relatedStatutes: string[];
+}
+
+export interface LegalSourceLink {
+  title: string;
+  uri: string;
+}
+
+export interface LegalJurisdictionEntry {
+  code: string;
+  name: string;
+  level: 'federal' | 'state' | 'territory';
+  officialCodeName: string;
+  officialUrl: string;
+  statutoryFocus: string;
+}
+
+export interface USCodeTitleEntry {
+  titleNumber: number;
+  label: string;
+  domain: LegalPracticeArea;
+  summary: string;
+  url: string;
+}
+
+export interface LegalDossierEntry {
+  id: string;
+  title: string;
+  query: string;
+  practiceArea: LegalPracticeArea;
+  mode: LegalResearchMode;
+  defenseStatementType?: LegalDefenseStatementType;
+  houseEntityName?: string;
+  opposingParty?: string;
+  precedentsUsed?: Array<{ id: string; caseName: string; citation: string; doctrine: string }>;
+  jurisdiction: string;
+  compareJurisdiction?: string;
+  content: string;
+  citations: string[];
+  sources: LegalSourceLink[];
+  servedByModel?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface LegalCounselResponse {
+  success: boolean;
+  content: string;
+  citations: string[];
+  sources: LegalSourceLink[];
+  servedByModel: string;
+  jurisdiction: string;
+  compareJurisdiction?: string;
+  practiceArea: LegalPracticeArea;
+  mode: LegalResearchMode;
+  defenseStatementType?: LegalDefenseStatementType;
+  houseEntityName?: string;
+  opposingParty?: string;
+  precedentsUsed?: Array<{ id: string; caseName: string; citation: string; doctrine: string }>;
+}
+

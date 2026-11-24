@@ -23,6 +23,7 @@ import TacticalTouchOverlay from './components/TacticalTouchOverlay';
 import VoiceEmulator from './components/VoiceEmulator';
 import RadialTacticalFAB from './components/RadialTacticalFAB';
 import AcousticLatticeStudio from './components/AcousticLatticeStudio';
+import LegalCounselPortal from './components/LegalCounselPortal';
 import { AppTab, GeminiModel } from './types';
 import { getAI, refreshConfig, getApiKey, isServerPrincipalActive, safeGenerateContent } from './services/geminiService';
 import { headerPulse } from './services/headerPulseService';
@@ -262,6 +263,8 @@ const App: React.FC = () => {
       'assistant': AppTab.ASSISTANT,
       'acousticroom': AppTab.ACOUSTIC_ROOM,
       'acoustic_room': AppTab.ACOUSTIC_ROOM,
+      'legal': AppTab.LEGAL,
+      'law': AppTab.LEGAL,
     };
 
     const resolved =
@@ -485,6 +488,8 @@ const App: React.FC = () => {
         return <AcousticLatticeStudio key="acoustic_room" onNavigateBack={() => commonProps.onNavigate(AppTab.CHAT)} />;
       case AppTab.ASSISTANT:
         return <AssistantDaemon key="assistant" socket={activeSocket || socketRef.current} isPrincipalMode={isPrincipalMode} />;
+      case AppTab.LEGAL:
+        return <LegalCounselPortal key="legal" socket={activeSocket || socketRef.current} onNavigate={commonProps.onNavigate} />;
       default:
         return <ChatBot key="default" avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} isPrincipalMode={isPrincipalMode} setIsPrincipalMode={setIsPrincipalMode} {...commonProps} />;
     }

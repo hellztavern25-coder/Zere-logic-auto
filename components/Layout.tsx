@@ -20,7 +20,8 @@ import {
   FolderOpen,
   BrainCircuit,
   AlertTriangle,
-  ShieldCheck
+  ShieldCheck,
+  Scale
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Socket } from 'socket.io-client';
@@ -55,7 +56,8 @@ const TAB_TITLES: Record<AppTab, string> = {
   [AppTab.SYSTEM]: 'System Control',
   [AppTab.WORKSHOP]: 'Neural Forge',
   [AppTab.SNAPSHOT]: 'Optical Intel',
-  [AppTab.ACOUSTIC_ROOM]: 'Acoustic Lattice'
+  [AppTab.ACOUSTIC_ROOM]: 'Acoustic Lattice',
+  [AppTab.LEGAL]: 'Legal Counsel'
 };
 
 const HARMONIC_BAR_HEIGHTS = [0.45, 0.82, 1.0, 0.68, 0.52];
@@ -127,6 +129,7 @@ const Layout: React.FC<LayoutProps> = ({
 
   const navItems = isPrincipalMode ? [
     { id: AppTab.CHAT, icon: MessageSquare, label: 'Dialogue Core' },
+    { id: AppTab.LEGAL, icon: Scale, label: 'Legal Counsel' },
     { id: AppTab.FILES, icon: FolderOpen, label: 'Add Files / Vault' },
     { id: AppTab.ASSISTANT, icon: Cpu, label: 'Assistant Daemon' },
     { id: AppTab.VOICE, icon: Mic, label: 'Voice Portal' },
@@ -145,6 +148,7 @@ const Layout: React.FC<LayoutProps> = ({
   ] : [
     { id: AppTab.HOME, icon: HomeIcon, label: 'Home' },
     { id: AppTab.CHAT, icon: MessageSquare, label: 'Chat' },
+    { id: AppTab.LEGAL, icon: Scale, label: 'Legal Counsel' },
     { id: AppTab.FILES, icon: FolderOpen, label: 'Add Files' },
     { id: AppTab.ASSISTANT, icon: Cpu, label: 'Assistant Daemon' },
     { id: AppTab.VOICE_EMULATOR, icon: Headphones, label: 'Voice Emulator' },

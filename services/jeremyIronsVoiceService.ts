@@ -1197,15 +1197,32 @@ class JeremyIronsPlaybackManager {
     }
   }
 
-  public async unlockAudio(): Promise<void> {
-    if (typeof window === 'undefined') return;
+  public getAudioContextState(): AudioContextState | 'uninitialized' {
+    if (!this.activeCtx) return 'uninitialized';
+    return this.activeCtx.state;
+  }
+
+  public async unlockAudio(): Promise<AudioContextState | 'uninitialized'> {
+    if (typeof window === 'undefined') return 'uninitialized';
     try {
       if (!this.activeCtx || this.activeCtx.state === 'closed') {
         const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioCtxClass) return 'uninitialized';
         this.activeCtx = new AudioCtxClass({ sampleRate: 24000 });
       }
-      if (this.activeCtx.state === 'suspended') {
-        await this.activeCtx.resume();
+      if ((this.activeCtx.state as string) === 'suspended' || (this.activeCtx.state as string) === 'interrupted') {
+        await this.activeCtx.resume().catch(() => {});
+      }
+      // Play a silent 1-sample buffer inside user gesture so strict iframe/Safari autoplay policies unlock hardware output
+      try {
+        const silentBuf = this.activeCtx.createBuffer(1, 1, 24000);
+        const silentSrc = this.activeCtx.createBufferSource();
+        silentSrc.buffer = silentBuf;
+        silentSrc.connect(this.activeCtx.destination);
+        silentSrc.start(0);
+      } catch (_) {}
+      if ((this.activeCtx.state as string) === 'suspended') {
+        await this.activeCtx.resume().catch(() => {});
       }
       if (window.speechSynthesis) {
         window.speechSynthesis.getVoices();
@@ -1213,7 +1230,10 @@ class JeremyIronsPlaybackManager {
           window.speechSynthesis.resume();
         }
       }
-    } catch (_) {}
+      return this.activeCtx.state;
+    } catch (_) {
+      return this.activeCtx?.state || 'uninitialized';
+    }
   }
 
   public stop() {
@@ -1542,7 +1562,7 @@ class JeremyIronsPlaybackManager {
           const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
           this.activeCtx = new AudioCtxClass({ sampleRate: 24000 });
         }
-        if (this.activeCtx.state === 'suspended') {
+        if ((this.activeCtx.state as string) === 'suspended' || (this.activeCtx.state as string) === 'interrupted') {
           await this.activeCtx.resume().catch(() => {});
         }
 
@@ -1688,8 +1708,8 @@ export function startSpeechRecognition(handlers: SpeechRecognitionHandlers): { s
     };
 
     recognizer.onerror = (event: any) => {
-      console.warn('SpeechRecognition error:', event.error);
-      handlers.onError?.(event);
+      console.warn('SpeechRecognition error:', event?.error || event);
+      handlers.onError?.(event?.error || event);
     };
 
     recognizer.onend = () => {

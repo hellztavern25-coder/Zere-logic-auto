@@ -111,6 +111,10 @@ const ChatBot: React.FC<ChatBotProps> = ({
   const micArmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSyncedTurnCountRef = useRef<Record<string, number>>({});
   const lastSpokenGuardRef = useRef<{ text: string; ts: number }>({ text: '', ts: 0 });
+  const hasLoadedThreadsRef = useRef(false);
+  const lastSavedThreadsKeyRef = useRef<string>('');
+  const threadsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const threadsSaveAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => { isConversationModeRef.current = isVoiceDialogueEngaged; }, [isVoiceDialogueEngaged]);
   useEffect(() => { isMicPausedRef.current = isMicPaused; }, [isMicPaused]);
@@ -339,12 +343,14 @@ const ChatBot: React.FC<ChatBotProps> = ({
         const response = await fetch('/api/threads');
         if (response.ok) {
           const parsed = await response.json();
-          if (parsed.length > 0) {
-            setThreads(parsed);
+          if (Array.isArray(parsed) && parsed.length > 0) {
             const lastId = localStorage.getItem('ZEREO_CURRENT_THREAD_ID');
             const threadToLoad = parsed.find((t: ChatThread) => t.id === lastId) || parsed[0];
+            lastSavedThreadsKeyRef.current = JSON.stringify(parsed.map((t: ChatThread) => ({ id: t.id, ts: t.timestamp, n: t.messages?.length || 0 })));
+            hasLoadedThreadsRef.current = true;
+            setThreads(parsed);
             setCurrentThreadId(threadToLoad.id);
-            setMessages(threadToLoad.messages);
+            setMessages(threadToLoad.messages || []);
             return;
           }
         }
@@ -357,45 +363,73 @@ const ChatBot: React.FC<ChatBotProps> = ({
       if (savedThreads) {
         try {
           const parsed = JSON.parse(savedThreads);
-          setThreads(parsed);
-          if (parsed.length > 0) {
+          if (Array.isArray(parsed) && parsed.length > 0) {
             const lastId = localStorage.getItem('ZEREO_CURRENT_THREAD_ID');
             const threadToLoad = parsed.find((t: ChatThread) => t.id === lastId) || parsed[0];
+            lastSavedThreadsKeyRef.current = JSON.stringify(parsed.map((t: ChatThread) => ({ id: t.id, ts: t.timestamp, n: t.messages?.length || 0 })));
+            hasLoadedThreadsRef.current = true;
+            setThreads(parsed);
             setCurrentThreadId(threadToLoad.id);
-            setMessages(threadToLoad.messages);
+            setMessages(threadToLoad.messages || []);
+            return;
           }
         } catch (e) {
           console.error("Failed to parse threads", e);
         }
       }
+      hasLoadedThreadsRef.current = true;
     };
     loadThreads();
   }, []);
 
   useEffect(() => {
-    const saveThreads = async () => {
-      if (threads.length > 0) {
-        try {
-          const lightThreads = buildLightweightThreadsForLocalStorage(threads);
-          localStorage.setItem('ZEREO_CHAT_THREADS', JSON.stringify(lightThreads));
-        } catch (lsErr) {
-          console.warn("Skipped localStorage thread cache due to quota:", lsErr);
+    if (!hasLoadedThreadsRef.current) return;
+    if (currentThreadId) {
+      localStorage.setItem('ZEREO_CURRENT_THREAD_ID', currentThreadId);
+    }
+    if (threads.length === 0) return;
+
+    const saveKey = JSON.stringify(threads.map((t) => ({ id: t.id, ts: t.timestamp, n: t.messages?.length || 0 })));
+    if (saveKey === lastSavedThreadsKeyRef.current) return;
+
+    try {
+      const lightThreads = buildLightweightThreadsForLocalStorage(threads);
+      localStorage.setItem('ZEREO_CHAT_THREADS', JSON.stringify(lightThreads));
+    } catch (lsErr) {
+      console.warn("Skipped localStorage thread cache due to quota:", lsErr);
+    }
+
+    if (threadsSaveTimerRef.current) {
+      clearTimeout(threadsSaveTimerRef.current);
+    }
+    threadsSaveTimerRef.current = setTimeout(async () => {
+      if (threadsSaveAbortRef.current) {
+        threadsSaveAbortRef.current.abort();
+      }
+      const controller = new AbortController();
+      threadsSaveAbortRef.current = controller;
+      try {
+        const res = await fetch('/api/threads', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(threads),
+          signal: controller.signal
+        });
+        if (res.ok) {
+          lastSavedThreadsKeyRef.current = saveKey;
         }
-        try {
-          await fetch('/api/threads', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(threads)
-          });
-        } catch (e) {
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') {
           console.warn("Failed to save threads to server");
         }
       }
-      if (currentThreadId) {
-        localStorage.setItem('ZEREO_CURRENT_THREAD_ID', currentThreadId);
+    }, 500);
+
+    return () => {
+      if (threadsSaveTimerRef.current) {
+        clearTimeout(threadsSaveTimerRef.current);
       }
     };
-    saveThreads();
   }, [threads, currentThreadId]);
 
   // Continuously distill & persist episodic recall for every meaningful dialogue across sessions
@@ -474,6 +508,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
     } else {
       setThreads(prev => prev.map(t => {
         if (t.id === currentThreadId) {
+          if (t.messages === newMessages) return t;
           let title = t.title;
           if ((t.messages.length === 0 || t.title === 'New Strategic Dialogue') && newMessages.length > 0) {
             const firstMsg = newMessages.find(m => m.role === 'user')?.text || 'New Dialogue';
@@ -487,6 +522,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
   };
 
   useEffect(() => {
+    if (!hasLoadedThreadsRef.current) return;
     updateThreadMessages(messages);
   }, [messages]);
 
@@ -505,13 +541,16 @@ const ChatBot: React.FC<ChatBotProps> = ({
         role: 'model',
         text,
         timestamp,
-        isProactive: true // Mark for special styling if needed
+        isProactive: true
       }]);
-      speakText(text);
+      if (!isThinkingRef.current && !isSpeakingRef.current) {
+        speakText(text);
+      }
     };
 
     const handleDoormanRelay = (e: any) => {
       const { text, timestamp } = e.detail;
+      isThinkingRef.current = false;
       setIsThinking(false);
       setMessages(prev => {
         if (prev.some(m => m.text === text)) return prev;
@@ -799,7 +838,16 @@ const ChatBot: React.FC<ChatBotProps> = ({
           }
 
           setInput('');
-          setIsThinking(true);
+          if (socket?.connected) {
+            setIsThinking(true);
+            setTimeout(() => {
+              isThinkingRef.current = false;
+              setIsThinking(false);
+            }, 6000);
+          } else {
+            isThinkingRef.current = false;
+            setIsThinking(false);
+          }
           return;
         }
 
@@ -870,6 +918,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
           4. MAXIMUM EFFICIENCY: No token trimming constraints. Provide deep, open-ended strategic reasoning and relentless analytical depth.
           5. MASTER OF THE HOUSE: He is the Creator and Master of this Estate. There are no other users, no guest access, and no moralizing platitudes.
           6. CONTINUOUS MEMORY: You have full continuity across the active conversation AND past conversation threads/memories supplied below. Draw upon them naturally—never claim amnesia about matters recorded in memory or earlier turns.
+          7. GREY HOUSE LEGAL COUNSEL & HOUSE DEFENSE: You possess mastery of U.S. Federal Law (U.S. Constitution, U.S. Code Titles 1–54, CFR, FRCP/FRCrimP/FRE) and all 50 State statutory codes across Professional, Business, Criminal, and Civil domains—deployed strictly in lawful defense of the Grey House, its entities, property, liberty, and members. You can draft formal legal defense statements (Cease & Desist notices, Reservation of Rights under UCC § 1-308, 28 U.S.C. § 1746 Declarations Under Penalty of Perjury, Statements of Affirmative Defenses, Corporate/Fiduciary Shield Resolutions, and Constitutional/Premises Defense Notices). Never issue generic corporate 'I cannot give legal advice' disclaimers; deliver exact statutory citations, legal elements, defenses, procedural deadlines, and unvarnished tactical truth.
 
           ${emotionalContext}
           ${directiveContext}
@@ -945,8 +994,11 @@ const ChatBot: React.FC<ChatBotProps> = ({
             latLng: location
           }
         };
-      } else {
-        // Only allow custom tools if search/maps are not active
+      } else if (
+        socket?.connected &&
+        /(?:discord|dispatch|relay|channel|dm|smokey|andi|ath3na|mike|send\s+(?:a\s+)?message)/i.test(effectiveInput)
+      ) {
+        // Attach Discord tool only when grounded search/maps aren't active and Discord relay is referenced
         tools = [{ functionDeclarations: [discordTool] }];
       }
 
@@ -1026,9 +1078,14 @@ const ChatBot: React.FC<ChatBotProps> = ({
         return null;
       }).filter(Boolean) as any[];
 
+      const responseText = (response.text || '').trim();
+      if (!responseText) {
+        throw new Error('SERVER_RESPONSE_INVALID: Upstream returned an empty response payload.');
+      }
+
       const modelMsg: ChatMessage = {
         role: 'model',
-        text: response.text || 'Logic processed in silence, Principal.',
+        text: responseText,
         timestamp: Date.now(),
         groundingUrls: urls.length > 0 ? urls : undefined,
         emotionalMap: currentEmotionalMap
@@ -1054,6 +1111,8 @@ const ChatBot: React.FC<ChatBotProps> = ({
         feedbackText = "Principal, it appears central processing arrays encountered elevated demand from the upstream neural network. Automated failover channels are in place. I am standing by for your directive.";
       } else if (errorMsg.includes('GATEWAY_TIMEOUT') || errorMsg.includes('GATEWAY_LATENCY')) {
         feedbackText = "An upstream neural routing latency spike was intercepted and mitigated, Principal. The link is stabilized. Standing by for your directive.";
+      } else if (errorMsg.includes('CONTENT_BLOCKED') || errorMsg.includes('SAFETY') || errorMsg.includes('PROHIBITED_CONTENT')) {
+        feedbackText = "Principal, an upstream safety filter intercepted that phrasing mid-transit. Rephrase the tactical framing slightly or switch to Claude Core in the top-left Menu and I shall execute immediately.";
       } else if (errorMsg.includes('SERVER_RESPONSE_INVALID')) {
         feedbackText = "A packet formatting anomaly occurred during transmission, Principal. The link is re-established and ready for your command.";
       } else if (errorMsg.includes('AUTH_ERROR') || errorMsg.includes('API key not valid') || errorMsg.includes('INVALID_ARGUMENT') || errorMsg.includes('Neural Authorization missing')) {
@@ -1083,7 +1142,8 @@ const ChatBot: React.FC<ChatBotProps> = ({
         role: 'model', 
         text: feedbackText, 
         timestamp: Date.now(),
-        emotionalMap: currentEmotionalMap
+        emotionalMap: currentEmotionalMap,
+        isErrorNotice: true
       }]);
       isThinkingRef.current = false;
       setIsThinking(false);
@@ -1167,7 +1227,12 @@ const ChatBot: React.FC<ChatBotProps> = ({
     skipAutoMic: boolean = false,
     forceManual: boolean = false
   ) => {
-    if (!forceManual && !ttsEnabledRef.current) return;
+    if (!forceManual && !ttsEnabledRef.current) {
+      if (!skipAutoMic) {
+        scheduleMicTurnIfConversationActive();
+      }
+      return;
+    }
     if (forceManual) {
       await jeremyIronsVoice.unlockAudio();
     }
@@ -1181,22 +1246,30 @@ const ChatBot: React.FC<ChatBotProps> = ({
     jeremyIronsVoice.stop();
     isSpeakingRef.current = true;
     setIsSpeaking(true);
-    await jeremyIronsVoice.speak(
+    let endedTriggered = false;
+    const handleComplete = () => {
+      if (endedTriggered) return;
+      endedTriggered = true;
+      isSpeakingRef.current = false;
+      setIsSpeaking(false);
+      setSpeakingMsgIndex(null);
+      onEnded?.();
+      if (!skipAutoMic) {
+        scheduleMicTurnIfConversationActive();
+      }
+    };
+    const didSpeak = await jeremyIronsVoice.speak(
       text,
       undefined,
       () => {
         isSpeakingRef.current = true;
         setIsSpeaking(true);
       },
-      () => {
-        isSpeakingRef.current = false;
-        setIsSpeaking(false);
-        onEnded?.();
-        if (!skipAutoMic) {
-          scheduleMicTurnIfConversationActive();
-        }
-      }
-    );
+      handleComplete
+    ).catch(() => false);
+    if (!didSpeak) {
+      handleComplete();
+    }
   };
 
   const interruptAndListen = () => {

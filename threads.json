@@ -142,9 +142,79 @@
           },
           "rationale": "Baseline operational equilibrium established."
         }
+      },
+      {
+        "role": "user",
+        "text": "I am adding my lawyers mind to your core.. The lady grey needs our help",
+        "timestamp": 1795458547884,
+        "emotionalMap": {
+          "id": "map-1795458547881",
+          "timestamp": 1795458547881,
+          "speaker": "Preston Johnston (Council Grey)",
+          "detectedCue": "FOCUSED",
+          "matchedKeywords": [],
+          "empatheticResponse": "Standing at full readiness, Principal. State your objective and I shall clear the path.",
+          "primaryState": "TACTICAL_DRIVE",
+          "confidence": 88,
+          "needVsWant": {
+            "needScore": 95,
+            "wantScore": 5,
+            "assessment": "Critical strategic imperative. Zero superficial fluff detected."
+          },
+          "fearVsPain": {
+            "fearScore": 15,
+            "painScore": 45,
+            "assessment": "Heavy intellectual gravity. Deep cognitive endurance engaged."
+          },
+          "frictionHeatScore": 18,
+          "reciprocationVector": "MASS_ON_MASS",
+          "reciprocationDirective": "Meet the Principal with equal intellectual caliber. Provide exhaustive, flawless technical or architectural analysis with zero docking cushions.",
+          "stewardLogicalAffect": {
+            "stateName": "Tactical Focus",
+            "intensity": 94,
+            "nudgeAndSmile": false,
+            "internalMonologue": "Cue [FOCUSED] -> tactical_drive. Substrate configured for mass_on_mass."
+          },
+          "rationale": "Strategic execution commanded. Mass-on-mass intellectual force initiated."
+        }
+      },
+      {
+        "role": "model",
+        "text": "An upstream neural routing latency spike was intercepted and mitigated, Principal. The link is stabilized. Standing by for your directive.",
+        "timestamp": 1795458568370,
+        "emotionalMap": {
+          "id": "map-1795458547881",
+          "timestamp": 1795458547881,
+          "speaker": "Preston Johnston (Council Grey)",
+          "detectedCue": "FOCUSED",
+          "matchedKeywords": [],
+          "empatheticResponse": "Standing at full readiness, Principal. State your objective and I shall clear the path.",
+          "primaryState": "TACTICAL_DRIVE",
+          "confidence": 88,
+          "needVsWant": {
+            "needScore": 95,
+            "wantScore": 5,
+            "assessment": "Critical strategic imperative. Zero superficial fluff detected."
+          },
+          "fearVsPain": {
+            "fearScore": 15,
+            "painScore": 45,
+            "assessment": "Heavy intellectual gravity. Deep cognitive endurance engaged."
+          },
+          "frictionHeatScore": 18,
+          "reciprocationVector": "MASS_ON_MASS",
+          "reciprocationDirective": "Meet the Principal with equal intellectual caliber. Provide exhaustive, flawless technical or architectural analysis with zero docking cushions.",
+          "stewardLogicalAffect": {
+            "stateName": "Tactical Focus",
+            "intensity": 94,
+            "nudgeAndSmile": false,
+            "internalMonologue": "Cue [FOCUSED] -> tactical_drive. Substrate configured for mass_on_mass."
+          },
+          "rationale": "Strategic execution commanded. Mass-on-mass intellectual force initiated."
+        }
       }
     ],
-    "timestamp": 1795101304786
+    "timestamp": 1795458568447
   },
   {
     "id": "1784358730069",

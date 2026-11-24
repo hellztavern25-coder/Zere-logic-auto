@@ -73,10 +73,14 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
   const [activeFormantPreset, setActiveFormantPreset] = useState<string>('sovereign-gravitas');
   const [isAuditioningSignature, setIsAuditioningSignature] = useState(false);
   const [logRefreshSignal, setLogRefreshSignal] = useState(0);
+  const [audioStreamState, setAudioStreamState] = useState<AudioContextState | 'uninitialized'>(() =>
+    jeremyIronsVoice.getAudioContextState()
+  );
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const ironsDSPRef = useRef<any>(null);
   const sessionRef = useRef<any>(null);
@@ -93,6 +97,9 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
   const liveSessionIdRef = useRef<string>('');
   const selectedProfileRef = useRef<VoiceModulationProfile>(selectedProfile);
   const activePresetRef = useRef<string>(activeFormantPreset);
+  const activePitchRateRef = useRef<number>(
+    clampLowEPitchRate(JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.pitchRate)
+  );
 
   useEffect(() => {
     selectedProfileRef.current = selectedProfile;
@@ -100,7 +107,15 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
 
   useEffect(() => {
     activePresetRef.current = activeFormantPreset;
+    const preset = JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset];
+    if (preset) {
+      activePitchRateRef.current = clampLowEPitchRate(preset.pitchRate);
+    }
   }, [activeFormantPreset]);
+
+  useEffect(() => {
+    screenStreamRef.current = screenStream;
+  }, [screenStream]);
 
   const flushPendingVoiceTurn = () => {
     const commandText = pendingPrincipalTurnRef.current.trim();
@@ -158,16 +173,261 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
     }
   };
 
+  const logAudioDiagnostic = (
+    phase: string,
+    details: Record<string, unknown> = {},
+    level: 'debug' | 'info' | 'warn' | 'error' = 'info'
+  ) => {
+    const userActivation = typeof navigator !== 'undefined' ? (navigator as any).userActivation : undefined;
+    const payload = {
+      timestamp: new Date().toISOString(),
+      phase,
+      liveOutputState: audioContextRef.current?.state ?? 'uninitialized',
+      liveInputState: inputAudioContextRef.current?.state ?? 'uninitialized',
+      ttsContextState: jeremyIronsVoice.getAudioContextState(),
+      isLiveBridge: isLive,
+      userActivation: userActivation
+        ? { isActive: Boolean(userActivation.isActive), hasBeenActive: Boolean(userActivation.hasBeenActive) }
+        : 'unsupported',
+      ...details
+    };
+    if (level === 'error') {
+      console.error(`[VoicePortal:Audio] ${phase}`, payload);
+    } else if (level === 'warn') {
+      console.warn(`[VoicePortal:Audio] ${phase}`, payload);
+    } else if (level === 'debug') {
+      console.debug(`[VoicePortal:Audio] ${phase}`, payload);
+    } else {
+      console.info(`[VoicePortal:Audio] ${phase}`, payload);
+    }
+  };
+
+  const warmUpAudioContext = async (
+    ctx: AudioContext | null,
+    label: 'live-output' | 'live-input' = 'live-output'
+  ): Promise<{ label: string; initialState: string; finalState: string; unlocked: boolean }> => {
+    if (!ctx) {
+      logAudioDiagnostic('warmUp:skipped-null', { label }, 'warn');
+      return { label, initialState: 'null', finalState: 'null', unlocked: false };
+    }
+    const initialState = ctx.state;
+    if (initialState === 'closed') {
+      logAudioDiagnostic('warmUp:skipped-closed', { label, initialState }, 'warn');
+      return { label, initialState, finalState: 'closed', unlocked: false };
+    }
+
+    const startedAt = performance.now();
+    logAudioDiagnostic('warmUp:start', {
+      label,
+      initialState,
+      sampleRate: ctx.sampleRate,
+      baseLatency: (ctx as any).baseLatency ?? null,
+      outputLatency: (ctx as any).outputLatency ?? null
+    });
+
+    if ((ctx.state as string) === 'suspended' || (ctx.state as string) === 'interrupted') {
+      try {
+        await ctx.resume();
+        logAudioDiagnostic('warmUp:resume-resolved', {
+          label,
+          stateAfterResume: ctx.state,
+          elapsedMs: Math.round(performance.now() - startedAt)
+        });
+      } catch (err: any) {
+        logAudioDiagnostic(
+          'warmUp:resume-rejected',
+          { label, stateAfterError: ctx.state, error: err?.message || String(err) },
+          'warn'
+        );
+      }
+    }
+
+    try {
+      const silentBuffer = ctx.createBuffer(1, 1, ctx.sampleRate || 24000);
+      const silentNode = ctx.createBufferSource();
+      silentNode.buffer = silentBuffer;
+      silentNode.connect(ctx.destination);
+      silentNode.start(0);
+      logAudioDiagnostic('warmUp:silent-buffer-started', {
+        label,
+        stateAfterSilentPulse: ctx.state
+      }, 'debug');
+    } catch (err: any) {
+      logAudioDiagnostic(
+        'warmUp:silent-buffer-failed',
+        { label, error: err?.message || String(err), currentState: ctx.state },
+        'warn'
+      );
+    }
+
+    if ((ctx.state as string) === 'suspended') {
+      try {
+        await ctx.resume();
+        logAudioDiagnostic('warmUp:post-pulse-resume-resolved', {
+          label,
+          finalState: ctx.state
+        });
+      } catch (err: any) {
+        logAudioDiagnostic(
+          'warmUp:post-pulse-resume-rejected',
+          { label, finalState: ctx.state, error: err?.message || String(err) },
+          'warn'
+        );
+      }
+    }
+
+    const finalState = ctx.state;
+    const unlocked = finalState === 'running';
+    logAudioDiagnostic(
+      unlocked ? 'warmUp:complete' : 'warmUp:still-locked',
+      {
+        label,
+        initialState,
+        finalState,
+        unlocked,
+        elapsedMs: Math.round(performance.now() - startedAt)
+      },
+      unlocked ? 'info' : 'warn'
+    );
+
+    return { label, initialState, finalState, unlocked };
+  };
+
+  const resumeAudioContextsAfterInteraction = async (triggerSource: string = 'manual') => {
+    const isPassiveGesture =
+      triggerSource === 'pointerdown' || triggerSource === 'touchstart' || triggerSource === 'keydown';
+
+    const preOutputState = audioContextRef.current?.state ?? 'uninitialized';
+    const preInputState = inputAudioContextRef.current?.state ?? 'uninitialized';
+    const preTtsState = jeremyIronsVoice.getAudioContextState();
+
+    const needsUnlock =
+      preTtsState !== 'running' ||
+      (audioContextRef.current && preOutputState !== 'running' && preOutputState !== 'closed') ||
+      (inputAudioContextRef.current && preInputState !== 'running' && preInputState !== 'closed');
+
+    if (isPassiveGesture && !needsUnlock) {
+      logAudioDiagnostic(
+        'gesture:already-unlocked',
+        { triggerSource, preOutputState, preInputState, preTtsState },
+        'debug'
+      );
+      return;
+    }
+
+    const startedAt = performance.now();
+    logAudioDiagnostic('gesture:resume-attempt', {
+      triggerSource,
+      preOutputState,
+      preInputState,
+      preTtsState
+    });
+
+    const tasks: Array<{ name: string; promise: Promise<unknown> }> = [];
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      tasks.push({ name: 'live-output', promise: warmUpAudioContext(audioContextRef.current, 'live-output') });
+    }
+    if (inputAudioContextRef.current && inputAudioContextRef.current.state !== 'closed') {
+      tasks.push({ name: 'live-input', promise: warmUpAudioContext(inputAudioContextRef.current, 'live-input') });
+    }
+    tasks.push({ name: 'jeremy-irons-tts', promise: jeremyIronsVoice.unlockAudio() });
+
+    const settled = await Promise.allSettled(tasks.map((t) => t.promise));
+    const resolutionReport = settled.map((result, idx) => ({
+      target: tasks[idx].name,
+      status: result.status,
+      value: result.status === 'fulfilled' ? result.value : undefined,
+      reason: result.status === 'rejected' ? String(result.reason) : undefined
+    }));
+
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      setAudioStreamState(audioContextRef.current.state);
+    } else {
+      const ttsResult = resolutionReport.find((r) => r.target === 'jeremy-irons-tts');
+      const nextState =
+        ttsResult?.status === 'fulfilled' && typeof ttsResult.value === 'string'
+          ? (ttsResult.value as AudioContextState | 'uninitialized')
+          : jeremyIronsVoice.getAudioContextState();
+      setAudioStreamState(nextState);
+    }
+
+    const postTtsState = jeremyIronsVoice.getAudioContextState();
+    const postOutputState = audioContextRef.current?.state ?? 'uninitialized';
+    const anySuspended =
+      postTtsState === 'suspended' ||
+      postOutputState === 'suspended' ||
+      resolutionReport.some((r) => r.status === 'rejected');
+
+    logAudioDiagnostic(
+      anySuspended ? 'gesture:resume-incomplete' : 'gesture:resume-complete',
+      {
+        triggerSource,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        preStates: { output: preOutputState, input: preInputState, tts: preTtsState },
+        postStates: {
+          output: postOutputState,
+          input: inputAudioContextRef.current?.state ?? 'uninitialized',
+          tts: postTtsState
+        },
+        promiseResolutions: resolutionReport
+      },
+      anySuspended ? 'warn' : 'info'
+    );
+  };
+
   // Keep active profile synced across components & ensure voice engine initializes on mount
   useEffect(() => {
-    void jeremyIronsVoice.initialize();
+    logAudioDiagnostic('mount:init-start', {
+      initialAudioStreamState: jeremyIronsVoice.getAudioContextState(),
+      speechSynthesisSupported: typeof window !== 'undefined' && 'speechSynthesis' in window
+    });
+
+    void jeremyIronsVoice
+      .initialize()
+      .then((profiles) => {
+        const initState = jeremyIronsVoice.getAudioContextState();
+        setAudioStreamState(initState);
+        logAudioDiagnostic('mount:jeremyIronsVoice-initialize-resolved', {
+          loadedProfilesCount: Array.isArray(profiles) ? profiles.length : 0,
+          activeProfile: jeremyIronsVoice.getLegacyProfile(),
+          ttsContextStateAfterInit: initState
+        });
+      })
+      .catch((err) => {
+        logAudioDiagnostic(
+          'mount:jeremyIronsVoice-initialize-rejected',
+          { error: err?.message || String(err) },
+          'error'
+        );
+      });
+
     const unsub = jeremyIronsVoice.subscribe(({ legacyProfile }) => {
-      if (legacyProfile && legacyProfile !== selectedProfile) {
+      if (legacyProfile && legacyProfile !== selectedProfileRef.current) {
         setSelectedProfile(legacyProfile);
       }
     });
-    return unsub;
-  }, [selectedProfile]);
+
+    const handlePointerGesture = () => {
+      void resumeAudioContextsAfterInteraction('pointerdown');
+    };
+    const handleTouchGesture = () => {
+      void resumeAudioContextsAfterInteraction('touchstart');
+    };
+    const handleKeyGesture = () => {
+      void resumeAudioContextsAfterInteraction('keydown');
+    };
+
+    window.addEventListener('pointerdown', handlePointerGesture, { passive: true });
+    window.addEventListener('touchstart', handleTouchGesture, { passive: true });
+    window.addEventListener('keydown', handleKeyGesture, { passive: true });
+
+    return () => {
+      unsub();
+      window.removeEventListener('pointerdown', handlePointerGesture);
+      window.removeEventListener('touchstart', handleTouchGesture);
+      window.removeEventListener('keydown', handleKeyGesture);
+    };
+  }, []);
 
   useEffect(() => {
     if (ironsDSPRef.current) {
@@ -237,18 +497,33 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
     return () => release();
   }, [isThinking, isLive]);
 
+  // Unmount-only cleanup so toggling screen share never disconnects active audio contexts or the live bridge
   useEffect(() => {
     return () => {
       stopLiveConversation();
-      if (screenStream) {
-        screenStream.getTracks().forEach((t) => t.stop());
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach((t) => t.stop());
       }
     };
-  }, [screenStream]);
+  }, []);
+
+  const liveSocketCleanupRef = useRef<(() => void) | null>(null);
 
   const stopLiveConversation = () => {
+    logAudioDiagnostic('live:stop-invoked', {
+      activeSourcesCount: sourcesRef.current.size,
+      inputState: inputAudioContextRef.current?.state ?? 'uninitialized',
+      outputState: audioContextRef.current?.state ?? 'uninitialized'
+    });
     flushPendingVoiceTurn();
     liveSessionIdRef.current = '';
+    if (liveSocketCleanupRef.current) {
+      try { liveSocketCleanupRef.current(); } catch (_) {}
+      liveSocketCleanupRef.current = null;
+    }
+    if (socket?.connected) {
+      try { socket.emit('live:stop'); } catch (_) {}
+    }
     if (sessionRef.current) {
       try { sessionRef.current.close(); } catch (_) {}
       sessionRef.current = null;
@@ -261,12 +536,16 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
       try { micStreamRef.current.getTracks().forEach((t) => t.stop()); } catch (_) {}
       micStreamRef.current = null;
     }
+    sourcesRef.current.forEach((s) => {
+      try { s.stop(); } catch (_) {}
+    });
+    sourcesRef.current.clear();
     if (inputAudioContextRef.current) {
-      try { inputAudioContextRef.current.close(); } catch (_) {}
+      try { void inputAudioContextRef.current.close(); } catch (_) {}
       inputAudioContextRef.current = null;
     }
     if (audioContextRef.current) {
-      try { audioContextRef.current.close(); } catch (_) {}
+      try { void audioContextRef.current.close(); } catch (_) {}
       audioContextRef.current = null;
     }
     ironsDSPRef.current = null;
@@ -274,13 +553,16 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
     setIsRecording(false);
     setIsThinking(false);
     nextStartTimeRef.current = 0;
-    sourcesRef.current.clear();
+    const nextTtsState = jeremyIronsVoice.getAudioContextState();
+    setAudioStreamState(nextTtsState);
+    logAudioDiagnostic('live:stop-complete', { restoredTtsState: nextTtsState });
   };
 
   const startLiveConversation = async () => {
     // ENFORCE ABSOLUTE OWNERSHIP BEFORE INITIALIZING VOICE PIPELINE
     if (!isPrincipalVerified) {
       const lockMsg = "Acoustic Ownership Locked: Principal voice-print verification is mandatory before engaging the voice modulation pipeline.";
+      logAudioDiagnostic('live:blocked-unverified', { reason: lockMsg }, 'warn');
       setGateWarning(lockMsg);
       headerPulse.triggerCritical('Voice Ownership Locked', 'Principal verification mandatory', AppTab.VOICE, 12000);
       verificationSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -289,19 +571,77 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
 
     try {
       setGateWarning(null);
-      const apiKey = getApiKey();
-      if (!apiKey || apiKey === 'undefined') {
-        throw new Error("Neural Authorization missing. Please select an API key.");
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtxClass) {
+        throw new Error('Web Audio API is unavailable in this browser.');
       }
-      const ai = getAI();
-      const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+
+      logAudioDiagnostic('live:start-init', {
+        priorInputState: inputAudioContextRef.current?.state ?? 'none',
+        priorOutputState: audioContextRef.current?.state ?? 'none'
+      });
+
+      // Clean up any stale prior contexts before initializing fresh streams inside the user gesture
+      if (inputAudioContextRef.current && inputAudioContextRef.current.state !== 'closed') {
+        try { await inputAudioContextRef.current.close(); } catch (_) {}
+      }
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        try { await audioContextRef.current.close(); } catch (_) {}
+      }
+
+      // Initialize and unlock both AudioContexts IMMEDIATELY inside the click handler before any network/mic await
+      const inputCtx = new AudioCtxClass({ sampleRate: 16000 });
+      const outputCtx = new AudioCtxClass({ sampleRate: 24000 });
       inputAudioContextRef.current = inputCtx;
       audioContextRef.current = outputCtx;
 
-      // Ensure both audio contexts leave 'suspended' state cleanly under browser autoplay policies
-      await inputCtx.resume().catch(() => {});
-      await outputCtx.resume().catch(() => {});
+      inputCtx.onstatechange = () => {
+        logAudioDiagnostic('live-input:onstatechange', {
+          newState: inputCtx.state,
+          currentTime: inputCtx.currentTime
+        });
+      };
+      outputCtx.onstatechange = () => {
+        logAudioDiagnostic('live-output:onstatechange', {
+          newState: outputCtx.state,
+          currentTime: outputCtx.currentTime
+        });
+        setAudioStreamState(outputCtx.state);
+      };
+      setAudioStreamState(outputCtx.state);
+
+      logAudioDiagnostic('live:contexts-created', {
+        inputInitialState: inputCtx.state,
+        outputInitialState: outputCtx.state,
+        inputSampleRate: inputCtx.sampleRate,
+        outputSampleRate: outputCtx.sampleRate
+      });
+
+      const unlockSettled = await Promise.allSettled([
+        warmUpAudioContext(inputCtx, 'live-input'),
+        warmUpAudioContext(outputCtx, 'live-output'),
+        jeremyIronsVoice.unlockAudio()
+      ]);
+      logAudioDiagnostic('live:initial-unlock-settled', {
+        resolutions: unlockSettled.map((r, i) => ({
+          target: ['live-input', 'live-output', 'jeremy-irons-tts'][i],
+          status: r.status,
+          value: r.status === 'fulfilled' ? r.value : undefined,
+          reason: r.status === 'rejected' ? String(r.reason) : undefined
+        })),
+        outputStateNow: outputCtx.state,
+        inputStateNow: inputCtx.state
+      });
+      setAudioStreamState(outputCtx.state);
+
+      const apiKey = getApiKey();
+      if (!apiKey || apiKey === 'undefined') {
+        throw new Error("Live Audio Bridge requires a configured Gemini API key in System Control (TTS & Voice Synthesis remain active).");
+      }
+      const isServerManagedKey = apiKey === 'ZEREO_CORE_LINK';
+      if (isServerManagedKey && !socket) {
+        throw new Error("Neural Bridge socket is offline. Please refresh or configure a custom key in System Control.");
+      }
 
       const currentProfileMeta = VOICE_MODULATION_PROFILES[selectedProfile] || VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
       const activePreset = JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset];
@@ -323,11 +663,30 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
       } : currentProfileMeta.config;
 
       ironsDSPRef.current = buildJeremyIronsDSP(outputCtx, outputCtx.destination, mergedConfig);
+      logAudioDiagnostic('live:dsp-built', {
+        formantPreset: activeFormantPreset,
+        pitchRate: activePitchRateRef.current,
+        outputState: outputCtx.state
+      });
+
+      const micStart = performance.now();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       micStreamRef.current = stream;
+      logAudioDiagnostic('live:mic-stream-resolved', {
+        elapsedMs: Math.round(performance.now() - micStart),
+        tracks: stream.getAudioTracks().map((t) => ({
+          label: t.label,
+          readyState: t.readyState,
+          enabled: t.enabled,
+          muted: t.muted
+        })),
+        inputStateAfterMic: inputCtx.state,
+        outputStateAfterMic: outputCtx.state
+      });
 
-      if (inputCtx.state === 'suspended') await inputCtx.resume().catch(() => {});
-      if (outputCtx.state === 'suspended') await outputCtx.resume().catch(() => {});
+      if ((inputCtx.state as string) !== 'running') await warmUpAudioContext(inputCtx, 'live-input');
+      if ((outputCtx.state as string) !== 'running') await warmUpAudioContext(outputCtx, 'live-output');
+      setAudioStreamState(outputCtx.state);
 
       // Hydrate persistent core memories & past conversations for Live Voice recall
       let liveMemoryRecallBlock = '';
@@ -378,115 +737,238 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
         return `${existing} ${incoming}`;
       };
 
-      const sessionPromise = ai.live.connect({
-        model: GeminiModel.FLASH_LIVE,
-        callbacks: {
-          onopen: () => {
-            const source = inputCtx.createMediaStreamSource(stream);
-            const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
-            scriptProcessorRef.current = scriptProcessor;
-            scriptProcessor.onaudioprocess = (e) => {
-              const inputData = e.inputBuffer.getChannelData(0);
-              const int16 = new Int16Array(inputData.length);
-              for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
-              const pcmBlob = { data: encodeBase64(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
-              sessionPromise.then(s => s.sendRealtimeInput({ media: pcmBlob }));
-            };
-            source.connect(scriptProcessor);
-            scriptProcessor.connect(inputCtx.destination);
-            setIsLive(true);
-            setIsRecording(true);
-          },
-          onmessage: async (message: any) => {
-            const audioPart = message.serverContent?.modelTurn?.parts?.find((p: any) => p.inlineData?.data);
-            const audioData = audioPart?.inlineData?.data;
-            if (audioData) {
-              if (!turnStartedAtRef.current) turnStartedAtRef.current = Date.now();
-              pendingStewardPcmRef.current.push(audioData);
-              setIsThinking(true);
-              if (outputCtx.state === 'suspended') {
-                await outputCtx.resume().catch(() => {});
-              }
-              const start = Math.max(nextStartTimeRef.current, outputCtx.currentTime);
-              const buffer = await decodeAudioData(decodeBase64(audioData), outputCtx);
-              const source = outputCtx.createBufferSource();
-              source.buffer = buffer;
-              const playbackRate = clampLowEPitchRate(mergedConfig.pitchRate);
-              source.playbackRate.value = playbackRate;
-              if (ironsDSPRef.current) {
-                source.connect(ironsDSPRef.current.inputNode);
-              } else {
-                source.connect(outputCtx.destination);
-              }
-              source.start(start);
-              // Divide duration by playbackRate so slowed speech (~0.86x) never causes overlapping cutoffs between packets
-              nextStartTimeRef.current = start + (buffer.duration / playbackRate);
-              sourcesRef.current.add(source);
-              source.onended = () => {
-                sourcesRef.current.delete(source);
-                if (sourcesRef.current.size === 0) setIsThinking(false);
-              };
-            }
-            if (message.serverContent?.interrupted) {
-              sourcesRef.current.forEach(s => { try { s.stop(); } catch (_) {} });
-              sourcesRef.current.clear();
-              nextStartTimeRef.current = 0;
-              setIsThinking(false);
-              flushPendingVoiceTurn();
-            }
-            const inputChunk = message.serverContent?.inputTranscription?.text;
-            if (inputChunk) {
-              if (pendingStewardTurnRef.current.trim()) {
-                flushPendingVoiceTurn();
-              }
-              if (!turnStartedAtRef.current) turnStartedAtRef.current = Date.now();
-              pendingPrincipalTurnRef.current = appendLiveChunk(pendingPrincipalTurnRef.current, inputChunk);
-              setTranscriptions((p) => {
-                const last = p[p.length - 1];
-                if (last && last.role === 'Principal') {
-                  return [...p.slice(0, -1), { role: 'Principal', text: appendLiveChunk(last.text, inputChunk) }];
-                }
-                return [...p, { role: 'Principal', text: inputChunk }];
-              });
-            }
-            const outputChunk = message.serverContent?.outputTranscription?.text;
-            if (outputChunk) {
-              if (!turnStartedAtRef.current) turnStartedAtRef.current = Date.now();
-              pendingStewardTurnRef.current = appendLiveChunk(pendingStewardTurnRef.current, outputChunk);
-              setTranscriptions((p) => {
-                const last = p[p.length - 1];
-                if (last && last.role === 'Steward') {
-                  return [...p.slice(0, -1), { role: 'Steward', text: appendLiveChunk(last.text, outputChunk) }];
-                }
-                return [...p, { role: 'Steward', text: outputChunk }];
-              });
-            }
-            if (message.serverContent?.turnComplete) {
-              flushPendingVoiceTurn();
-            }
-          },
-          onclose: () => stopLiveConversation(),
-          onerror: (err) => {
-            console.error("Live session error:", err);
-            stopLiveConversation();
+      const handleLiveMessage = async (message: any) => {
+        const audioPart = message.serverContent?.modelTurn?.parts?.find((p: any) => p.inlineData?.data);
+        const audioData = audioPart?.inlineData?.data;
+        if (audioData) {
+          if (!turnStartedAtRef.current) turnStartedAtRef.current = Date.now();
+          const packetIndex = pendingStewardPcmRef.current.length + 1;
+          pendingStewardPcmRef.current.push(audioData);
+          setIsThinking(true);
+          if ((outputCtx.state as string) !== 'running') {
+            logAudioDiagnostic('live:packet-output-not-running', {
+              packetIndex,
+              outputStateBeforeWarmUp: outputCtx.state
+            }, 'warn');
+            await warmUpAudioContext(outputCtx, 'live-output');
+            setAudioStreamState(outputCtx.state);
           }
-        },
-        config: {
-          responseModalities: ['AUDIO' as any],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } } },
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-          systemInstruction: liveSystemInstruction
+          const buffer = await decodeAudioData(decodeBase64(audioData), outputCtx);
+          const start = Math.max(nextStartTimeRef.current, outputCtx.currentTime);
+          const source = outputCtx.createBufferSource();
+          source.buffer = buffer;
+          const playbackRate = activePitchRateRef.current;
+          source.playbackRate.value = playbackRate;
+          if (ironsDSPRef.current) {
+            source.connect(ironsDSPRef.current.inputNode);
+          } else {
+            source.connect(outputCtx.destination);
+          }
+          source.start(start);
+          if (packetIndex === 1 || outputCtx.state !== 'running') {
+            logAudioDiagnostic(
+              outputCtx.state === 'running' ? 'live:audio-chunk-started' : 'live:audio-chunk-scheduled-while-not-running',
+              {
+                packetIndex,
+                outputState: outputCtx.state,
+                currentTime: outputCtx.currentTime,
+                scheduledStart: start,
+                bufferDurationSec: Number(buffer.duration.toFixed(3)),
+                bufferSampleRate: buffer.sampleRate,
+                playbackRate,
+                routedThroughDSP: Boolean(ironsDSPRef.current)
+              },
+              outputCtx.state === 'running' ? 'info' : 'warn'
+            );
+          }
+          nextStartTimeRef.current = start + (buffer.duration / playbackRate);
+          sourcesRef.current.add(source);
+          source.onended = () => {
+            sourcesRef.current.delete(source);
+            if (sourcesRef.current.size === 0) setIsThinking(false);
+          };
         }
-      });
-      sessionRef.current = await sessionPromise;
-    } catch (err: any) { 
-      const errorMsg = err.message || JSON.stringify(err);
-      if (errorMsg.includes('API key not valid') || errorMsg.includes('INVALID_ARGUMENT')) {
-        clearApiKey();
-        alert("Principal, our neural authorization has been rejected. I have cleared the faulty link. Please re-authorize.");
+        if (message.serverContent?.interrupted) {
+          sourcesRef.current.forEach(s => { try { s.stop(); } catch (_) {} });
+          sourcesRef.current.clear();
+          nextStartTimeRef.current = 0;
+          setIsThinking(false);
+          flushPendingVoiceTurn();
+        }
+        const inputChunk = message.serverContent?.inputTranscription?.text;
+        if (inputChunk) {
+          if (pendingStewardTurnRef.current.trim()) {
+            flushPendingVoiceTurn();
+          }
+          if (!turnStartedAtRef.current) turnStartedAtRef.current = Date.now();
+          pendingPrincipalTurnRef.current = appendLiveChunk(pendingPrincipalTurnRef.current, inputChunk);
+          setTranscriptions((p) => {
+            const last = p[p.length - 1];
+            if (last && last.role === 'Principal') {
+              return [...p.slice(0, -1), { role: 'Principal', text: appendLiveChunk(last.text, inputChunk) }];
+            }
+            return [...p, { role: 'Principal', text: inputChunk }];
+          });
+        }
+        const outputChunk = message.serverContent?.outputTranscription?.text;
+        if (outputChunk) {
+          if (!turnStartedAtRef.current) turnStartedAtRef.current = Date.now();
+          pendingStewardTurnRef.current = appendLiveChunk(pendingStewardTurnRef.current, outputChunk);
+          setTranscriptions((p) => {
+            const last = p[p.length - 1];
+            if (last && last.role === 'Steward') {
+              return [...p.slice(0, -1), { role: 'Steward', text: appendLiveChunk(last.text, outputChunk) }];
+            }
+            return [...p, { role: 'Steward', text: outputChunk }];
+          });
+        }
+        if (message.serverContent?.turnComplete) {
+          flushPendingVoiceTurn();
+        }
+      };
+
+      const startMicStreamPump = (sendBlob: (pcmBlob: { data: string; mimeType: string }) => void) => {
+        if ((inputCtx.state as string) !== 'running') {
+          void warmUpAudioContext(inputCtx, 'live-input');
+        }
+        if ((outputCtx.state as string) !== 'running') {
+          void warmUpAudioContext(outputCtx, 'live-output');
+        }
+        const source = inputCtx.createMediaStreamSource(stream);
+        const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
+        scriptProcessorRef.current = scriptProcessor;
+        scriptProcessor.onaudioprocess = (e) => {
+          const inputData = e.inputBuffer.getChannelData(0);
+          const int16 = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
+          const pcmBlob = { data: encodeBase64(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
+          sendBlob(pcmBlob);
+        };
+        source.connect(scriptProcessor);
+        scriptProcessor.connect(inputCtx.destination);
+        setIsLive(true);
+        setIsRecording(true);
+      };
+
+      if (socket && (isServerManagedKey || socket.connected)) {
+        // Use Server-Side Socket.IO Live Proxy so server-managed GEMINI_API_KEY works without exposing secrets
+        await new Promise<void>((resolve, reject) => {
+          let opened = false;
+          const connectTimeout = setTimeout(() => {
+            if (!opened) {
+              cleanup();
+              reject(new Error('Live Audio Bridge handshake timed out.'));
+            }
+          }, 15000);
+
+          const onOpen = () => {
+            opened = true;
+            clearTimeout(connectTimeout);
+            logAudioDiagnostic('live:proxy-onopen', {
+              inputState: inputCtx.state,
+              outputState: outputCtx.state
+            });
+            startMicStreamPump((pcmBlob) => {
+              socket.emit('live:audio', pcmBlob);
+            });
+            resolve();
+          };
+          const onMessage = (msg: any) => {
+            void handleLiveMessage(msg);
+          };
+          const onClose = (ev: any) => {
+            clearTimeout(connectTimeout);
+            logAudioDiagnostic('live:proxy-onclose', { code: ev?.code, reason: ev?.reason }, 'warn');
+            if (!opened) {
+              cleanup();
+              reject(new Error(ev?.reason || 'Live Audio Bridge connection closed.'));
+              return;
+            }
+            stopLiveConversation();
+          };
+          const onError = (err: any) => {
+            clearTimeout(connectTimeout);
+            const msg = err?.message || String(err || 'Live Audio Bridge error');
+            logAudioDiagnostic('live:proxy-onerror', { error: msg }, 'error');
+            if (!opened) {
+              cleanup();
+              reject(new Error(msg));
+              return;
+            }
+            setGateWarning(msg);
+            stopLiveConversation();
+          };
+
+          const cleanup = () => {
+            socket.off('live:open', onOpen);
+            socket.off('live:message', onMessage);
+            socket.off('live:close', onClose);
+            socket.off('live:error', onError);
+          };
+
+          liveSocketCleanupRef.current = cleanup;
+          socket.on('live:open', onOpen);
+          socket.on('live:message', onMessage);
+          socket.on('live:close', onClose);
+          socket.on('live:error', onError);
+
+          socket.emit('live:start', {
+            model: GeminiModel.FLASH_LIVE,
+            voiceName: 'Charon',
+            systemInstruction: liveSystemInstruction,
+            customApiKey: isServerManagedKey ? undefined : apiKey
+          });
+        });
       } else {
-        alert(errorMsg); 
+        const ai = getAI();
+        const sessionPromise = ai.live.connect({
+          model: GeminiModel.FLASH_LIVE,
+          callbacks: {
+            onopen: () => {
+              logAudioDiagnostic('live:ws-onopen', {
+                inputState: inputCtx.state,
+                outputState: outputCtx.state
+              });
+              startMicStreamPump((pcmBlob) => {
+                sessionPromise.then(s => s.sendRealtimeInput({ media: pcmBlob }));
+              });
+            },
+            onmessage: handleLiveMessage,
+            onclose: (ev: any) => {
+              logAudioDiagnostic('live:ws-onclose', { code: ev?.code, reason: ev?.reason }, 'warn');
+              stopLiveConversation();
+            },
+            onerror: (err) => {
+              logAudioDiagnostic('live:ws-onerror', { error: err?.message || String(err) }, 'error');
+              stopLiveConversation();
+            }
+          },
+          config: {
+            responseModalities: ['AUDIO' as any],
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } } },
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
+            systemInstruction: liveSystemInstruction
+          }
+        });
+        sessionRef.current = await sessionPromise;
+        logAudioDiagnostic('live:session-promise-resolved', {
+          sessionActive: Boolean(sessionRef.current),
+          inputState: inputCtx.state,
+          outputState: outputCtx.state
+        });
+      }
+    } catch (err: any) {
+      logAudioDiagnostic('live:start-failed', { error: err?.message || String(err) }, 'error');
+      stopLiveConversation();
+      const errorMsg = err?.message || JSON.stringify(err);
+      if (errorMsg.includes('API key not valid') || errorMsg.includes('INVALID_ARGUMENT')) {
+        if (getApiKey() !== 'ZEREO_CORE_LINK') {
+          clearApiKey();
+        }
+        setGateWarning("Principal, our neural authorization was rejected. Please verify your Gemini API key in System Control.");
+      } else {
+        setGateWarning(errorMsg);
       }
     }
   };
@@ -519,6 +1001,7 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
 
   const handleAuditionSignature = async (customSampleText?: string) => {
     if (isAuditioningSignature) {
+      logAudioDiagnostic('audition:stop-requested');
       jeremyIronsVoice.stop();
       setIsAuditioningSignature(false);
       setIsThinking(false);
@@ -531,9 +1014,11 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
 
     setIsAuditioningSignature(true);
     setIsThinking(true);
+    logAudioDiagnostic('audition:start', { preset: activePreset.id, charCount: textToSpeak.length });
+    await resumeAudioContextsAfterInteraction('audition-signature');
 
     try {
-      await jeremyIronsVoice.speak(
+      const speakPromise = jeremyIronsVoice.speak(
         textToSpeak,
         {
           ...signatureMeta.config,
@@ -552,16 +1037,25 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
           speechRate: activePreset.speechRate
         },
         () => {
+          logAudioDiagnostic('audition:speak-onStart', { ttsContextState: jeremyIronsVoice.getAudioContextState() });
           setIsThinking(true);
           setIsAuditioningSignature(true);
         },
         () => {
+          logAudioDiagnostic('audition:speak-onEnded', { ttsContextState: jeremyIronsVoice.getAudioContextState() });
           setIsThinking(false);
           setIsAuditioningSignature(false);
         }
       );
-    } catch (err) {
-      console.warn('Signature audition failed:', err);
+      const didSpeak = await speakPromise;
+      logAudioDiagnostic(
+        didSpeak ? 'audition:speak-promise-resolved' : 'audition:speak-returned-false',
+        { didSpeak, ttsContextStateAfterSpeak: jeremyIronsVoice.getAudioContextState() },
+        didSpeak ? 'info' : 'warn'
+      );
+      setAudioStreamState(jeremyIronsVoice.getAudioContextState());
+    } catch (err: any) {
+      logAudioDiagnostic('audition:speak-rejected', { error: err?.message || String(err) }, 'error');
       setIsThinking(false);
       setIsAuditioningSignature(false);
     }
@@ -572,6 +1066,12 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
     if (!cleanPrompt) return;
     setIsSynthesizing(true);
     setIsThinking(true);
+    logAudioDiagnostic('tts:start', {
+      profile: selectedProfile,
+      preset: activeFormantPreset,
+      charCount: cleanPrompt.length
+    });
+    await resumeAudioContextsAfterInteraction('tts-execute');
     const synthStartedAt = Date.now();
     try {
       const profileMeta = VOICE_MODULATION_PROFILES[selectedProfile] || VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
@@ -600,18 +1100,34 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
         formantPreset: activeFormantPreset
       }).then(() => setLogRefreshSignal((n) => n + 1));
 
-      await jeremyIronsVoice.speak(cleanPrompt, mergedConfig, () => {
-        setIsThinking(true);
-      }, () => {
-        setIsThinking(false);
-        const elapsed = Date.now() - synthStartedAt;
-        if (elapsed > 0) {
-          // Ensure live buffer also reflects recent synthesis
-          setTranscriptions((prev) => [...prev, { role: 'Steward', text: cleanPrompt }]);
+      const didSpeak = await jeremyIronsVoice.speak(
+        cleanPrompt,
+        mergedConfig,
+        () => {
+          logAudioDiagnostic('tts:speak-onStart', { ttsContextState: jeremyIronsVoice.getAudioContextState() });
+          setIsThinking(true);
+        },
+        () => {
+          logAudioDiagnostic('tts:speak-onEnded', {
+            elapsedMs: Date.now() - synthStartedAt,
+            ttsContextState: jeremyIronsVoice.getAudioContextState()
+          });
+          setIsThinking(false);
+          const elapsed = Date.now() - synthStartedAt;
+          if (elapsed > 0) {
+            // Ensure live buffer also reflects recent synthesis
+            setTranscriptions((prev) => [...prev, { role: 'Steward', text: cleanPrompt }]);
+          }
         }
-      });
-    } catch (err) {
-      console.error('TTS execution failed:', err);
+      );
+      logAudioDiagnostic(
+        didSpeak ? 'tts:speak-promise-resolved' : 'tts:speak-returned-false',
+        { didSpeak, ttsContextStateAfterSpeak: jeremyIronsVoice.getAudioContextState() },
+        didSpeak ? 'info' : 'warn'
+      );
+      setAudioStreamState(jeremyIronsVoice.getAudioContextState());
+    } catch (err: any) {
+      logAudioDiagnostic('tts:speak-rejected', { error: err?.message || String(err) }, 'error');
       setIsThinking(false);
     } finally {
       setIsSynthesizing(false);
@@ -685,6 +1201,17 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
             <Monitor className="w-5 h-5 text-amber-500" />
             <span>{screenStream ? 'Screen Active' : 'Screen Share'}</span>
           </button>
+
+          {(audioStreamState === 'suspended' || (audioStreamState as string) === 'interrupted') && (
+            <button
+              type="button"
+              onClick={() => void resumeAudioContextsAfterInteraction('manual-resume-button')}
+              className="px-6 py-5 rounded-2xl font-bold uppercase tracking-widest flex items-center gap-2.5 transition-all shadow-2xl border bg-amber-500 text-black border-amber-400 hover:bg-amber-400 cursor-pointer"
+            >
+              <Volume2 className="w-5 h-5" />
+              <span>Resume Audio Stream</span>
+            </button>
+          )}
         </div>
       </div>
 

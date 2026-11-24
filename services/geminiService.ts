@@ -302,7 +302,11 @@ export const safeGenerateContent = async (params: any) => {
   }
 
   const adjustedParams = { ...params };
-  if (adjustedParams.config?.tools && adjustedParams.config.tools.length > 0) {
+  const toolsArr = Array.isArray(adjustedParams.config?.tools) ? adjustedParams.config.tools : [];
+  const hasServerSideTools = toolsArr.some(
+    (t: any) => t && (t.googleSearch || t.googleMaps || t.urlContext || t.codeExecution)
+  );
+  if (hasServerSideTools) {
     adjustedParams.config = {
       ...adjustedParams.config,
       toolConfig: {
@@ -347,6 +351,9 @@ export const safeGenerateContent = async (params: any) => {
       if (res.status === 504 || res.status === 502 || msg.includes('UPSTREAM_TIMEOUT') || msg.includes('GATEWAY_TIMEOUT') || msg.includes('DEADLINE_EXCEEDED') || rawText.includes('<!doctype') || rawText.includes('<html>')) {
         throw new Error("GATEWAY_TIMEOUT: Upstream neural bridge latency spike detected. Failover engaged.");
       }
+      if (res.status === 422 || msg.includes('CONTENT_BLOCKED') || msg.includes('SAFETY')) {
+        throw new Error(`CONTENT_BLOCKED: ${msg}`);
+      }
       throw new Error(msg || "SERVER_RESPONSE_INVALID: Upstream server returned non-JSON data. Please retry directive.");
     }
 
@@ -355,7 +362,8 @@ export const safeGenerateContent = async (params: any) => {
       text: data.text || '',
       candidates: data.candidates || [],
       functionCalls: data.functionCalls || undefined,
-      usageMetadata: data.usageMetadata
+      usageMetadata: data.usageMetadata,
+      servedByModel: data.servedByModel
     };
   } catch (err: any) {
     console.warn("geminiService: generateContent issue:", err?.message || err);

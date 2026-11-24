@@ -45,7 +45,8 @@ import {
   Music,
   Paperclip,
   Globe,
-  Home
+  Home,
+  Scale
 } from 'lucide-react';
 import { ChatThread, AppTab, EmotionalMap, KnowledgeOfUseItem, KnowledgeCategory } from '../types';
 import ButlerAvatar from './ButlerAvatar';
@@ -904,6 +905,15 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                       icon: MessageSquare,
                       color: 'from-amber-950/60 to-black',
                       border: 'border-amber-500/40',
+                      textColor: 'text-amber-300'
+                    },
+                    {
+                      id: AppTab.LEGAL,
+                      name: 'Grey House Legal Counsel',
+                      tagline: 'U.S. Code 1–54 • All 50 States • Professional, Business, Criminal & Civil Law',
+                      icon: Scale,
+                      color: 'from-amber-950/60 to-black',
+                      border: 'border-amber-500/50',
                       textColor: 'text-amber-300'
                     },
                     {

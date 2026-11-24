@@ -54,7 +54,24 @@ function isNoisyMemory(m: StoredMemory): boolean {
   const c = (m.content || '').toLowerCase();
   return (
     c.includes('daily quota for this api key has been reached') ||
-    c.includes('processing arrays are temporarily exhausted')
+    c.includes('processing arrays are temporarily exhausted') ||
+    c.includes('upstream neural routing latency spike') ||
+    c.includes('thermodynamic anomaly has interrupted reasoning')
+  );
+}
+
+export function isTransientErrorMessage(msg: ChatMessage): boolean {
+  if (!msg) return false;
+  if (msg.isErrorNotice) return true;
+  if (msg.role !== 'model') return false;
+  const t = (msg.text || '').toLowerCase();
+  return (
+    t.includes('a thermodynamic anomaly has interrupted reasoning') ||
+    t.includes('an upstream neural routing latency spike was intercepted') ||
+    t.includes('central processing arrays encountered elevated demand') ||
+    t.includes('my processing arrays are temporarily exhausted') ||
+    t.includes('packet formatting anomaly occurred during transmission') ||
+    t.includes('neural authorization has been compromised at the source')
   );
 }
 
@@ -95,7 +112,7 @@ export function buildMultiTurnContents(
   maxTurns: number = 24,
   extraInlineParts?: Array<{ mimeType: string; data: string }>
 ): Array<{ role: 'user' | 'model'; parts: any[] }> {
-  const recentHistory = (history || []).slice(-maxTurns);
+  const recentHistory = (history || []).filter((m) => !isTransientErrorMessage(m)).slice(-maxTurns);
   const contents: Array<{ role: 'user' | 'model'; parts: any[] }> = [];
 
   for (const msg of recentHistory) {
@@ -175,7 +192,7 @@ export function buildClaudeHistory(
   currentInput: string,
   maxTurns: number = 24
 ): ClaudeTurnMessage[] {
-  const recentHistory = (history || []).slice(-maxTurns);
+  const recentHistory = (history || []).filter((m) => !isTransientErrorMessage(m)).slice(-maxTurns);
   const result: ClaudeTurnMessage[] = [];
 
   for (const msg of recentHistory) {
@@ -364,13 +381,14 @@ export async function syncThreadEpisodicMemory(
   threadTitle: string,
   messages: ChatMessage[]
 ): Promise<StoredMemory | null> {
-  if (!threadId || !messages || messages.length < 2) return null;
+  const cleanMessages = messages.filter((m) => !isTransientErrorMessage(m));
+  if (cleanMessages.length < 2) return null;
 
-  const userTurns = messages.filter((m) => m.role === 'user' && (m.text || '').trim().length > 0);
+  const userTurns = cleanMessages.filter((m) => m.role === 'user' && (m.text || '').trim().length > 0);
   if (userTurns.length === 0) return null;
 
   const firstTopic = cleanSnippet(userTurns[0].text, 90);
-  const recentPairs = messages
+  const recentPairs = cleanMessages
     .filter((m) => (m.text || '').trim().length > 0)
     .slice(-4)
     .map((m) => `${m.role === 'user' ? 'Principal' : 'ZereØ'}: ${cleanSnippet(m.text, 130)}`);
