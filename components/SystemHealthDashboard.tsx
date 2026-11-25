@@ -1,3 +1,4 @@
+// [TAG: 11]
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Activity, 
@@ -206,17 +207,8 @@ export const SystemHealthDashboard: React.FC<SystemHealthDashboardProps> = ({ so
       addLog(`Neural Bridge Socket severed: ${reason}`, "warn");
     };
 
-    const onNeuralPong = (data: any) => {
-      const now = performance.now();
-      const rtt = socketPingStartRef.current ? Math.round(now - socketPingStartRef.current) : 5;
-      recordLatency(rtt, 'socket');
-      setIsPinging(false);
-      addLog(`Neural Pong captured: ${rtt}ms RTT • Core Synced`, 'pulse');
-    };
-
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
-    socket.on('neural:pong', onNeuralPong);
 
     if (socket.connected) {
       setIsSocketConnected(true);
@@ -225,18 +217,16 @@ export const SystemHealthDashboard: React.FC<SystemHealthDashboardProps> = ({ so
     return () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
-      socket.off('neural:pong', onNeuralPong);
     };
   }, [socket]);
 
-  // Window event fallback for Doorman / Local pongs
+  // Single pong bridge listener from App.tsx
   useEffect(() => {
-    const handleLocalPong = (e: any) => {
-      if (socketPingStartRef.current) {
-        const rtt = Math.round(performance.now() - socketPingStartRef.current);
-        recordLatency(rtt, 'socket');
-        setIsPinging(false);
-      }
+    const handleLocalPong = () => {
+      const rtt = socketPingStartRef.current ? Math.round(performance.now() - socketPingStartRef.current) : 5;
+      recordLatency(rtt, 'socket');
+      setIsPinging(false);
+      addLog(`Neural Pong captured: ${rtt}ms RTT • Core Synced`, 'pulse');
     };
     window.addEventListener('neural:pong_local', handleLocalPong);
     
@@ -252,14 +242,14 @@ export const SystemHealthDashboard: React.FC<SystemHealthDashboardProps> = ({ so
     };
   }, []);
 
-  // Dispatch ping function
+  // Dispatch ping via single App.tsx socket ping path
   const triggerPing = () => {
     setIsPinging(true);
     setPingsSentCount(prev => prev + 1);
     
     if (socket && socket.connected) {
       socketPingStartRef.current = performance.now();
-      socket.emit('neural:ping', { clientTime: Date.now() });
+      window.dispatchEvent(new CustomEvent('broker:trigger_ping'));
     } else {
       fetchTelemetry();
     }

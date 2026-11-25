@@ -1,3 +1,4 @@
+// [TAG: 11]
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -7,6 +8,7 @@ import {
   Grid, List, Check, Copy, X, Plus, Monitor, Tag
 } from 'lucide-react';
 import { VisualCapture, VisualCaptureSource } from '../types';
+import { fetchMemoryRecords, deleteMemoryRecord } from '../services/conversationMemoryService';
 
 interface Memory {
   id: string;
@@ -35,9 +37,27 @@ const MemoryCore: React.FC = () => {
 
   const fetchMemories = async () => {
     try {
-      const res = await fetch('/api/memories');
-      const data = await res.json();
-      setMemories(data);
+      const [memData, auditRes] = await Promise.all([
+        fetchMemoryRecords(),
+        fetch('/api/audit/principal-buffer').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      ]);
+      const normalizedMemories: Memory[] = memData.map((m) => ({
+        id: m.id,
+        title: m.title,
+        content: m.content,
+        type: m.type,
+        timestamp: String(m.timestamp),
+      }));
+      const auditEntries: Memory[] = Array.isArray(auditRes?.buffer)
+        ? auditRes.buffer.map((a: any) => ({
+            id: a.id || a.requestId || `audit-${a.timestamp || Date.now()}`,
+            title: `[AUDIT: REASONING] ${a.requestId || a.id || 'TRACE'}`,
+            content: `TIMESTAMP: ${a.isoTime || ''}\nSTATUS: ${a.status || ''}\nMODEL: ${a.model || ''}\nLATENCY: ${a.durationMs ?? 0}ms\nSOURCE: ${a.source || 'neural_bridge'}\nPROMPT:\n${a.prompt || ''}\n\nRAW REASONING OUTPUT:\n${a.rawResponse || ''}\n\nAUDIT SIGNET: ${a.auditHash || ''}\nCLASSIFICATION: ${a.classification || ''}`,
+            type: 'principal_audit',
+            timestamp: a.isoTime || new Date(a.timestamp || Date.now()).toISOString(),
+          }))
+        : [];
+      setMemories([...normalizedMemories, ...auditEntries]);
     } catch (err) {
       console.error('Failed to load memories');
     } finally {
@@ -60,7 +80,7 @@ const MemoryCore: React.FC = () => {
 
   const deleteMemory = async (id: string) => {
     try {
-      await fetch(`/api/memories/${id}`, { method: 'DELETE' });
+      await deleteMemoryRecord(id);
       setMemories(prev => prev.filter(m => m.id !== id));
       if (selectedAuditTrace?.id === id) {
         setSelectedAuditTrace(null);

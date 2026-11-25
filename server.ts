@@ -1330,13 +1330,6 @@ async function startServer() {
       console.log("SERVER: Pulse Daemon reset via Neural Activity.");
     });
 
-    socket.on('audit:clear', () => {
-      const prevCount = principalAuditBuffer.length;
-      principalAuditBuffer.length = 0;
-      addDaemonLog('TASK', `Principal audit buffer purged (${prevCount} records cleared).`);
-      io.emit('audit:cleared', { timestamp: Date.now(), clearedCount: prevCount });
-    });
-
     socket.on('tactical:touch_intent', (data: { x: number; y: number; pressure?: number; targetTag?: string; quadrant?: string; timestamp?: number } = { x: 0, y: 0 }) => {
       daemonState.urgency = 0;
       daemonState.lastActivity = Date.now();
@@ -1425,22 +1418,6 @@ async function startServer() {
         bufferDurationMs: metrics.pipeline.bufferDurationMs,
         pipelineLatencyMs: metrics.pipeline.latencyMs,
         status: 'OPTIMAL'
-      });
-    });
-
-    // Hidden Principal-Only Reasoning Audit Ingest
-    socket.on('neural:audit_log', (auditEntry: any) => {
-      if (!auditEntry) return;
-      console.log(`SERVER: [AUDIT: REASONING] Storing trace for Request ID ${auditEntry.requestId || 'UNKNOWN'}`);
-      principalAuditBuffer.unshift(auditEntry);
-      if (principalAuditBuffer.length > 500) {
-        principalAuditBuffer.pop();
-      }
-      // Broadcast audit event to any connected Principal monitors
-      io.emit('neural:audit_ack', {
-        id: auditEntry.id,
-        timestamp: Date.now(),
-        bufferSize: principalAuditBuffer.length
       });
     });
 
@@ -1709,13 +1686,39 @@ async function startServer() {
     });
   });
 
-  // API Routes
+  // API Routes — Single durable server audit buffer
   app.get('/api/audit/principal-buffer', (req, res) => {
     res.status(200).json({
       success: true,
       count: principalAuditBuffer.length,
       buffer: principalAuditBuffer,
       timestamp: Date.now()
+    });
+  });
+
+  app.post('/api/audit/principal-buffer', (req, res) => {
+    const auditEntry = req.body;
+    if (!auditEntry || typeof auditEntry !== 'object') {
+      return res.status(400).json({ error: 'Audit record payload is required.' });
+    }
+    const duplicate = principalAuditBuffer.find(
+      (item) => (auditEntry.id && item.id === auditEntry.id) || (auditEntry.requestId && item.requestId === auditEntry.requestId)
+    );
+    if (!duplicate) {
+      principalAuditBuffer.unshift(auditEntry);
+      if (principalAuditBuffer.length > 500) {
+        principalAuditBuffer.pop();
+      }
+      io.emit('neural:audit_ack', {
+        id: auditEntry.id,
+        timestamp: Date.now(),
+        bufferSize: principalAuditBuffer.length
+      });
+    }
+    return res.status(200).json({
+      success: true,
+      count: principalAuditBuffer.length,
+      record: duplicate || auditEntry
     });
   });
 
@@ -1732,27 +1735,6 @@ async function startServer() {
     });
   });
 
-  app.post('/api/neural/ping', (req, res) => {
-    daemonState.urgency = 0;
-    daemonState.lastActivity = Date.now();
-    addDaemonLog('VIGILANCE', 'Neural Core ping received via REST channel. Resonance 100%.');
-    io.emit('neural:pong', {
-      status: 'NOMINAL',
-      latencyMs: 0.12,
-      timestamp: Date.now(),
-      uptimeSeconds: stewardDaemonState.uptimeSeconds,
-      stewardStatus: stewardDaemonState.status
-    });
-    io.emit('neural:pulse', { timestamp: Date.now(), source: 'radial_fab' });
-    res.status(200).json({
-      success: true,
-      status: 'NOMINAL',
-      latencyMs: 0.12,
-      timestamp: Date.now(),
-      uptimeSeconds: stewardDaemonState.uptimeSeconds,
-      message: 'Neural Core pulse nominal. Resonance 100% nominal.'
-    });
-  });
   app.get('/api/voice/bridge-ping', async (req, res) => {
     const t0 = process.hrtime.bigint();
     const queryUnixSocketPing = (): Promise<number> => {
@@ -2351,16 +2333,18 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post('/api/gemini/generate', async (req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    try {
-      const customApiKey = getCustomApiKey(req);
+  const executeHydrogenGeneration = async (params: {
+    ai: GoogleGenAI;
+    keyFp: string;
+    model?: string;
+    contents: any;
+    config?: any;
+    totalRouteBudgetMs?: number;
+  }): Promise<{ response: any; successfulModel: string; groundingBypassUsed: boolean }> => {
+    const { ai, keyFp, model, contents, config, totalRouteBudgetMs = 58000 } = params;
 
-      const ai = getGeminiClient(customApiKey);
-      const { model, contents, config } = req.body;
-
-      // Select candidate models with automatic failover ordered by reliability
-      const candidateModels: string[] = [];
+    // Select candidate models with automatic failover ordered by reliability
+    const candidateModels: string[] = [];
       const requestedModel = typeof model === 'string' ? model.trim() : '';
 
       const isImageRequest = !!config?.imageConfig || requestedModel.includes('image');
@@ -2452,15 +2436,14 @@ async function startServer() {
         return cfg;
       };
 
-      const keyFp = getKeyFingerprint(customApiKey);
       let lastError: any = null;
       let response: any = null;
       let successfulModel = '';
+      let groundingBypassUsed = false;
       const attemptErrors: Array<{ model: string; status: number; message: string }> = [];
 
       const hasThinkingConfig = Boolean(config?.thinkingConfig);
       const baseTimeoutMs = hasThinkingConfig ? 22000 : 9500;
-      const totalRouteBudgetMs = 58000;
       const routeStartedAt = Date.now();
       const readyCandidates: string[] = [];
       const cooledDownFallback: string[] = [];
@@ -2593,6 +2576,7 @@ async function startServer() {
               if (bypassResp && (hasText || hasCalls)) {
                 response = bypassResp;
                 successfulModel = m;
+                groundingBypassUsed = true;
                 console.log(`SERVER: Search grounding quota bypassed via direct synthesis [${m}]`);
                 break;
               }
@@ -2662,6 +2646,25 @@ async function startServer() {
         }
         throw finalError;
       }
+
+      return { response, successfulModel, groundingBypassUsed };
+  };
+
+  app.post('/api/gemini/generate', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    try {
+      const customApiKey = getCustomApiKey(req);
+      const ai = getGeminiClient(customApiKey);
+      const keyFp = getKeyFingerprint(customApiKey);
+      const { model, contents, config } = req.body;
+
+      const { response, successfulModel } = await executeHydrogenGeneration({
+        ai,
+        keyFp,
+        model,
+        contents,
+        config
+      });
 
       return res.status(200).json({
         text: response.text || '',
@@ -3976,102 +3979,25 @@ ${opposingParty ? `ADVERSE / COUNTERPARTY / AGENCY: ${opposingParty}\n` : ''}${c
 PRINCIPAL DIRECTIVE & FACTS:
 ${cleanQuery}`;
 
-      const legalModel = 'gemini-4-hydrogen';
-      const cdKey = `${legalModel}:${keyFp}`;
-      const routeStartedAt = Date.now();
-      const totalBudgetMs = 60000;
-
-      let response: any = null;
-      let servedByModel = '';
-      let lastError: any = null;
-      let groundingFallbackUsed = false;
-
-      const executeLegalAttempt = async (useSearch: boolean, maxTimeoutMs: number): Promise<boolean> => {
-        const remainingMs = totalBudgetMs - (Date.now() - routeStartedAt);
-        if (remainingMs < 8000) return false;
-        const timeoutMs = Math.min(maxTimeoutMs, Math.max(8000, remainingMs));
-        const config: any = {
+      const { response, successfulModel, groundingBypassUsed } = await executeHydrogenGeneration({
+        ai,
+        keyFp,
+        model: 'gemini-4-hydrogen',
+        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+        config: {
           systemInstruction,
           maxOutputTokens: 8192,
           safetySettings: DEFAULT_SAFETY_SETTINGS,
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          ...(useSearch ? { tools: [{ googleSearch: {} }] } : {}),
-        };
+          tools: [{ googleSearch: {} }],
+        },
+        totalRouteBudgetMs: 60000,
+      });
 
-        try {
-          const candidateResponse = await invokeModelWithTimeout(
-            ai,
-            {
-              model: legalModel,
-              contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-              config,
-            },
-            timeoutMs,
-            useSearch ? 'LEGAL_UPSTREAM_TIMEOUT' : 'LEGAL_DIRECT_TIMEOUT'
-          );
-
-          if (candidateResponse?.text && String(candidateResponse.text).trim()) {
-            response = candidateResponse;
-            textModelCooldowns.delete(cdKey);
-            servedByModel = useSearch ? legalModel : `${legalModel} (direct-precedent-synthesis)`;
-            groundingFallbackUsed = !useSearch;
-            if (!useSearch) {
-              console.log(`SERVER: /api/legal/counsel bypassed Search quota via direct synthesis [${legalModel}]`);
-            }
-            return true;
-          }
-
-          throw Object.assign(
-            new Error(`LEGAL_EMPTY_RESPONSE: Model [${legalModel}] returned no readable counsel`),
-            { status: 502 }
-          );
-        } catch (err: any) {
-          lastError = err;
-          const statusNum = getNumericHttpStatus(err, 500);
-          const msgStr = String(err?.message || err || '');
-          if (useSearch) {
-            if (statusNum === 429 || msgStr.includes('RESOURCE_EXHAUSTED')) {
-              textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 15 * 1000, reason: 'QUOTA' });
-            } else if (statusNum === 404 || msgStr.includes('NOT_FOUND')) {
-              textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 30 * 60 * 1000, reason: 'NOT_FOUND' });
-            } else if (msgStr.includes('TIMEOUT') || statusNum === 503 || statusNum === 504 || statusNum === 502) {
-              textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 6 * 1000, reason: 'TIMEOUT' });
-            }
-            console.log(`SERVER: /api/legal/counsel failover [${legalModel}] (${statusNum}): ${msgStr.slice(0, 140)}`);
-          } else {
-            console.log(`SERVER: /api/legal/counsel direct synthesis [${legalModel}] failed:`, msgStr.slice(0, 140));
-          }
-          return false;
-        }
-      };
-
-      // Phase 1: Search-grounded statutory verification (skip immediately if NOT_FOUND)
-      const activeCooldown = textModelCooldowns.get(cdKey);
-      if (!activeCooldown || activeCooldown.reason !== 'NOT_FOUND' || activeCooldown.blockedUntil <= Date.now()) {
-        await executeLegalAttempt(true, 12000);
-      }
-
-      // Phase 2: Bypass Google Search grounding quota wall via direct statutory & Law Library precedent synthesis
-      if (!response && getNumericHttpStatus(lastError, 500) !== 403) {
-        await executeLegalAttempt(false, 18000);
-      }
-
-      if (!response) {
-        const statusCode = getNumericHttpStatus(lastError, 500);
-        let readableError = String(lastError?.message || 'Unable to reach statutory verification substrate.');
-        try {
-          if (readableError.trim().startsWith('{')) {
-            const parsedErr = JSON.parse(readableError);
-            if (parsedErr?.error?.message) {
-              readableError = parsedErr.error.message;
-            }
-          }
-        } catch {}
-        if (statusCode === 429 || readableError.includes('quota')) {
-          readableError = 'Gemini API quota temporarily reached on the active key. Retry shortly, configure an updated key in System Control, or open official U.S. Code / State Code links directly in the directory.';
-        }
-        return res.status(statusCode).json({ error: readableError });
-      }
+      const servedByModel = groundingBypassUsed
+        ? `${successfulModel} (direct-precedent-synthesis)`
+        : successfulModel;
+      const groundingFallbackUsed = groundingBypassUsed;
 
       const contentText = response.text || '';
       const rawChunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];

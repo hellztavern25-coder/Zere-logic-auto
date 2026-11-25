@@ -460,23 +460,22 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
     };
     checkStatus();
 
-    if (socket) {
-      const handleDaemonState = (data: any) => {
-        if (data.status === 'ONLINE' && data.verified) {
-          setIsPrincipalVerified(true);
-          setGateWarning(null);
-        } else if (data.status === 'STANDBY_LOCKED') {
-          setIsPrincipalVerified(false);
-          if (isLive) {
-            stopLiveConversation();
-          }
+    const handleDaemonState = (e: Event) => {
+      const data = (e as CustomEvent).detail || {};
+      if (data.status === 'ONLINE' && data.verified) {
+        setIsPrincipalVerified(true);
+        setGateWarning(null);
+      } else if (data.status === 'STANDBY_LOCKED') {
+        setIsPrincipalVerified(false);
+        if (isLive) {
+          stopLiveConversation();
         }
-      };
-      socket.on('voice:daemon_state', handleDaemonState);
-      return () => {
-        socket.off('voice:daemon_state', handleDaemonState);
-      };
-    }
+      }
+    };
+    window.addEventListener('zereo:voice_daemon_state', handleDaemonState);
+    return () => {
+      window.removeEventListener('zereo:voice_daemon_state', handleDaemonState);
+    };
   }, [socket, isLive]);
 
   useEffect(() => {

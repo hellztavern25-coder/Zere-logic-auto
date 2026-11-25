@@ -71,7 +71,8 @@ const Layout: React.FC<LayoutProps> = ({
       }
     };
 
-    const handleVoiceDaemonState = (data: any) => {
+    const handleVoiceDaemonState = (e: Event) => {
+      const data = (e as CustomEvent).detail;
       if (data?.status === 'STANDBY_LOCKED') {
         headerPulse.triggerCritical(
           'Voice Daemon Locked',
@@ -82,14 +83,18 @@ const Layout: React.FC<LayoutProps> = ({
       }
     };
 
-    socket.on('daemon:briefing', handleBriefing);
-    socket.on('daemon:tick', handleDaemonTick);
-    socket.on('voice:daemon_state', handleVoiceDaemonState);
+    window.addEventListener('zereo:voice_daemon_state', handleVoiceDaemonState);
+    if (socket) {
+      socket.on('daemon:briefing', handleBriefing);
+      socket.on('daemon:tick', handleDaemonTick);
+    }
 
     return () => {
-      socket.off('daemon:briefing', handleBriefing);
-      socket.off('daemon:tick', handleDaemonTick);
-      socket.off('voice:daemon_state', handleVoiceDaemonState);
+      window.removeEventListener('zereo:voice_daemon_state', handleVoiceDaemonState);
+      if (socket) {
+        socket.off('daemon:briefing', handleBriefing);
+        socket.off('daemon:tick', handleDaemonTick);
+      }
     };
   }, [socket]);
 

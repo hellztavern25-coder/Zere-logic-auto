@@ -1,3 +1,4 @@
+// [TAG: 11]
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Socket } from 'socket.io-client';
@@ -17,7 +18,8 @@ import {
   Lock,
   Bell
 } from 'lucide-react';
-import { jeremyIronsVoice } from '../services/jeremyIronsVoiceService';
+import { jeremyIronsVoice, getTtsEnabled, setTtsEnabledPreference } from '../services/jeremyIronsVoiceService';
+import { setPrincipalActivePreference } from '../services/stewardIdentity';
 
 interface RadialTacticalFABProps {
   isPrincipalMode: boolean;
@@ -45,9 +47,7 @@ export const RadialTacticalFAB: React.FC<RadialTacticalFABProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ title: string; detail?: string; type: 'success' | 'info' | 'pulse' } | null>(null);
-  const [ttsEnabled, setTtsEnabled] = useState<boolean>(() => {
-    return localStorage.getItem('ZEREO_TTS_ENABLED') !== 'false';
-  });
+  const [ttsEnabled, setTtsEnabled] = useState<boolean>(() => getTtsEnabled());
   const [isPinging, setIsPinging] = useState(false);
   const [pulseWave, setPulseWave] = useState(false);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -116,30 +116,22 @@ export const RadialTacticalFAB: React.FC<RadialTacticalFABProps> = ({
     playTacticalClick(520, 0.08, 'triangle');
     let clearedCount = 0;
 
-    // 1. Client buffer clear
-    if (typeof window !== 'undefined' && window.__CLEAR_ZEREO_AUDIT_BUFFER__) {
-      const logs = window.__GET_ZEREO_AUDIT_LOGS__?.() || [];
-      clearedCount = logs.length;
-      window.__CLEAR_ZEREO_AUDIT_BUFFER__();
-    }
-    try {
-      localStorage.removeItem('ZEREO_PRINCIPAL_AUDIT_BUFFER');
-    } catch {}
-
-    // 2. Server buffer clear via REST
+    // 1. Single durable server clear via REST
     try {
       const res = await fetch('/api/audit/principal-buffer', { method: 'DELETE' });
       if (res.ok) {
         const data = await res.json();
-        clearedCount = Math.max(clearedCount, data.clearedCount || 0);
+        clearedCount = data.clearedCount || 0;
       }
     } catch {
       // Offline fallback
     }
 
-    // 3. Socket broadcast
-    if (socket && socket.connected) {
-      socket.emit('audit:clear');
+    // 2. Refresh in-memory view
+    if (typeof window !== 'undefined' && window.__CLEAR_ZEREO_AUDIT_BUFFER__) {
+      const logs = window.__GET_ZEREO_AUDIT_LOGS__?.() || [];
+      clearedCount = Math.max(clearedCount, logs.length);
+      window.__CLEAR_ZEREO_AUDIT_BUFFER__();
     }
 
     window.dispatchEvent(new CustomEvent('audit:cleared', { detail: { count: clearedCount } }));
@@ -158,9 +150,7 @@ export const RadialTacticalFAB: React.FC<RadialTacticalFABProps> = ({
     setIsPrincipalMode(nextState);
     playTacticalClick(nextState ? 880 : 440, 0.1, 'sawtooth');
 
-    try {
-      localStorage.setItem('ZEREO_PRINCIPAL_ACTIVE', String(nextState));
-    } catch {}
+    setPrincipalActivePreference(nextState);
 
     // Notify backend
     try {
@@ -191,49 +181,45 @@ export const RadialTacticalFAB: React.FC<RadialTacticalFABProps> = ({
     setIsOpen(false);
   };
 
-  // Action: Ping Neural Core
+  // Action: Ping Neural Core (single socket ping path via App.tsx)
   const handlePingNeuralCore = async () => {
     setIsPinging(true);
     setPulseWave(true);
     playTacticalClick(1046, 0.12, 'sine'); // High C
     const startTime = performance.now();
 
-    // Trigger visual pulse in ChatBot / DOM
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('broker:trigger_doorman_ping', { 
-        detail: { source: 'radial_fab' } 
-      }));
-    }
-
-    // Socket ping
-    if (socket && socket.connected) {
-      socket.emit('neural:ping');
-    }
-
-    // REST latency measurement
     try {
-      const res = await fetch('/api/neural/ping', { method: 'POST' });
-      const durationMs = (performance.now() - startTime).toFixed(1);
-      if (res.ok) {
-        triggerToast(
-          'Neural Core: NOMINAL',
-          `Handshake confirmed in ${durationMs}ms. Substrate resonance 100%.`,
-          'pulse'
-        );
-      } else {
-        triggerToast(
-          'Neural Ping Broadcasted',
-          `Array signal dispatched in ${durationMs}ms.`,
-          'info'
-        );
-      }
-    } catch {
-      const durationMs = (performance.now() - startTime).toFixed(1);
-      triggerToast(
-        'Neural Pulse Radiated',
-        `Local acoustic & visual sweep executed (${durationMs}ms).`,
-        'pulse'
-      );
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          window.removeEventListener('neural:pong_local', onPong);
+          resolve();
+        };
+        const onPong = () => {
+          const durationMs = (performance.now() - startTime).toFixed(1);
+          triggerToast(
+            'Neural Core: NOMINAL',
+            `Handshake confirmed in ${durationMs}ms. Substrate resonance 100%.`,
+            'pulse'
+          );
+          finish();
+        };
+        window.addEventListener('neural:pong_local', onPong);
+        window.dispatchEvent(new CustomEvent('broker:trigger_ping'));
+        setTimeout(() => {
+          if (!settled) {
+            const durationMs = (performance.now() - startTime).toFixed(1);
+            triggerToast(
+              'Neural Ping Broadcasted',
+              `Array signal dispatched in ${durationMs}ms.`,
+              'info'
+            );
+            finish();
+          }
+        }, 1200);
+      });
     } finally {
       setIsPinging(false);
       setTimeout(() => setPulseWave(false), 900);
@@ -243,19 +229,13 @@ export const RadialTacticalFAB: React.FC<RadialTacticalFABProps> = ({
 
   // Action: Toggle Jeremy Irons Voice
   const handleToggleVoice = () => {
-    const nextState = !ttsEnabled;
+    const nextState = setTtsEnabledPreference(!ttsEnabled);
     setTtsEnabled(nextState);
     playTacticalClick(nextState ? 660 : 330, 0.08);
-
-    try {
-      localStorage.setItem('ZEREO_TTS_ENABLED', String(nextState));
-    } catch {}
 
     if (!nextState) {
       jeremyIronsVoice.stop();
     }
-
-    window.dispatchEvent(new CustomEvent('zereo:tts_toggle', { detail: { enabled: nextState } }));
 
     triggerToast(
       nextState ? 'Voice Cadence: ONLINE' : 'Voice Cadence: MUTED',

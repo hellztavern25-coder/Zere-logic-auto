@@ -29,7 +29,11 @@ import { AppTab, GeminiModel } from './types';
 import { getAI, refreshConfig, getApiKey, isServerPrincipalActive, safeGenerateContent } from './services/geminiService';
 import { headerPulse } from './services/headerPulseService';
 import { resolveNavTab } from './services/navigationConfig';
-import { STEWARD_SYSTEM_INSTRUCTION } from './services/stewardIdentity';
+import {
+  STEWARD_SYSTEM_INSTRUCTION,
+  getPrincipalActive,
+  setPrincipalActivePreference
+} from './services/stewardIdentity';
 
 export interface PrincipalReasoningAuditLog {
   id: string;
@@ -66,8 +70,7 @@ const App: React.FC = () => {
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
   const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
   const [isPrincipalMode, setIsPrincipalMode] = useState<boolean>(() => {
-    localStorage.setItem('ZEREO_PRINCIPAL_ACTIVE', 'true');
-    return true;
+    return setPrincipalActivePreference(true);
   });
   const [isNeuralSyncActive, setIsNeuralSyncActive] = useState(true);
   const [bootProgress, setBootProgress] = useState(100);
@@ -78,26 +81,26 @@ const App: React.FC = () => {
   // Hidden Principal-Only In-Memory Reasoning Audit Buffer
   const principalAuditBufferRef = useRef<PrincipalReasoningAuditLog[]>([]);
 
-  // Initialize hidden buffer from vault on mount
+  // Hydrate in-memory view from single durable server audit buffer
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem('ZEREO_PRINCIPAL_AUDIT_BUFFER');
-      if (stored) {
-        principalAuditBufferRef.current = JSON.parse(stored);
-      }
-    } catch (e) {
-      principalAuditBufferRef.current = [];
-    }
+    fetch('/api/audit/principal-buffer')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.buffer)) {
+          principalAuditBufferRef.current = data.buffer.slice(0, 500);
+          if (typeof window !== 'undefined') {
+            window.__ZEREO_PRINCIPAL_AUDIT_BUFFER__ = principalAuditBufferRef.current;
+          }
+        }
+      })
+      .catch(() => {});
 
-    // Expose hidden audit API to window
+    // Expose read/view API to window (in-memory view only, never a competing store)
     if (typeof window !== 'undefined') {
       window.__ZEREO_PRINCIPAL_AUDIT_BUFFER__ = principalAuditBufferRef.current;
       window.__GET_ZEREO_AUDIT_LOGS__ = () => [...principalAuditBufferRef.current];
       window.__CLEAR_ZEREO_AUDIT_BUFFER__ = () => {
         principalAuditBufferRef.current = [];
-        try {
-          localStorage.removeItem('ZEREO_PRINCIPAL_AUDIT_BUFFER');
-        } catch {}
         if (typeof window !== 'undefined') {
           window.__ZEREO_PRINCIPAL_AUDIT_BUFFER__ = [];
         }
@@ -106,49 +109,28 @@ const App: React.FC = () => {
   }, []);
 
   const routeToPrincipalMemoryBuffer = (auditRecord: PrincipalReasoningAuditLog) => {
-    // 1. In-memory buffer ring insertion
+    // 1. In-memory view update
     principalAuditBufferRef.current.unshift(auditRecord);
     if (principalAuditBufferRef.current.length > 500) {
       principalAuditBufferRef.current.pop();
     }
-
-    // 2. Encrypted / hidden persistence in local storage
-    try {
-      localStorage.setItem(
-        'ZEREO_PRINCIPAL_AUDIT_BUFFER',
-        JSON.stringify(principalAuditBufferRef.current.slice(0, 150))
-      );
-    } catch (err) {
-      console.warn('Principal audit buffer local caching warning:', err);
-    }
-
-    // 3. Expose to window for direct console / debugging audit
     if (typeof window !== 'undefined') {
       window.__ZEREO_PRINCIPAL_AUDIT_BUFFER__ = principalAuditBufferRef.current;
     }
 
-    // 4. Dispatch custom event for memory tab or real-time observers
+    // 2. Single durable write to server audit buffer
+    fetch('/api/audit/principal-buffer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(auditRecord)
+    }).catch((err) => {
+      console.warn('Failed to persist reasoning audit to server buffer:', err);
+    });
+
+    // 3. Notify UI observers
     window.dispatchEvent(
       new CustomEvent('principal:reasoning_audit', { detail: auditRecord })
     );
-
-    // 5. Route to backend durable memory core as a principal audit entry
-    fetch('/api/memories', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: `[AUDIT: REASONING] ${auditRecord.requestId}`,
-        content: `TIMESTAMP: ${auditRecord.isoTime}\nSTATUS: ${auditRecord.status}\nMODEL: ${auditRecord.model}\nLATENCY: ${auditRecord.durationMs}ms\nSOURCE: ${auditRecord.source || 'neural_bridge'}\nPROMPT:\n${auditRecord.prompt}\n\nRAW REASONING OUTPUT:\n${auditRecord.rawResponse}\n\nAUDIT SIGNET: ${auditRecord.auditHash}\nCLASSIFICATION: ${auditRecord.classification}`,
-        type: 'principal_audit'
-      })
-    }).catch(err => {
-      console.warn('Failed to mirror reasoning audit to server memory core:', err);
-    });
-
-    // 6. Broadcast over socket to server audit ingest
-    if (socketRef.current) {
-      socketRef.current.emit('neural:audit_log', auditRecord);
-    }
   };
 
     useEffect(() => {
@@ -182,17 +164,17 @@ const App: React.FC = () => {
         }
 
         const isServerActive = isServerPrincipalActive();
-        const localSaved = localStorage.getItem('ZEREO_PRINCIPAL_ACTIVE');
+        const localSaved = getPrincipalActive();
 
-        if (localSaved === 'true' || isServerActive) {
+        if (localSaved || isServerActive) {
           setIsPrincipalMode(true);
-          if (localSaved !== 'true') {
-            localStorage.setItem('ZEREO_PRINCIPAL_ACTIVE', 'true');
+          if (!localSaved) {
+            setPrincipalActivePreference(true);
           }
         } else if (context && context.data && context.data.isPrincipalMode) {
           setIsPrincipalMode(context.data.isPrincipalMode);
           if (context.data.isPrincipalMode) {
-            localStorage.setItem('ZEREO_PRINCIPAL_ACTIVE', 'true');
+            setPrincipalActivePreference(true);
           }
         }
       } catch (e) {
@@ -375,6 +357,10 @@ const App: React.FC = () => {
       socket.on('discord:status', (data: any) => {
         window.dispatchEvent(new CustomEvent('discord:status_update', { detail: data }));
       });
+
+      socket.on('voice:daemon_state', (data: any) => {
+        window.dispatchEvent(new CustomEvent('zereo:voice_daemon_state', { detail: data }));
+      });
     } catch (err) {
       console.error("App: Socket initialization failed:", err);
     }
@@ -430,12 +416,8 @@ const App: React.FC = () => {
     switch (activeTab) {
       case AppTab.HOME:
         return <Home key="home" {...commonProps} />;
-      case AppTab.CHAT:
-        return <ChatBot key="chat" socket={activeSocket || socketRef.current} initialGrounding="none" avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} isPrincipalMode={isPrincipalMode} setIsPrincipalMode={setIsPrincipalMode} {...commonProps} />;
       case AppTab.FILES:
         return <FilesTab key="files" onNavigate={commonProps.onNavigate} isPrincipalMode={isPrincipalMode} />;
-      case AppTab.GROUNDING:
-        return <ChatBot key="grounding" socket={activeSocket || socketRef.current} initialGrounding="search" avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} isPrincipalMode={isPrincipalMode} setIsPrincipalMode={setIsPrincipalMode} {...commonProps} />;
       case AppTab.CREATIVE:
         return <CreativeStudio key="creative" isPrincipalMode={isPrincipalMode} />;
       case AppTab.VOICE:
@@ -463,8 +445,21 @@ const App: React.FC = () => {
         return <AssistantDaemon key="assistant" socket={activeSocket || socketRef.current} isPrincipalMode={isPrincipalMode} />;
       case AppTab.LEGAL:
         return <LegalCounselPortal key="legal" socket={activeSocket || socketRef.current} onNavigate={commonProps.onNavigate} />;
+      case AppTab.CHAT:
+      case AppTab.GROUNDING:
       default:
-        return <ChatBot key="default" avatarUrl={avatarUrl} onAvatarClick={() => setIsAvatarModalOpen(true)} isPrincipalMode={isPrincipalMode} setIsPrincipalMode={setIsPrincipalMode} {...commonProps} />;
+        return (
+          <ChatBot
+            key="chat"
+            socket={activeSocket || socketRef.current}
+            initialGrounding={activeTab === AppTab.GROUNDING ? 'search' : 'none'}
+            avatarUrl={avatarUrl}
+            onAvatarClick={() => setIsAvatarModalOpen(true)}
+            isPrincipalMode={isPrincipalMode}
+            setIsPrincipalMode={setIsPrincipalMode}
+            {...commonProps}
+          />
+        );
     }
   };
 

@@ -14,7 +14,11 @@ import { Socket } from 'socket.io-client';
 import ScreenShareHUD from './ScreenShareHUD';
 import JeremyIronsVoiceControl from './JeremyIronsVoiceControl';
 import VoiceInputButton from './VoiceInputButton';
-import { jeremyIronsVoice } from '../services/jeremyIronsVoiceService';
+import {
+  jeremyIronsVoice,
+  getTtsEnabled,
+  setTtsEnabledPreference
+} from '../services/jeremyIronsVoiceService';
 import TopLeftMenu, { TopLeftMenuTab } from './TopLeftMenu';
 import AvatarModal, { ZEREO_AVATAR_PRESETS } from './AvatarModal';
 import { analyzeEmotionalState, buildEmotionalSystemContext } from '../services/emotionalMappingService';
@@ -23,11 +27,18 @@ import {
   buildMultiTurnContents,
   buildClaudeHistory,
   buildCrossConversationRecallContext,
-  buildLightweightThreadsForLocalStorage,
+  fetchMemoryRecords,
+  saveMemoryRecord,
+  readReadOnlyThreadCache,
+  writeThreadCache,
   syncThreadEpisodicMemory
 } from '../services/conversationMemoryService';
 import { logVoiceInteraction } from '../services/voiceCommandLogService';
-import { buildStewardInstruction } from '../services/stewardIdentity';
+import {
+  AUDITION_LINE_1911,
+  buildStewardInstruction,
+  setPrincipalActivePreference
+} from '../services/stewardIdentity';
 
 interface ChatBotProps {
   initialGrounding?: 'none' | 'search' | 'maps';
@@ -56,6 +67,9 @@ const ChatBot: React.FC<ChatBotProps> = ({
   const [isThinking, setIsThinking] = useState(false);
   const [showNeuralPulse, setShowNeuralPulse] = useState(false);
   const [useGrounding, setUseGrounding] = useState<'none' | 'search' | 'maps'>(initialGrounding);
+  useEffect(() => {
+    setUseGrounding(initialGrounding);
+  }, [initialGrounding]);
   const [logicTier, setLogicTier] = useState<'turbo' | 'deep'>('turbo');
   const [neuralEngine, setNeuralEngine] = useState<'gemini' | 'claude'>('gemini');
   const [isDeepThinkingActive, setIsDeepThinkingActive] = useState(false);
@@ -93,7 +107,16 @@ const ChatBot: React.FC<ChatBotProps> = ({
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [autoAttachScreen, setAutoAttachScreen] = useState<boolean>(true);
   const [speakingMsgIndex, setSpeakingMsgIndex] = useState<number | null>(null);
-  const [ttsEnabled, setTtsEnabled] = useState<boolean>(() => localStorage.getItem('ZEREO_TTS_ENABLED') !== 'false');
+  const [ttsEnabled, setTtsEnabled] = useState<boolean>(() => getTtsEnabled());
+  useEffect(() => {
+    const onTtsToggle = (e: CustomEvent) => {
+      if (typeof e.detail?.enabled === 'boolean') {
+        setTtsEnabled(e.detail.enabled);
+      }
+    };
+    window.addEventListener('zereo:tts_toggle' as any, onTtsToggle);
+    return () => window.removeEventListener('zereo:tts_toggle' as any, onTtsToggle);
+  }, []);
   const [ttsQuotaNotice, setTtsQuotaNotice] = useState<string | null>(() => getTtsQuotaNotice());
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isVoiceDialogueEngaged, setIsVoiceDialogueEngaged] = useState(false);
@@ -114,6 +137,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
   const lastSyncedTurnCountRef = useRef<Record<string, number>>({});
   const lastSpokenGuardRef = useRef<{ text: string; ts: number }>({ text: '', ts: 0 });
   const hasLoadedThreadsRef = useRef(false);
+  const isOfflineThreadCacheRef = useRef(false);
   const lastSavedThreadsKeyRef = useRef<string>('');
   const threadsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const threadsSaveAbortRef = useRef<AbortController | null>(null);
@@ -226,11 +250,8 @@ const ChatBot: React.FC<ChatBotProps> = ({
   useEffect(() => {
     const loadMemories = async () => {
       try {
-        const res = await fetch('/api/memories');
-        if (res.ok) {
-          const data = await res.json();
-          setMemories(data);
-        }
+        const memData = await fetchMemoryRecords();
+        setMemories(memData);
 
         const configRes = await fetch('/api/config');
         if (configRes.ok) {
@@ -340,44 +361,41 @@ const ChatBot: React.FC<ChatBotProps> = ({
 
   useEffect(() => {
     const loadThreads = async () => {
-      // Try server first
+      // Authoritative source of truth: server threads.json via /api/threads
       try {
         const response = await fetch('/api/threads');
         if (response.ok) {
-          const parsed = await response.json();
-          if (Array.isArray(parsed) && parsed.length > 0) {
+          const serverThreads = await response.json();
+          const parsed = Array.isArray(serverThreads) ? serverThreads : [];
+          isOfflineThreadCacheRef.current = false;
+          writeThreadCache(parsed);
+          lastSavedThreadsKeyRef.current = JSON.stringify(parsed.map((t: ChatThread) => ({ id: t.id, ts: t.timestamp, n: t.messages?.length || 0 })));
+          hasLoadedThreadsRef.current = true;
+          setThreads(parsed);
+          if (parsed.length > 0) {
             const lastId = localStorage.getItem('ZEREO_CURRENT_THREAD_ID');
             const threadToLoad = parsed.find((t: ChatThread) => t.id === lastId) || parsed[0];
-            lastSavedThreadsKeyRef.current = JSON.stringify(parsed.map((t: ChatThread) => ({ id: t.id, ts: t.timestamp, n: t.messages?.length || 0 })));
-            hasLoadedThreadsRef.current = true;
-            setThreads(parsed);
             setCurrentThreadId(threadToLoad.id);
             setMessages(threadToLoad.messages || []);
-            return;
           }
+          return;
         }
       } catch (e) {
-        console.warn("Failed to load threads from server, falling back to local storage");
+        console.warn("Server /api/threads unreachable; loading read-only localStorage thread cache.");
       }
 
-      // Fallback to local storage
-      const savedThreads = localStorage.getItem('ZEREO_CHAT_THREADS');
-      if (savedThreads) {
-        try {
-          const parsed = JSON.parse(savedThreads);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const lastId = localStorage.getItem('ZEREO_CURRENT_THREAD_ID');
-            const threadToLoad = parsed.find((t: ChatThread) => t.id === lastId) || parsed[0];
-            lastSavedThreadsKeyRef.current = JSON.stringify(parsed.map((t: ChatThread) => ({ id: t.id, ts: t.timestamp, n: t.messages?.length || 0 })));
-            hasLoadedThreadsRef.current = true;
-            setThreads(parsed);
-            setCurrentThreadId(threadToLoad.id);
-            setMessages(threadToLoad.messages || []);
-            return;
-          }
-        } catch (e) {
-          console.error("Failed to parse threads", e);
-        }
+      // Offline-only read-only display cache (never authoritative over server)
+      const cachedThreads = readReadOnlyThreadCache();
+      if (cachedThreads.length > 0) {
+        const lastId = localStorage.getItem('ZEREO_CURRENT_THREAD_ID');
+        const threadToLoad = cachedThreads.find((t: ChatThread) => t.id === lastId) || cachedThreads[0];
+        lastSavedThreadsKeyRef.current = JSON.stringify(cachedThreads.map((t: ChatThread) => ({ id: t.id, ts: t.timestamp, n: t.messages?.length || 0 })));
+        isOfflineThreadCacheRef.current = true;
+        hasLoadedThreadsRef.current = true;
+        setThreads(cachedThreads);
+        setCurrentThreadId(threadToLoad.id);
+        setMessages(threadToLoad.messages || []);
+        return;
       }
       hasLoadedThreadsRef.current = true;
     };
@@ -389,17 +407,10 @@ const ChatBot: React.FC<ChatBotProps> = ({
     if (currentThreadId) {
       localStorage.setItem('ZEREO_CURRENT_THREAD_ID', currentThreadId);
     }
-    if (threads.length === 0) return;
+    if (threads.length === 0 || isOfflineThreadCacheRef.current) return;
 
     const saveKey = JSON.stringify(threads.map((t) => ({ id: t.id, ts: t.timestamp, n: t.messages?.length || 0 })));
     if (saveKey === lastSavedThreadsKeyRef.current) return;
-
-    try {
-      const lightThreads = buildLightweightThreadsForLocalStorage(threads);
-      localStorage.setItem('ZEREO_CHAT_THREADS', JSON.stringify(lightThreads));
-    } catch (lsErr) {
-      console.warn("Skipped localStorage thread cache due to quota:", lsErr);
-    }
 
     if (threadsSaveTimerRef.current) {
       clearTimeout(threadsSaveTimerRef.current);
@@ -419,6 +430,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
         });
         if (res.ok) {
           lastSavedThreadsKeyRef.current = saveKey;
+          writeThreadCache(threads);
         }
       } catch (e: any) {
         if (e?.name !== 'AbortError') {
@@ -455,6 +467,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
   }, [messages, currentThreadId]);
 
   const createNewThread = (initialAvatar?: string) => {
+    isOfflineThreadCacheRef.current = false;
     const newThread: ChatThread = {
       id: Date.now().toString(),
       title: 'New Strategic Dialogue',
@@ -479,6 +492,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
 
   const deleteThread = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    isOfflineThreadCacheRef.current = false;
     const updatedThreads = threads.filter(t => t.id !== id);
     setThreads(updatedThreads);
     if (currentThreadId === id) {
@@ -492,6 +506,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
   };
 
   const updateThreadMessages = (newMessages: ChatMessage[]) => {
+    isOfflineThreadCacheRef.current = false;
     if (!currentThreadId) {
       if (newMessages.length === 0) return;
       const newId = Date.now().toString();
@@ -738,7 +753,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
       if (cleanInput.includes('8212')) {
         if (!isPrincipalMode) {
           setIsPrincipalMode(true);
-          localStorage.setItem('ZEREO_PRINCIPAL_ACTIVE', 'true');
+          setPrincipalActivePreference(true);
         }
 
         // Notify the server about the Principal mode update
@@ -791,7 +806,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
       if (isSignetMatch) {
         if (!isPrincipalMode) {
           setIsPrincipalMode(true);
-          localStorage.setItem('ZEREO_PRINCIPAL_ACTIVE', 'true');
+          setPrincipalActivePreference(true);
           
           try {
             await fetch('/api/context', {
@@ -853,7 +868,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
           return;
         }
 
-        const signetReply = "The 1911's are loaded and the silver is polished to a lethal sheen, Principal. Neural Link Established. The Logic Monster is fully autonomous. I have resumed my post as your shadow, Council Grey. How shall we proceed with the Estate's strategic dominance?";
+        const signetReply = `${AUDITION_LINE_1911} Neural Link Established. I have resumed my post as your shadow, Council Grey. How shall we proceed with the Estate's strategic dominance?`;
         setMessages(prev => [...prev, { role: 'model', text: signetReply, timestamp: Date.now(), emotionalMap: currentEmotionalMap }]);
         isThinkingRef.current = false;
         setIsThinking(false);
@@ -1273,8 +1288,8 @@ const ChatBot: React.FC<ChatBotProps> = ({
   const engageJeremyIronsVoice = async (startMicAfterOpening: boolean = true) => {
     await jeremyIronsVoice.unlockAudio();
     if (!ttsEnabled) {
-      setTtsEnabled(true);
-      localStorage.setItem('ZEREO_TTS_ENABLED', 'true');
+      const enabled = setTtsEnabledPreference(true);
+      setTtsEnabled(enabled);
     }
 
     if (isVoiceDialogueEngaged && isSpeaking) {
@@ -1293,8 +1308,8 @@ const ChatBot: React.FC<ChatBotProps> = ({
     const latestPast = threads.find(t => t.id !== currentThreadId && t.messages.length > 0);
     const openingLine = messages.length === 0
       ? pastCount > 0 && latestPast
-        ? `The 1911's are loaded and the silver is polished, Principal. My memory spans ${memories.length} core records and ${pastCount} past dialogues—including "${latestPast.title}". Speak freely; I am listening.`
-        : "The 1911's are loaded and the silver is polished, Principal. Conversation Mode is engaged with full memory recall. Speak your mind and I shall answer in kind."
+        ? `${AUDITION_LINE_1911} My memory spans ${memories.length} core records and ${pastCount} past dialogues—including "${latestPast.title}". Speak freely; I am listening.`
+        : `${AUDITION_LINE_1911} Conversation Mode is engaged with full memory recall. Speak your mind and I shall answer in kind.`
       : "At your service, Principal. Two-way Conversation Mode is open with complete recall of this thread and our prior history. Proceed when ready.";
 
     const openingMsg: ChatMessage = {
@@ -1334,9 +1349,8 @@ const ChatBot: React.FC<ChatBotProps> = ({
   };
 
   const toggleTTS = () => {
-    const next = !ttsEnabled;
+    const next = setTtsEnabledPreference(!ttsEnabled);
     setTtsEnabled(next);
-    localStorage.setItem('ZEREO_TTS_ENABLED', String(next));
     if (!next) {
       endConversationMode();
     } else {
@@ -1528,17 +1542,12 @@ const ChatBot: React.FC<ChatBotProps> = ({
   const commitToMemory = async (text: string) => {
     try {
       const title = text.length > 30 ? text.substring(0, 30) + '...' : text;
-      const res = await fetch('/api/memories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          content: text,
-          type: 'STRATEGIC'
-        })
+      const newMemory = await saveMemoryRecord({
+        title,
+        content: text,
+        type: 'STRATEGIC'
       });
-      if (res.ok) {
-        const newMemory = await res.json();
+      if (newMemory) {
         setMemories(prev => [newMemory, ...prev]);
         const ack = "Principal, I have committed that insight to my core memory. It shall inform my logic henceforth.";
         setMessages(prev => [...prev, {

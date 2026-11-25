@@ -7,6 +7,7 @@ import Markdown from 'react-markdown';
 import { fileToBase64, safeGenerateContent } from '../services/geminiService';
 import { GeminiModel } from '../types';
 import { buildLogicAnalyticsInstruction } from '../services/stewardIdentity';
+import { saveMemoryRecord } from '../services/conversationMemoryService';
 import SystemHealthDashboard from './SystemHealthDashboard';
 import { Socket } from 'socket.io-client';
 
@@ -271,16 +272,16 @@ const LogicAnalytics: React.FC<LogicAnalyticsProps> = ({ socket }) => {
                  <button 
                    onClick={async () => {
                      try {
-                       await fetch('/api/memories', {
-                         method: 'POST',
-                         headers: { 'Content-Type': 'application/json' },
-                         body: JSON.stringify({
-                           title: `Visual Analysis - ${new Date().toLocaleTimeString()}`,
-                           content: analysis,
-                           type: 'Visual Logic'
-                         })
+                       const saved = await saveMemoryRecord({
+                         title: `Visual Analysis - ${new Date().toLocaleTimeString()}`,
+                         content: analysis,
+                         type: 'Visual Logic'
                        });
-                       alert('Committed to Memory Core, Principal.');
+                       if (saved) {
+                         alert('Committed to Memory Core, Principal.');
+                       } else {
+                         alert('Failed to commit memory.');
+                       }
                      } catch (err) {
                        alert('Failed to commit memory.');
                      }

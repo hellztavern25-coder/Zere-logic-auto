@@ -1952,4 +1952,25 @@ export function startSpeechRecognition(handlers: SpeechRecognitionHandlers): { s
   }
 }
 
+const TTS_ENABLED_STORAGE_KEY = 'ZEREO_TTS_ENABLED';
+
+export function getTtsEnabled(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    return localStorage.getItem(TTS_ENABLED_STORAGE_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+export function setTtsEnabledPreference(enabled: boolean): boolean {
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(TTS_ENABLED_STORAGE_KEY, String(enabled));
+    } catch {}
+    window.dispatchEvent(new CustomEvent('zereo:tts_toggle', { detail: { enabled } }));
+  }
+  return enabled;
+}
+
 export { voiceCloningEngine, CANONICAL_IRONS_TONAL_MODEL } from './voiceCloningEngineService';

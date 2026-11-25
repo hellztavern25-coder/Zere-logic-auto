@@ -145,8 +145,10 @@ export function isTransientErrorMessage(msg: ChatMessage): boolean {
   );
 }
 
+const THREAD_CACHE_STORAGE_KEY = 'ZEREO_CHAT_THREADS';
+
 /**
- * Produces a lightweight copy of threads safe for browser localStorage fallback,
+ * Produces a lightweight copy of threads safe for browser localStorage cache,
  * stripping heavy base64 image payloads from messages while preserving all dialogue text.
  */
 export function buildLightweightThreadsForLocalStorage(threads: ChatThread[]): ChatThread[] {
@@ -167,6 +169,34 @@ export function buildLightweightThreadsForLocalStorage(threads: ChatThread[]): C
       return copy;
     }),
   }));
+}
+
+/**
+ * Cache-only read helper (never authoritative source of truth; only for offline display when /api/threads is unreachable).
+ */
+export function readReadOnlyThreadCache(): ChatThread[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(THREAD_CACHE_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Cache-only write helper invoked only after server /api/threads truth is resolved or saved.
+ */
+export function writeThreadCache(threads: ChatThread[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const lightThreads = buildLightweightThreadsForLocalStorage(threads);
+    localStorage.setItem(THREAD_CACHE_STORAGE_KEY, JSON.stringify(lightThreads));
+  } catch (err) {
+    console.warn('Skipped localStorage thread cache due to quota:', err);
+  }
 }
 
 /**
@@ -437,8 +467,60 @@ export function buildCrossConversationRecallContext(params: {
   };
 }
 
+export interface SaveMemoryInput {
+  title?: string;
+  content: string;
+  type?: string;
+  dedupeKey?: string;
+}
+
+export async function fetchMemoryRecords(): Promise<StoredMemory[]> {
+  try {
+    const res = await fetch('/api/memories');
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
- * Distills a thread into a compact, deduplicated episodic recall entry and saves it to `/api/memories`.
+ * Canonical single POST writer for `/api/memories`. All client memory writes route through this helper.
+ */
+export async function saveMemoryRecord(input: SaveMemoryInput): Promise<StoredMemory | null> {
+  const cleanContent = typeof input?.content === 'string' ? input.content.trim() : '';
+  if (!cleanContent) return null;
+  try {
+    const res = await fetch('/api/memories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: input.title,
+        content: cleanContent,
+        type: input.type || 'STRATEGIC',
+        ...(input.dedupeKey ? { dedupeKey: input.dedupeKey } : {}),
+      }),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteMemoryRecord(id: string): Promise<boolean> {
+  if (!id) return false;
+  try {
+    const res = await fetch(`/api/memories/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Distills a thread into a compact, deduplicated episodic recall entry and saves it via the single memory writer.
  * Uses `dedupeKey` on the server so each thread keeps a single up-to-date memory record cleanly.
  */
 export async function syncThreadEpisodicMemory(
@@ -461,20 +543,10 @@ export async function syncThreadEpisodicMemory(
   const digestContent = `Thread "${cleanSnippet(threadTitle || firstTopic, 50)}" (${userTurns.length} Principal turns). Initial focus: "${firstTopic}". Latest exchange -> ${recentPairs.join(' | ')}`;
   const dedupeKey = `thread_recall_${threadId}`;
 
-  try {
-    const res = await fetch('/api/memories', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: `Dialogue Recall: ${cleanSnippet(threadTitle || firstTopic, 48)}`,
-        content: digestContent,
-        type: 'CONVERSATION_RECALL',
-        dedupeKey,
-      }),
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
+  return saveMemoryRecord({
+    title: `Dialogue Recall: ${cleanSnippet(threadTitle || firstTopic, 48)}`,
+    content: digestContent,
+    type: 'CONVERSATION_RECALL',
+    dedupeKey,
+  });
 }

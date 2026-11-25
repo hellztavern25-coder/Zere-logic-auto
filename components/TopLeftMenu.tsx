@@ -60,6 +60,9 @@ import { getVisibleNavItems } from '../services/navigationConfig';
 
 export type TopLeftMenuTab = 'buttons' | 'navigation' | 'acoustic_room' | 'knowledge_uses' | 'danielle_link' | 'threads' | 'avatar' | 'voice_emulator';
 
+const DANIELLE_INVITE_TEXT =
+  "Danielle, you have been invited by Preston Johnston to interface with ZereØ — the Architect's Logic Monster. Access link:";
+
 interface TopLeftMenuProps {
   isOpen: boolean;
   onClose: () => void;
@@ -1341,7 +1344,7 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                       onClick={() =>
                         handleNativeShare(
                           'ZereØ Access for Danielle',
-                          `Danielle, you have been invited by Preston Johnston to interface with ZereØ — the Architect's Logic Monster. Access link:`,
+                          DANIELLE_INVITE_TEXT,
                           danielleLink,
                           'danielle-share'
                         )
@@ -1359,7 +1362,7 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                     <button
                       onClick={() =>
                         handleCopy(
-                          `Danielle, you have been invited by Preston Johnston to interface with ZereØ — the Architect's Logic Monster. Access link: ${danielleLink}`,
+                          `${DANIELLE_INVITE_TEXT} ${danielleLink}`,
                           'danielle-msg'
                         )
                       }

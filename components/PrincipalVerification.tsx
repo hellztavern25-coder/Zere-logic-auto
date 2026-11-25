@@ -1,3 +1,4 @@
+// [TAG: 11]
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Socket } from 'socket.io-client';
@@ -107,34 +108,40 @@ export const PrincipalVerification: React.FC<PrincipalVerificationProps> = ({
   useEffect(() => {
     fetchStatus();
 
-    if (socket) {
-      const handleDaemonState = (data: any) => {
-        if (data.status === 'ONLINE' && data.verified) {
-          setIsVerified(true);
-          setDaemonStatus('ONLINE');
-          setConfidenceScore(data.confidence || 98.4);
-        } else if (data.status === 'STANDBY_LOCKED') {
-          setIsVerified(false);
-          setDaemonStatus('STANDBY_LOCKED');
-          setConfidenceScore(0);
-        }
-      };
+    const handleDaemonState = (e: Event) => {
+      const data = (e as CustomEvent).detail || {};
+      if (data.status === 'ONLINE' && data.verified) {
+        setIsVerified(true);
+        setDaemonStatus('ONLINE');
+        setConfidenceScore(data.confidence || 98.4);
+      } else if (data.status === 'STANDBY_LOCKED') {
+        setIsVerified(false);
+        setDaemonStatus('STANDBY_LOCKED');
+        setConfidenceScore(0);
+      }
+    };
 
+    window.addEventListener('zereo:voice_daemon_state', handleDaemonState);
+
+    if (socket) {
       const handleVerificationState = (data: any) => {
         setIsVerified(data.verified);
         setDaemonStatus(data.daemonStatus);
         setConfidenceScore(data.confidenceScore);
       };
 
-      socket.on('voice:daemon_state', handleDaemonState);
       socket.on('voice:verification_state', handleVerificationState);
       socket.emit('voice:check_verification');
 
       return () => {
-        socket.off('voice:daemon_state', handleDaemonState);
+        window.removeEventListener('zereo:voice_daemon_state', handleDaemonState);
         socket.off('voice:verification_state', handleVerificationState);
       };
     }
+
+    return () => {
+      window.removeEventListener('zereo:voice_daemon_state', handleDaemonState);
+    };
   }, [socket, fetchStatus]);
 
   // Autocorrelation pitch extraction (F0 in Hz)

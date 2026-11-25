@@ -58,6 +58,21 @@ interface LegalCounselPortalProps {
   onNavigate?: (tab: string) => void;
 }
 
+function useFilteredList<T>(
+  items: readonly T[],
+  query: string,
+  predicate: (item: T, normalizedQuery: string) => boolean,
+  deps: React.DependencyList = [],
+  postProcess?: (filtered: T[]) => T[]
+): T[] {
+  return useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const filtered = items.filter((item) => predicate(item, normalizedQuery));
+    return postProcess ? postProcess(filtered) : filtered;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, query, ...deps]);
+}
+
 const PRACTICE_TABS: Array<{
   id: LegalPracticeArea;
   label: string;
@@ -140,23 +155,23 @@ const LegalCounselPortal: React.FC<LegalCounselPortalProps> = ({ socket, onNavig
     [mode, compareJurisdictionCode]
   );
 
-  const filteredJurisdictions = useMemo(() => {
-    const q = directorySearch.trim().toLowerCase();
-    if (!q) return US_JURISDICTIONS;
-    return US_JURISDICTIONS.filter(
-      (j) =>
-        j.name.toLowerCase().includes(q) ||
-        j.code.toLowerCase().includes(q) ||
-        j.officialCodeName.toLowerCase().includes(q) ||
-        j.statutoryFocus.toLowerCase().includes(q)
-    );
-  }, [directorySearch]);
+  const filteredJurisdictions = useFilteredList(
+    US_JURISDICTIONS,
+    directorySearch,
+    (j, q) =>
+      !q ||
+      j.name.toLowerCase().includes(q) ||
+      j.code.toLowerCase().includes(q) ||
+      j.officialCodeName.toLowerCase().includes(q) ||
+      j.statutoryFocus.toLowerCase().includes(q)
+  );
 
-  const filteredUsCodeTitles = useMemo(() => {
-    const q = directorySearch.trim().toLowerCase();
-    return US_CODE_TITLES.filter((t) => {
-      if (practiceArea !== 'all' && t.domain !== practiceArea && t.domain !== 'constitutional') {
-        if (!q) return false;
+  const filteredUsCodeTitles = useFilteredList(
+    US_CODE_TITLES,
+    directorySearch,
+    (t, q) => {
+      if (practiceArea !== 'all' && t.domain !== practiceArea && t.domain !== 'constitutional' && !q) {
+        return false;
       }
       if (!q) return true;
       return (
@@ -164,8 +179,9 @@ const LegalCounselPortal: React.FC<LegalCounselPortalProps> = ({ socket, onNavig
         t.summary.toLowerCase().includes(q) ||
         String(t.titleNumber) === q
       );
-    });
-  }, [directorySearch, practiceArea]);
+    },
+    [practiceArea]
+  );
 
   const visibleTemplates = useMemo(() => {
     if (practiceArea === 'all' || practiceArea === 'constitutional') {
@@ -185,9 +201,10 @@ const LegalCounselPortal: React.FC<LegalCounselPortalProps> = ({ socket, onNavig
     return LEGAL_QUICK_TEMPLATES.filter((t) => t.domain === practiceArea);
   }, [practiceArea]);
 
-  const filteredDossiers = useMemo(() => {
-    const q = archiveSearch.trim().toLowerCase();
-    return dossiers.filter((d) => {
+  const filteredDossiers = useFilteredList(
+    dossiers,
+    archiveSearch,
+    (d, q) => {
       if (archiveAreaFilter !== 'all' && d.practiceArea !== archiveAreaFilter) return false;
       if (!q) return true;
       return (
@@ -196,8 +213,9 @@ const LegalCounselPortal: React.FC<LegalCounselPortalProps> = ({ socket, onNavig
         d.jurisdiction.toLowerCase().includes(q) ||
         d.content.toLowerCase().includes(q)
       );
-    });
-  }, [dossiers, archiveSearch, archiveAreaFilter]);
+    },
+    [archiveAreaFilter]
+  );
 
   const selectedPrecedents: LawLibraryPrecedent[] = useMemo(
     () =>
@@ -207,9 +225,10 @@ const LegalCounselPortal: React.FC<LegalCounselPortalProps> = ({ socket, onNavig
     [selectedPrecedentIds]
   );
 
-  const filteredLibraryPrecedents = useMemo(() => {
-    const q = librarySearch.trim().toLowerCase();
-    return US_LAW_LIBRARY_PRECEDENTS.filter((p) => {
+  const filteredLibraryPrecedents = useFilteredList(
+    US_LAW_LIBRARY_PRECEDENTS,
+    librarySearch,
+    (p, q) => {
       if (libraryDomainFilter !== 'all' && p.domain !== libraryDomainFilter) return false;
       if (!q) return true;
       return (
@@ -220,26 +239,27 @@ const LegalCounselPortal: React.FC<LegalCounselPortalProps> = ({ socket, onNavig
         p.defensiveApplication.toLowerCase().includes(q) ||
         p.relatedStatutes.some((s) => s.toLowerCase().includes(q))
       );
-    });
-  }, [librarySearch, libraryDomainFilter]);
+    },
+    [libraryDomainFilter]
+  );
 
-  const pickerPrecedents = useMemo(() => {
-    const q = precedentPickerSearch.trim().toLowerCase();
-    const list = US_LAW_LIBRARY_PRECEDENTS.filter((p) => {
-      if (!q) return true;
-      return (
-        p.caseName.toLowerCase().includes(q) ||
-        p.citation.toLowerCase().includes(q) ||
-        p.doctrine.toLowerCase().includes(q) ||
-        p.defensiveApplication.toLowerCase().includes(q)
-      );
-    });
-    return [...list].sort((a, b) => {
-      const aMatch = practiceArea === 'all' || a.domain === practiceArea ? 0 : 1;
-      const bMatch = practiceArea === 'all' || b.domain === practiceArea ? 0 : 1;
-      return aMatch - bMatch;
-    });
-  }, [precedentPickerSearch, practiceArea]);
+  const pickerPrecedents = useFilteredList(
+    US_LAW_LIBRARY_PRECEDENTS,
+    precedentPickerSearch,
+    (p, q) =>
+      !q ||
+      p.caseName.toLowerCase().includes(q) ||
+      p.citation.toLowerCase().includes(q) ||
+      p.doctrine.toLowerCase().includes(q) ||
+      p.defensiveApplication.toLowerCase().includes(q),
+    [practiceArea],
+    (list) =>
+      [...list].sort((a, b) => {
+        const aMatch = practiceArea === 'all' || a.domain === practiceArea ? 0 : 1;
+        const bMatch = practiceArea === 'all' || b.domain === practiceArea ? 0 : 1;
+        return aMatch - bMatch;
+      })
+  );
 
   const togglePrecedent = (id: string) => {
     setSelectedPrecedentIds((prev) => {

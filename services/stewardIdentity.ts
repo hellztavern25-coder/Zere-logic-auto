@@ -122,3 +122,23 @@ export function buildLogicAnalyticsInstruction(mode: 'visual_feed' | 'evidence')
         : 'EVIDENCE ANALYSIS DIRECTIVE: Analyze this data with clinical precision. Provide structured, logical insights. If search is enabled, cross-reference with real-time web data.'
   });
 }
+
+const PRINCIPAL_ACTIVE_STORAGE_KEY = 'ZEREO_PRINCIPAL_ACTIVE';
+
+export function getPrincipalActive(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return localStorage.getItem(PRINCIPAL_ACTIVE_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function setPrincipalActivePreference(active: boolean): boolean {
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(PRINCIPAL_ACTIVE_STORAGE_KEY, String(active));
+    } catch {}
+  }
+  return active;
+}
