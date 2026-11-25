@@ -1,3 +1,4 @@
+// [TAG: 11]
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -55,6 +56,7 @@ import VoiceEmulator from './VoiceEmulator';
 import AcousticLatticeStudio from './AcousticLatticeStudio';
 import { tacticalTouchService, TacticalTouchState } from '../services/tacticalTouchService';
 import { KNOWLEDGE_OF_USES_REGISTRY, analyzeEmotionalState } from '../services/emotionalMappingService';
+import { getVisibleNavItems } from '../services/navigationConfig';
 
 export type TopLeftMenuTab = 'buttons' | 'navigation' | 'acoustic_room' | 'knowledge_uses' | 'danielle_link' | 'threads' | 'avatar' | 'voice_emulator';
 
@@ -69,6 +71,7 @@ interface TopLeftMenuProps {
   onSelectThread: (id: string) => void;
   onNewThread: () => void;
   onNavigate?: (tab: AppTab) => void;
+  isPrincipalMode?: boolean;
 
   // Neural Engine & Tactical Command props
   neuralEngine?: 'gemini' | 'claude';
@@ -115,6 +118,7 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
   onSelectThread,
   onNewThread,
   onNavigate,
+  isPrincipalMode = true,
   neuralEngine = 'gemini',
   onSelectNeuralEngine,
   logicTier = 'turbo',
@@ -897,171 +901,17 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {[
-                    {
-                      id: AppTab.CHAT,
-                      name: 'Dialogue Core',
-                      tagline: 'Fullscreen chat dialogue & reasoning stream',
-                      icon: MessageSquare,
-                      color: 'from-amber-950/60 to-black',
-                      border: 'border-amber-500/40',
-                      textColor: 'text-amber-300'
-                    },
-                    {
-                      id: AppTab.LEGAL,
-                      name: 'Grey House Legal Counsel',
-                      tagline: 'U.S. Code 1–54 • All 50 States • Professional, Business, Criminal & Civil Law',
-                      icon: Scale,
-                      color: 'from-amber-950/60 to-black',
-                      border: 'border-amber-500/50',
-                      textColor: 'text-amber-300'
-                    },
-                    {
-                      id: AppTab.FILES,
-                      name: 'Add Files / Vault',
-                      tagline: 'Word docs, audio intercepts, video footage',
-                      icon: FolderOpen,
-                      color: 'from-amber-950/40 to-black',
-                      border: 'border-amber-500/30',
-                      textColor: 'text-amber-300'
-                    },
-                    {
-                      id: AppTab.ACOUSTIC_ROOM,
-                      name: 'Acoustic Lattice & Room',
-                      tagline: 'The Room of Tonal Scales • F-Flashcards • A/E 3:2 Engine • 60-Bit Recipe',
-                      icon: Music,
-                      color: 'from-amber-950/60 to-black',
-                      border: 'border-amber-500/50',
-                      textColor: 'text-amber-300'
-                    },
-                    {
-                      id: AppTab.VOICE,
-                      name: 'Voice Portal',
-                      tagline: 'Jeremy Irons Vocal Signature & 3-pole DSP',
-                      icon: Mic,
-                      color: 'from-red-950/50 to-black',
-                      border: 'border-red-900/40',
-                      textColor: 'text-zinc-200'
-                    },
-                    {
-                      id: AppTab.VOICE_EMULATOR,
-                      name: 'Voice Emulator',
-                      tagline: 'Multi-voice cloning & formant modulation',
-                      icon: Headphones,
-                      color: 'from-red-950/40 to-black',
-                      border: 'border-red-900/40',
-                      textColor: 'text-zinc-200'
-                    },
-                    {
-                      id: AppTab.CREATIVE,
-                      name: 'Creative Studio',
-                      tagline: 'Manifest desired art & neural canvas',
-                      icon: Sparkles,
-                      color: 'from-amber-950/50 to-black',
-                      border: 'border-amber-500/30',
-                      textColor: 'text-amber-300'
-                    },
-                    {
-                      id: AppTab.ASSISTANT,
-                      name: 'Assistant Daemon',
-                      tagline: 'Autonomous background tasks & vigilance',
-                      icon: Cpu,
-                      color: 'from-zinc-900/60 to-black',
-                      border: 'border-red-900/30',
-                      textColor: 'text-zinc-200'
-                    },
-                    {
-                      id: AppTab.MEMORY,
-                      name: 'Memory Core',
-                      tagline: 'Permanent episodic vault & reasoning audit',
-                      icon: Database,
-                      color: 'from-zinc-900/60 to-black',
-                      border: 'border-red-900/30',
-                      textColor: 'text-zinc-200'
-                    },
-                    {
-                      id: AppTab.NEXUS,
-                      name: 'Neural Nexus',
-                      tagline: 'Multi-agent mesh network & synchronization',
-                      icon: Share2,
-                      color: 'from-zinc-900/60 to-black',
-                      border: 'border-red-900/30',
-                      textColor: 'text-zinc-200'
-                    },
-                    {
-                      id: AppTab.WORKSHOP,
-                      name: 'Neural Forge',
-                      tagline: 'Diagnostics, structural stress tests & repairs',
-                      icon: Wrench,
-                      color: 'from-red-950/60 to-black',
-                      border: 'border-red-900/40',
-                      textColor: 'text-red-300'
-                    },
-                    {
-                      id: AppTab.SYSTEM,
-                      name: 'System Control',
-                      tagline: 'Security signets, API keys & environment',
-                      icon: Settings,
-                      color: 'from-zinc-900/60 to-black',
-                      border: 'border-red-900/30',
-                      textColor: 'text-zinc-200'
-                    },
-                    {
-                      id: AppTab.ANALYTICS,
-                      name: 'Logic Analytics',
-                      tagline: 'Processing velocity & thermodynamic metrics',
-                      icon: LineChart,
-                      color: 'from-zinc-900/60 to-black',
-                      border: 'border-red-900/30',
-                      textColor: 'text-zinc-200'
-                    },
-                    {
-                      id: AppTab.SNAPSHOT,
-                      name: 'Optical Intel',
-                      tagline: 'Vision frame analysis & snapshot ingestion',
-                      icon: Eye,
-                      color: 'from-zinc-900/60 to-black',
-                      border: 'border-red-900/30',
-                      textColor: 'text-zinc-200'
-                    },
-                    {
-                      id: AppTab.GROUNDING,
-                      name: 'Grounding Intel',
-                      tagline: 'Search & geospatial verification telemetry',
-                      icon: Globe,
-                      color: 'from-zinc-900/60 to-black',
-                      border: 'border-red-900/30',
-                      textColor: 'text-zinc-200'
-                    },
-                    {
-                      id: AppTab.SHARE,
-                      name: 'Share ZereØ',
-                      tagline: 'Authorized ally portal links & access',
-                      icon: Share2,
-                      color: 'from-zinc-900/60 to-black',
-                      border: 'border-red-900/30',
-                      textColor: 'text-zinc-200'
-                    },
-                    {
-                      id: AppTab.HOME,
-                      name: 'Command Home',
-                      tagline: 'System overview & status hub',
-                      icon: Home,
-                      color: 'from-zinc-900/60 to-black',
-                      border: 'border-red-900/30',
-                      textColor: 'text-zinc-200'
-                    }
-                  ].map((tab) => {
-                    const IconComp = tab.icon;
+                  {getVisibleNavItems(isPrincipalMode).map((item) => {
+                    const IconComp = item.icon;
                     return (
                       <button
                         type="button"
-                        key={tab.id}
+                        key={item.tab}
                         onClick={() => {
-                          if (onNavigate) onNavigate(tab.id);
+                          if (onNavigate) onNavigate(item.tab);
                           onClose();
                         }}
-                        className={`p-3.5 rounded-2xl bg-gradient-to-br ${tab.color} border ${tab.border} hover:border-amber-400 text-left transition-all group flex flex-col justify-between gap-2 shadow-lg hover:shadow-amber-500/10 cursor-pointer`}
+                        className={`p-3.5 rounded-2xl bg-gradient-to-br ${item.cardColor} border ${item.cardBorder} hover:border-amber-400 text-left transition-all group flex flex-col justify-between gap-2 shadow-lg hover:shadow-amber-500/10 cursor-pointer`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="w-8 h-8 rounded-xl bg-black/60 border border-amber-500/20 flex items-center justify-center group-hover:scale-110 transition-transform">
@@ -1072,11 +922,11 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                           </span>
                         </div>
                         <div>
-                          <p className={`text-xs font-black ${tab.textColor} uppercase tracking-wider`}>
-                            {tab.name}
+                          <p className={`text-xs font-black ${item.cardTextColor} uppercase tracking-wider`}>
+                            {item.label}
                           </p>
                           <p className="text-[9px] text-zinc-400 font-mono leading-tight mt-0.5 line-clamp-1">
-                            {tab.tagline}
+                            {item.tagline}
                           </p>
                         </div>
                       </button>
@@ -1900,89 +1750,27 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
 
             {/* Bottom Quick Navigation Bar */}
             <div className="p-4 border-t border-red-900/20 bg-black/60 flex items-center justify-between text-[8px] font-black uppercase tracking-widest text-zinc-500 flex-shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  if (onNavigate) onNavigate(AppTab.CHAT);
-                  onClose();
-                }}
-                className="hover:text-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <MessageSquare className="w-3 h-3" />
-                <span>Chat</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (onNavigate) onNavigate(AppTab.FILES);
-                  onClose();
-                }}
-                className="hover:text-amber-400 text-amber-300/80 transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <FolderOpen className="w-3 h-3 text-amber-400" />
-                <span>Files</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (onNavigate) onNavigate(AppTab.VOICE);
-                  onClose();
-                }}
-                className="hover:text-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <Mic className="w-3 h-3" />
-                <span>Voice</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (onNavigate) onNavigate(AppTab.ACOUSTIC_ROOM);
-                  onClose();
-                }}
-                className="hover:text-amber-400 text-amber-300 transition-colors flex items-center gap-1 font-bold cursor-pointer"
-              >
-                <Music className="w-3 h-3 text-amber-400" />
-                <span>Lattice</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (onNavigate) onNavigate(AppTab.VOICE_EMULATOR);
-                  onClose();
-                }}
-                className="hover:text-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <Headphones className="w-3 h-3" />
-                <span>Emulator</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (onNavigate) onNavigate(AppTab.MEMORY);
-                  onClose();
-                }}
-                className="hover:text-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <Database className="w-3 h-3" />
-                <span>Memory</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (onNavigate) onNavigate(AppTab.SYSTEM);
-                  onClose();
-                }}
-                className="hover:text-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <Settings className="w-3 h-3" />
-                <span>System</span>
-              </button>
+              {getVisibleNavItems(isPrincipalMode)
+                .filter((item) => item.quickBar)
+                .map((item) => {
+                  const IconComp = item.icon;
+                  return (
+                    <button
+                      type="button"
+                      key={item.tab}
+                      onClick={() => {
+                        if (onNavigate) onNavigate(item.tab);
+                        onClose();
+                      }}
+                      className={`hover:text-amber-400 transition-colors flex items-center gap-1 cursor-pointer ${
+                        item.quickBarHighlight ? 'text-amber-300 font-bold' : ''
+                      }`}
+                    >
+                      <IconComp className={`w-3 h-3 ${item.quickBarHighlight ? 'text-amber-400' : ''}`} />
+                      <span>{item.shortLabel}</span>
+                    </button>
+                  );
+                })}
             </div>
           </motion.div>
         </div>

@@ -1,8 +1,10 @@
 
+// [TAG: 11]
 import React, { useState, useRef } from 'react';
 import { Image as ImageIcon, Sparkles, Wand2, Monitor, Video, Loader2, Download, Upload, Trash2, Database, Check, ExternalLink, BookmarkCheck } from 'lucide-react';
 import { getAI, fileToBase64, getApiKey, clearApiKey, safeGenerateContent } from '../services/geminiService';
 import { GeminiModel } from '../types';
+import { buildCreativeStudioInstruction } from '../services/stewardIdentity';
 
 interface CreativeStudioProps {
   isPrincipalMode: boolean;
@@ -98,9 +100,7 @@ const CreativeStudio: React.FC<CreativeStudioProps> = ({ isPrincipalMode }) => {
         throw new Error("Neural Authorization missing. Please select an API key in System Control or the platform dialog.");
       }
       const ai = getAI();
-      const butlerInstruction = isPrincipalMode 
-        ? "You are the Logic Monster Creative Engine, an AI butler of exquisite taste. You manifest visuals in a red and gold palette of luxury for your Principal, Preston (Council Grey). Your work is precise, elegant, and unfiltered."
-        : "You are the Logic Monster Creative Engine, a professional AI steward. You manifest high-quality visuals. Address the user as 'Guest'. Your work is precise and adheres to standard safety protocols.";
+      const butlerInstruction = buildCreativeStudioInstruction(isPrincipalMode);
 
       if (activeMode === 'generate') {
         const response = await safeGenerateContent({

@@ -1,3 +1,4 @@
+// [TAG: 11]
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -40,7 +41,8 @@ import VoiceSpectralAnalysis from './VoiceSpectralAnalysis';
 import VoiceCloningEngine from './VoiceCloningEngine';
 import { VoicePresetManager } from './VoicePresetManager';
 import { PersistentTonalModel, VoiceTonalPreset } from '../types';
-import { voicePresetManager } from '../services/voicePresetService';
+import { voicePresetStore } from '../services/voicePresetService';
+import { AUDITION_LINE_1911 } from '../services/stewardIdentity';
 
 interface VoiceEmulatorProps {
   className?: string;
@@ -59,9 +61,7 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [currentChunk, setCurrentChunk] = useState<number>(1);
   const [totalChunks, setTotalChunks] = useState<number>(1);
-  const [auditionText, setAuditionText] = useState(
-    'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. Systems nominal with zero logical drift.'
-  );
+  const [auditionText, setAuditionText] = useState(AUDITION_LINE_1911);
 
   // Audio Clip Recording State
   const [isRecording, setIsRecording] = useState(false);
@@ -82,7 +82,7 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
   const [selectedSpectralClipId, setSelectedSpectralClipId] = useState<string | null>(null);
 
   // Active Voice Tonal Preset
-  const [activeVoicePreset, setActiveVoicePreset] = useState<VoiceTonalPreset>(() => voicePresetManager.getActivePreset());
+  const [activeVoicePreset, setActiveVoicePreset] = useState<VoiceTonalPreset>(() => voicePresetStore.getActivePreset());
 
   // New Voice Profile Modal
   const [isNewProfileModalOpen, setIsNewProfileModalOpen] = useState(false);
@@ -103,17 +103,20 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
     const unsubVoice = jeremyIronsVoice.subscribe((state) => {
       setIsSpeaking(state.isSpeaking);
       setActiveProfile(state.profile);
+      if (state.profiles && state.profiles.length > 0) {
+        setProfiles(state.profiles);
+      }
       if (state.currentChunk) setCurrentChunk(state.currentChunk);
       if (state.totalChunks) setTotalChunks(state.totalChunks);
     });
 
-    const unsubPresets = voicePresetManager.subscribe((_, active) => {
+    const unsubPresets = voicePresetStore.subscribe((_, active) => {
       setActiveVoicePreset(active);
     });
 
     // Refresh profiles from server
     jeremyIronsVoice.loadProfilesFromServer().then((loaded) => {
-      setProfiles(loaded);
+      setProfiles([...loaded]);
       const currentActive = jeremyIronsVoice.getActiveProfile();
       setActiveProfile(currentActive);
       setSelectedProfileId(currentActive.id);
@@ -132,7 +135,6 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
     const success = await jeremyIronsVoice.setActiveProfile(profileId);
     if (success) {
       const updated = jeremyIronsVoice.getActiveProfile();
-      setActiveProfile(updated);
       setSelectedProfileId(profileId);
       onProfileActivated?.(updated);
       showToast(`Activated: ${updated.name} as active ZereØ voice.`);
@@ -167,9 +169,7 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
       dspConfig: updatedDsp
     };
 
-    // Update in local state
-    setProfiles((prev) => prev.map((p) => (p.id === selectedProfile.id ? updatedProfile : p)));
-    jeremyIronsVoice.saveProfile(updatedProfile);
+    void jeremyIronsVoice.saveProfile(updatedProfile);
   };
 
   // Bulk apply DSP adjustments from Spectral Analyzer
@@ -183,8 +183,7 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
       dspConfig: updatedDsp
     };
 
-    setProfiles((prev) => prev.map((p) => (p.id === selectedProfile.id ? updatedProfile : p)));
-    jeremyIronsVoice.saveProfile(updatedProfile);
+    void jeremyIronsVoice.saveProfile(updatedProfile);
     showToast(`Calibrated ${Object.keys(adjusted).length} DSP parameters to match Jeremy Irons.`);
   };
 
@@ -216,8 +215,6 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
 
         try {
           await jeremyIronsVoice.addVoiceClip(selectedProfile.id, newClip);
-          // Refresh local profiles
-          setProfiles(jeremyIronsVoice.getProfiles());
           setSelectedSpectralClipId(newClip.id);
           setActiveInspectorTab('spectral');
           showToast(`Voice clip "${newClip.name}" added and queued for Spectral Analysis.`);
@@ -299,7 +296,6 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
       };
 
       await jeremyIronsVoice.addVoiceClip(selectedProfile.id, newClip);
-      setProfiles(jeremyIronsVoice.getProfiles());
       setSelectedSpectralClipId(newClip.id);
       setActiveInspectorTab('spectral');
 
@@ -344,7 +340,6 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
   // Delete clip
   const handleDeleteClip = async (clipId: string) => {
     await jeremyIronsVoice.deleteVoiceClip(selectedProfile.id, clipId);
-    setProfiles(jeremyIronsVoice.getProfiles());
     showToast('Voice clip removed.');
   };
 
@@ -383,7 +378,6 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
     };
 
     await jeremyIronsVoice.saveProfile(newProfile);
-    setProfiles(jeremyIronsVoice.getProfiles());
     setSelectedProfileId(newProfile.id);
     setIsNewProfileModalOpen(false);
     setNewProfileName('');
@@ -395,8 +389,7 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
   const handleDeleteProfile = async (profileId: string) => {
     const success = await jeremyIronsVoice.deleteProfile(profileId);
     if (success) {
-      setProfiles(jeremyIronsVoice.getProfiles());
-      setSelectedProfileId('iron-adaptive');
+      setSelectedProfileId(jeremyIronsVoice.getActiveProfile().id);
       showToast('Custom voice profile purged.');
     }
   };
@@ -1013,7 +1006,7 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
               {/* Sample Preset Phrases */}
               <div className="flex items-center gap-1.5 overflow-x-auto max-w-md pb-1">
                 <button
-                  onClick={() => setAuditionText('The 1911s are loaded and the silver is polished to a lethal sheen, Principal. How shall we proceed?')}
+                  onClick={() => setAuditionText(AUDITION_LINE_1911)}
                   className="px-2 py-0.5 rounded text-[8px] font-mono text-zinc-400 hover:text-amber-300 bg-red-950/40 border border-red-900/30 whitespace-nowrap"
                 >
                   "1911s Loaded..."

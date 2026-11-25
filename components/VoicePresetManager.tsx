@@ -1,3 +1,4 @@
+// [TAG: 11]
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -28,10 +29,10 @@ import {
   CheckCircle2,
   SlidersHorizontal
 } from 'lucide-react';
-import { VoiceTonalPreset, PresetPersonaType, PersistentTonalModel, VoiceDSPConfig } from '../types';
-import { voicePresetManager, FACTORY_VOICE_PRESETS } from '../services/voicePresetService';
+import { VoiceTonalPreset, PresetPersonaType, PersistentTonalModel } from '../types';
+import { voicePresetStore } from '../services/voicePresetService';
 import { voiceCloningEngine } from '../services/voiceCloningEngineService';
-import { jeremyIronsVoice } from '../services/jeremyIronsVoiceService';
+import { AUDITION_LINE_1911 } from '../services/stewardIdentity';
 
 interface VoicePresetManagerProps {
   onPresetActivated?: (preset: VoiceTonalPreset) => void;
@@ -44,8 +45,8 @@ export const VoicePresetManager: React.FC<VoicePresetManagerProps> = ({
   activeModelOverride,
   className = ''
 }) => {
-  const [presets, setPresets] = useState<VoiceTonalPreset[]>(() => voicePresetManager.getPresets());
-  const [activePreset, setActivePreset] = useState<VoiceTonalPreset>(() => voicePresetManager.getActivePreset());
+  const [presets, setPresets] = useState<VoiceTonalPreset[]>(() => voicePresetStore.getPresets());
+  const [activePreset, setActivePreset] = useState<VoiceTonalPreset>(() => voicePresetStore.getActivePreset());
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPersonaFilter, setSelectedPersonaFilter] = useState<string>('ALL');
   const [onlyFavorites, setOnlyFavorites] = useState(false);
@@ -53,9 +54,7 @@ export const VoicePresetManager: React.FC<VoicePresetManagerProps> = ({
   // Audition state
   const [isAuditioning, setIsAuditioning] = useState(false);
   const [auditioningPresetId, setAuditioningPresetId] = useState<string | null>(null);
-  const [customAuditionText, setCustomAuditionText] = useState(
-    "The 1911s are loaded and the silver is polished to a lethal sheen, Principal. Systems nominal with zero logical drift."
-  );
+  const [customAuditionText, setCustomAuditionText] = useState(AUDITION_LINE_1911);
 
   // Modal: Save/Edit Preset
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -82,7 +81,7 @@ export const VoicePresetManager: React.FC<VoicePresetManagerProps> = ({
 
   // Subscribe to preset changes
   useEffect(() => {
-    const unsub = voicePresetManager.subscribe((newPresets, active) => {
+    const unsub = voicePresetStore.subscribe((newPresets, active) => {
       setPresets(newPresets);
       setActivePreset(active);
     });
@@ -117,7 +116,7 @@ export const VoicePresetManager: React.FC<VoicePresetManagerProps> = ({
   // Activate preset
   const handleActivatePreset = async (preset: VoiceTonalPreset) => {
     try {
-      await voicePresetManager.setActivePreset(preset.id);
+      await voicePresetStore.setActivePreset(preset.id);
       showToast(`Engaged Preset: [${preset.name}] (${preset.codeName})`);
       if (onPresetActivated) {
         onPresetActivated(preset);
@@ -134,7 +133,7 @@ export const VoicePresetManager: React.FC<VoicePresetManagerProps> = ({
     setAuditioningPresetId(preset.id);
 
     try {
-      await voicePresetManager.auditionPreset(preset, customAuditionText);
+      await voicePresetStore.auditionPreset(preset, customAuditionText);
       showToast(`Auditioned preset [${preset.name}]`);
     } catch (err: any) {
       console.warn('Audition error:', err);
@@ -148,7 +147,7 @@ export const VoicePresetManager: React.FC<VoicePresetManagerProps> = ({
   // Toggle favorite
   const handleToggleFavorite = (presetId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const isFav = voicePresetManager.toggleFavorite(presetId);
+    const isFav = voicePresetStore.toggleFavorite(presetId);
     showToast(isFav ? 'Marked as favorite preset' : 'Removed from favorites');
   };
 
@@ -156,7 +155,7 @@ export const VoicePresetManager: React.FC<VoicePresetManagerProps> = ({
   const handleDuplicatePreset = async (presetId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      const copy = await voicePresetManager.duplicatePreset(presetId);
+      const copy = await voicePresetStore.duplicatePreset(presetId);
       if (copy) {
         showToast(`Created duplicate: "${copy.name}"`);
       }
@@ -178,7 +177,7 @@ export const VoicePresetManager: React.FC<VoicePresetManagerProps> = ({
     }
 
     try {
-      await voicePresetManager.deletePreset(preset.id);
+      await voicePresetStore.deletePreset(preset.id);
       showToast(`Deleted preset "${preset.name}"`);
     } catch (err: any) {
       showToast(err?.message || 'Failed to delete preset');
@@ -245,7 +244,7 @@ export const VoicePresetManager: React.FC<VoicePresetManagerProps> = ({
       .filter(Boolean);
 
     try {
-      const saved = await voicePresetManager.savePreset({
+      const saved = await voicePresetStore.savePreset({
         id: editingPreset?.id,
         name: formName.trim(),
         codeName: formCodeName.trim() || formName.toUpperCase().replace(/\s+/g, '-'),
@@ -267,7 +266,7 @@ export const VoicePresetManager: React.FC<VoicePresetManagerProps> = ({
       });
 
       if (formActivateImmediately) {
-        await voicePresetManager.setActivePreset(saved.id);
+        await voicePresetStore.setActivePreset(saved.id);
       }
 
       showToast(`Preset "${saved.name}" successfully saved!`);

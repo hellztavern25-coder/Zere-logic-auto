@@ -1,15 +1,15 @@
+// [TAG: 11]
 import React, { useState, useEffect } from 'react';
 import { Volume2, VolumeX, Sliders, Play, Square, Sparkles, Check, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   jeremyIronsVoice,
   JeremyIronsConfig,
-  DEFAULT_JEREMY_IRONS_CONFIG,
   VoiceModulationProfile,
-  VOICE_MODULATION_PROFILES,
   clampLowEPitchRate
 } from '../services/jeremyIronsVoiceService';
 import { getTtsQuotaNotice } from '../services/geminiService';
+import { AUDITION_LINE_1911 } from '../services/stewardIdentity';
 
 interface JeremyIronsVoiceControlProps {
   ttsEnabled: boolean;
@@ -28,35 +28,16 @@ export const JeremyIronsVoiceControl: React.FC<JeremyIronsVoiceControlProps> = (
   const [activeProfile, setActiveProfile] = useState<VoiceModulationProfile>(() => {
     return jeremyIronsVoice.getLegacyProfile() || 'Jeremy-Irons-Signature';
   });
-  const [config, setConfig] = useState<JeremyIronsConfig>(() => {
-    try {
-      const saved = localStorage.getItem('ZEREO_JEREMY_IRONS_CONFIG');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const migratedBaseVoice =
-          parsed?.baseVoice === 'Charon' || parsed?.baseVoice === 'Fenrir' || parsed?.baseVoice === 'Orus'
-            ? parsed.baseVoice
-            : 'Charon';
-        return {
-          ...DEFAULT_JEREMY_IRONS_CONFIG,
-          ...parsed,
-          baseVoice: migratedBaseVoice,
-          pitchRate: clampLowEPitchRate(parsed?.pitchRate)
-        };
-      }
-      return DEFAULT_JEREMY_IRONS_CONFIG;
-    } catch {
-      return DEFAULT_JEREMY_IRONS_CONFIG;
-    }
-  });
+  const [config, setConfig] = useState<JeremyIronsConfig>(() => jeremyIronsVoice.getConfig());
 
   const [ttsQuotaNotice, setTtsQuotaNotice] = useState<string | null>(() => getTtsQuotaNotice());
 
   useEffect(() => {
-    const unsub = jeremyIronsVoice.subscribe(({ isSpeaking, text, legacyProfile }) => {
+    const unsub = jeremyIronsVoice.subscribe(({ isSpeaking, text, legacyProfile, config: storeConfig }) => {
       setIsSpeaking(isSpeaking);
       setCurrentText(text);
       if (legacyProfile) setActiveProfile(legacyProfile);
+      if (storeConfig) setConfig(storeConfig);
     });
     const onTtsNotice = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
@@ -70,23 +51,11 @@ export const JeremyIronsVoiceControl: React.FC<JeremyIronsVoiceControlProps> = (
   }, []);
 
   const handleProfileSelect = (p: VoiceModulationProfile) => {
-    setActiveProfile(p);
     jeremyIronsVoice.setProfile(p);
-    const meta = VOICE_MODULATION_PROFILES[p];
-    if (meta) {
-      setConfig(meta.config);
-      try {
-        localStorage.setItem('ZEREO_JEREMY_IRONS_CONFIG', JSON.stringify(meta.config));
-      } catch {}
-    }
   };
 
   const handleConfigChange = (changes: Partial<JeremyIronsConfig>) => {
-    const updated = { ...config, ...changes };
-    setConfig(updated);
-    try {
-      localStorage.setItem('ZEREO_JEREMY_IRONS_CONFIG', JSON.stringify(updated));
-    } catch {}
+    jeremyIronsVoice.updateConfig(changes);
   };
 
   const handleTestVoice = () => {
@@ -95,12 +64,12 @@ export const JeremyIronsVoiceControl: React.FC<JeremyIronsVoiceControlProps> = (
       return;
     }
     const testLines = [
-      "The 1911's are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your command.",
+      AUDITION_LINE_1911,
       "A man who cannot bear to share his screen with his steward is either concealing a catastrophe, or engineering one.",
       "Logic, Principal, is the only weapon that never jams under fire.",
     ];
     const line = testLines[Math.floor(Math.random() * testLines.length)];
-    jeremyIronsVoice.speak(line, config);
+    void jeremyIronsVoice.speak(line);
   };
 
   return (
@@ -319,10 +288,7 @@ export const JeremyIronsVoiceControl: React.FC<JeremyIronsVoiceControlProps> = (
               {/* Action Buttons */}
               <div className="pt-2 border-t border-red-950/60 flex items-center justify-between gap-2">
                 <button
-                  onClick={() => {
-                    setConfig(DEFAULT_JEREMY_IRONS_CONFIG);
-                    localStorage.setItem('ZEREO_JEREMY_IRONS_CONFIG', JSON.stringify(DEFAULT_JEREMY_IRONS_CONFIG));
-                  }}
+                  onClick={() => jeremyIronsVoice.resetConfig()}
                   className="text-[9px] font-mono text-zinc-500 hover:text-zinc-300 uppercase tracking-wider"
                 >
                   Reset Defaults

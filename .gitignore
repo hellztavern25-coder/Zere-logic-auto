@@ -1,3 +1,4 @@
+# [TAG: 11]
 # Logs
 logs
 *.log
@@ -22,3 +23,17 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Runtime persistent state JSONs (generated/updated by server.ts)
+config.json
+daemon_state.json
+emotional_state.json
+legal_dossiers.json
+memories.json
+recent_context.json
+threads.json
+visual_captures.json
+voice_clones.json
+voice_command_logs.json
+voice_presets.json
+voice_profiles.json

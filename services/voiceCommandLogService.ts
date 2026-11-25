@@ -1,8 +1,8 @@
+// [TAG: 11]
 import { VoiceCommandLogEntry, VoiceCommandSource } from '../types';
 import {
   jeremyIronsVoice,
-  VOICE_MODULATION_PROFILES,
-  JEREMY_IRONS_FORMANT_PRESETS,
+  resolveMergedDSPConfig,
   VoiceModulationProfile,
   JeremyIronsConfig
 } from './jeremyIronsVoiceService';
@@ -416,30 +416,7 @@ export async function clearVoiceCommandLogs(): Promise<boolean> {
 
 function buildConfigForEntry(entry: VoiceCommandLogEntry): Partial<JeremyIronsConfig> {
   const profileKey = (entry.voiceProfile as VoiceModulationProfile) || 'Jeremy-Irons-Signature';
-  const profileMeta =
-    VOICE_MODULATION_PROFILES[profileKey] || VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
-  const preset = entry.formantPreset ? JEREMY_IRONS_FORMANT_PRESETS[entry.formantPreset] : undefined;
-
-  if (!preset) {
-    return { ...profileMeta.config };
-  }
-
-  return {
-    ...profileMeta.config,
-    formantPresetName: preset.id,
-    f1Hz: preset.f1Hz,
-    f1GainDb: preset.f1GainDb,
-    f2Hz: preset.f2Hz,
-    f2GainDb: preset.f2GainDb,
-    f3Hz: preset.f3Hz,
-    f3GainDb: preset.f3GainDb,
-    vocalTractLengthFactor: preset.vocalTractLengthFactor,
-    chestResonanceDb: preset.chestResonanceDb,
-    articulationDb: preset.articulationDb,
-    gravelAmount: preset.gravelAmount,
-    pitchRate: preset.pitchRate,
-    speechRate: preset.speechRate
-  };
+  return resolveMergedDSPConfig(profileKey, entry.formantPreset);
 }
 
 export function stopVoiceLogReplay(): void {

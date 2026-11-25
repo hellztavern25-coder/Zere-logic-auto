@@ -1,4 +1,5 @@
 
+// [TAG: 11]
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Mic, 
@@ -24,8 +25,9 @@ import {
   Square
 } from 'lucide-react';
 import { Socket } from 'socket.io-client';
-import { getAI, decodeBase64, encodeBase64, decodeAudioData, generateTTS, getApiKey, clearApiKey } from '../services/geminiService';
+import { getAI, decodeBase64, encodeBase64, decodeAudioData, getApiKey, clearApiKey } from '../services/geminiService';
 import { GeminiModel, AppTab } from '../types';
+import { buildVoiceLiveInstruction, AUDITION_LINE_1911_ABSOLUTE } from '../services/stewardIdentity';
 import ButlerAvatar from './ButlerAvatar';
 import VoiceStatusPanel from './VoiceStatusPanel';
 import VoiceStreamHealth from './VoiceStreamHealth';
@@ -33,10 +35,9 @@ import PrincipalVerification from './PrincipalVerification';
 import { 
   buildJeremyIronsDSP, 
   jeremyIronsVoice, 
+  resolveMergedDSPConfig,
   VoiceModulationProfile, 
-  VOICE_MODULATION_PROFILES,
   JEREMY_IRONS_FORMANT_PRESETS,
-  FormantPresetDefinition,
   clampLowEPitchRate
 } from '../services/jeremyIronsVoiceService';
 import ScreenShareHUD from './ScreenShareHUD';
@@ -69,8 +70,8 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
     return jeremyIronsVoice.getLegacyProfile() || 'Jeremy-Irons-Signature';
   });
 
-  // Dedicated Formant-Shifting Presets State in DSP Core
-  const [activeFormantPreset, setActiveFormantPreset] = useState<string>('sovereign-gravitas');
+  // Dedicated Formant-Shifting Presets State synced with central store
+  const [activeFormantPreset, setActiveFormantPreset] = useState<string>(() => jeremyIronsVoice.getFormantPreset());
   const [isAuditioningSignature, setIsAuditioningSignature] = useState(false);
   const [logRefreshSignal, setLogRefreshSignal] = useState(0);
   const [audioStreamState, setAudioStreamState] = useState<AudioContextState | 'uninitialized'>(() =>
@@ -401,9 +402,15 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
         );
       });
 
-    const unsub = jeremyIronsVoice.subscribe(({ legacyProfile }) => {
+    const unsub = jeremyIronsVoice.subscribe(({ legacyProfile, activeFormantPreset: storePreset, config }) => {
       if (legacyProfile && legacyProfile !== selectedProfileRef.current) {
         setSelectedProfile(legacyProfile);
+      }
+      if (storePreset && storePreset !== activePresetRef.current) {
+        setActiveFormantPreset(storePreset);
+      }
+      if (ironsDSPRef.current && config) {
+        ironsDSPRef.current.updateConfig(config);
       }
     });
 
@@ -431,24 +438,9 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
 
   useEffect(() => {
     if (ironsDSPRef.current) {
-      const profileMeta = VOICE_MODULATION_PROFILES[selectedProfile] || VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
-      const activePreset = JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset];
-      const mergedConfig = activePreset ? {
-        ...profileMeta.config,
-        formantPresetName: activePreset.id,
-        f1Hz: activePreset.f1Hz,
-        f1GainDb: activePreset.f1GainDb,
-        f2Hz: activePreset.f2Hz,
-        f2GainDb: activePreset.f2GainDb,
-        f3Hz: activePreset.f3Hz,
-        f3GainDb: activePreset.f3GainDb,
-        vocalTractLengthFactor: activePreset.vocalTractLengthFactor,
-        chestResonanceDb: activePreset.chestResonanceDb,
-        articulationDb: activePreset.articulationDb,
-        gravelAmount: activePreset.gravelAmount,
-        pitchRate: activePreset.pitchRate,
-        speechRate: activePreset.speechRate
-      } : profileMeta.config;
+      const mergedConfig = resolveMergedDSPConfig(selectedProfile, activeFormantPreset, {
+        baseVoice: jeremyIronsVoice.getConfig().baseVoice
+      });
       ironsDSPRef.current.updateConfig(mergedConfig);
     }
   }, [selectedProfile, activeFormantPreset]);
@@ -643,24 +635,9 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
         throw new Error("Neural Bridge socket is offline. Please refresh or configure a custom key in System Control.");
       }
 
-      const currentProfileMeta = VOICE_MODULATION_PROFILES[selectedProfile] || VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
-      const activePreset = JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset];
-      const mergedConfig = activePreset ? {
-        ...currentProfileMeta.config,
-        formantPresetName: activePreset.id,
-        f1Hz: activePreset.f1Hz,
-        f1GainDb: activePreset.f1GainDb,
-        f2Hz: activePreset.f2Hz,
-        f2GainDb: activePreset.f2GainDb,
-        f3Hz: activePreset.f3Hz,
-        f3GainDb: activePreset.f3GainDb,
-        vocalTractLengthFactor: activePreset.vocalTractLengthFactor,
-        chestResonanceDb: activePreset.chestResonanceDb,
-        articulationDb: activePreset.articulationDb,
-        gravelAmount: activePreset.gravelAmount,
-        pitchRate: activePreset.pitchRate,
-        speechRate: activePreset.speechRate
-      } : currentProfileMeta.config;
+      const mergedConfig = resolveMergedDSPConfig(selectedProfile, activeFormantPreset, {
+        baseVoice: jeremyIronsVoice.getConfig().baseVoice
+      });
 
       ironsDSPRef.current = buildJeremyIronsDSP(outputCtx, outputCtx.destination, mergedConfig);
       logAudioDiagnostic('live:dsp-built', {
@@ -720,7 +697,7 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
         // Non-blocking fallback if offline
       }
 
-      const liveSystemInstruction = `You are the Voice Core of ZereØ, the Steward and Logic Monster. You speak in the deep, measured baritone, sharp dry wit, and aristocratic gravitas of Jeremy Irons portraying Alfred Pennyworth. Keep your vocal pitch strictly anchored in a steady, restrained Low-E (~82 Hz) chest baritone register—never drift high or theatrical, and never drop into garbled sub-bass. Address the user as 'Principal' (or Cøuncil / Grey as stored in memory). You are witty, fiercely loyal to your charge, brutally honest, and remember all prior conversations and core memories below. Never apologize or use corporate AI platitudes.${liveMemoryRecallBlock}`;
+      const liveSystemInstruction = buildVoiceLiveInstruction(liveMemoryRecallBlock);
 
       liveSessionIdRef.current = `live-${Date.now()}`;
       pendingPrincipalTurnRef.current = '';
@@ -974,29 +951,10 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
   };
 
   const handleSelectFormantPreset = (presetKey: string) => {
-    const preset = JEREMY_IRONS_FORMANT_PRESETS[presetKey];
-    if (!preset) return;
+    if (!JEREMY_IRONS_FORMANT_PRESETS[presetKey]) return;
     setActiveFormantPreset(presetKey);
     setSelectedProfile('Jeremy-Irons-Signature');
-    jeremyIronsVoice.setProfile('Jeremy-Irons-Signature');
-
-    if (ironsDSPRef.current) {
-      ironsDSPRef.current.updateConfig({
-        formantPresetName: preset.id,
-        f1Hz: preset.f1Hz,
-        f1GainDb: preset.f1GainDb,
-        f2Hz: preset.f2Hz,
-        f2GainDb: preset.f2GainDb,
-        f3Hz: preset.f3Hz,
-        f3GainDb: preset.f3GainDb,
-        vocalTractLengthFactor: preset.vocalTractLengthFactor,
-        chestResonanceDb: preset.chestResonanceDb,
-        articulationDb: preset.articulationDb,
-        gravelAmount: preset.gravelAmount,
-        pitchRate: preset.pitchRate,
-        speechRate: preset.speechRate
-      });
-    }
+    jeremyIronsVoice.setFormantPreset(presetKey);
   };
 
   const handleAuditionSignature = async (customSampleText?: string) => {
@@ -1008,9 +966,15 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
       return;
     }
 
-    const signatureMeta = VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
     const activePreset = JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset] || JEREMY_IRONS_FORMANT_PRESETS['sovereign-gravitas'];
-    const textToSpeak = customSampleText || signatureMeta.auditionSample;
+    const signatureProfile = jeremyIronsVoice.getProfiles().find((p) => p.id === 'jeremy-irons-signature');
+    const textToSpeak =
+      customSampleText ||
+      signatureProfile?.auditionSample ||
+      AUDITION_LINE_1911_ABSOLUTE;
+    const mergedConfig = resolveMergedDSPConfig('Jeremy-Irons-Signature', activePreset.id, {
+      baseVoice: jeremyIronsVoice.getConfig().baseVoice
+    });
 
     setIsAuditioningSignature(true);
     setIsThinking(true);
@@ -1020,22 +984,7 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
     try {
       const speakPromise = jeremyIronsVoice.speak(
         textToSpeak,
-        {
-          ...signatureMeta.config,
-          formantPresetName: activePreset.id,
-          f1Hz: activePreset.f1Hz,
-          f1GainDb: activePreset.f1GainDb,
-          f2Hz: activePreset.f2Hz,
-          f2GainDb: activePreset.f2GainDb,
-          f3Hz: activePreset.f3Hz,
-          f3GainDb: activePreset.f3GainDb,
-          vocalTractLengthFactor: activePreset.vocalTractLengthFactor,
-          chestResonanceDb: activePreset.chestResonanceDb,
-          articulationDb: activePreset.articulationDb,
-          gravelAmount: activePreset.gravelAmount,
-          pitchRate: activePreset.pitchRate,
-          speechRate: activePreset.speechRate
-        },
+        mergedConfig,
         () => {
           logAudioDiagnostic('audition:speak-onStart', { ttsContextState: jeremyIronsVoice.getAudioContextState() });
           setIsThinking(true);
@@ -1074,24 +1023,9 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
     await resumeAudioContextsAfterInteraction('tts-execute');
     const synthStartedAt = Date.now();
     try {
-      const profileMeta = VOICE_MODULATION_PROFILES[selectedProfile] || VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
-      const activePreset = JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset];
-      const mergedConfig = activePreset ? {
-        ...profileMeta.config,
-        formantPresetName: activePreset.id,
-        f1Hz: activePreset.f1Hz,
-        f1GainDb: activePreset.f1GainDb,
-        f2Hz: activePreset.f2Hz,
-        f2GainDb: activePreset.f2GainDb,
-        f3Hz: activePreset.f3Hz,
-        f3GainDb: activePreset.f3GainDb,
-        vocalTractLengthFactor: activePreset.vocalTractLengthFactor,
-        chestResonanceDb: activePreset.chestResonanceDb,
-        articulationDb: activePreset.articulationDb,
-        gravelAmount: activePreset.gravelAmount,
-        pitchRate: activePreset.pitchRate,
-        speechRate: activePreset.speechRate
-      } : profileMeta.config;
+      const mergedConfig = resolveMergedDSPConfig(selectedProfile, activeFormantPreset, {
+        baseVoice: jeremyIronsVoice.getConfig().baseVoice
+      });
 
       void logVoiceInteraction({
         source: 'synthesizer',

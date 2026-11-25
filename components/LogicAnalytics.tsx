@@ -1,10 +1,12 @@
 
+// [TAG: 11]
 import React, { useState, useRef, useEffect } from 'react';
 import { FileText, Search, Play, Upload, Image as ImageIcon, Video, Brain, Loader2, Info, Activity, Camera, RefreshCw, StopCircle, Globe, Link as LinkIcon, Save, Layers, HardDrive } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
 import { fileToBase64, safeGenerateContent } from '../services/geminiService';
 import { GeminiModel } from '../types';
+import { buildLogicAnalyticsInstruction } from '../services/stewardIdentity';
 import SystemHealthDashboard from './SystemHealthDashboard';
 import { Socket } from 'socket.io-client';
 
@@ -68,10 +70,10 @@ const LogicAnalytics: React.FC<LogicAnalyticsProps> = ({ socket }) => {
       const base64Data = canvas.toDataURL('image/jpeg').split(',')[1];
 
       const response = await safeGenerateContent({
-        model: GeminiModel.FLASH_PREVIEW,
+        model: GeminiModel.HYDROGEN,
         contents: { parts: [{ inlineData: { data: base64Data, mimeType: 'image/jpeg' } }, { text: taskPrompt }] },
         config: {
-          systemInstruction: "Analyze this live visual feed with the clinical precision of a high-end AI butler. Use a formal tone, addressing the Principal. Provide structured, logical insights based on the real-time surroundings. If search is enabled, find the best deals, facts, or real-time data to assist the Principal.",
+          systemInstruction: buildLogicAnalyticsInstruction('visual_feed'),
           tools: useSearch ? [{ googleSearch: {} }] : undefined
         }
       });
@@ -100,10 +102,10 @@ const LogicAnalytics: React.FC<LogicAnalyticsProps> = ({ socket }) => {
       const base64Data = file.split(',')[1];
       const mimeType = file.split(';')[0].split(':')[1];
       const response = await safeGenerateContent({
-        model: GeminiModel.FLASH_PREVIEW,
+        model: GeminiModel.HYDROGEN,
         contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: taskPrompt }] },
         config: {
-          systemInstruction: "Analyze this data with the clinical precision of a high-end AI butler. Use a formal tone, addressing the Principal. Provide structured, logical insights. If search is enabled, cross-reference with real-time web data.",
+          systemInstruction: buildLogicAnalyticsInstruction('evidence'),
           tools: useSearch ? [{ googleSearch: {} }] : undefined
         }
       });

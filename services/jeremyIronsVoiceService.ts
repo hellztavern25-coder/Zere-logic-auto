@@ -1,3 +1,4 @@
+// [TAG: 11]
 /**
  * ZEREO STEWARD INTELLIGENCE - VOICE EMULATION & ACOUSTIC DSP SYNTHESIS ENGINE
  * 
@@ -12,6 +13,13 @@
 
 import { generateTTS, decodeBase64, decodeAudioData, markTtsQuotaExhausted } from './geminiService';
 import { VoiceProfile, VoiceClip, VoiceAccentType, VoiceDSPConfig } from '../types';
+import canonicalIdentityProfile from '../zereo_identity_voice_profile.json';
+import {
+  AUDITION_LINE_1911,
+  AUDITION_LINE_1911_ABSOLUTE,
+  AUDITION_LINE_1911_SUBSTRATE,
+  AUDITION_LINE_1911_OPERATIONAL
+} from './stewardIdentity';
 import {
   LOW_E2_HZ,
   LOW_E_MIN_PITCH_RATE,
@@ -25,6 +33,11 @@ import {
 } from './voiceCalibration';
 
 export type { VoiceProfile, VoiceClip, VoiceAccentType, VoiceDSPConfig };
+const rawCanonicalBaseVoice = canonicalIdentityProfile?.dsp_filter_pipeline?.base_neural_voice;
+export const CANONICAL_BASE_VOICE: 'Charon' | 'Fenrir' | 'Orus' =
+  rawCanonicalBaseVoice === 'Fenrir' || rawCanonicalBaseVoice === 'Orus'
+    ? rawCanonicalBaseVoice
+    : 'Charon';
 export {
   LOW_E2_HZ,
   LOW_E_MIN_PITCH_RATE,
@@ -177,7 +190,7 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
     description: 'The dedicated Jeremy Irons vocal signature and default speech tone. Charon neural baritone baseline paired with warm Low-E2 acoustic resonance and controlled British diction.',
     isDefault: true,
     config: {
-      baseVoice: 'Charon',
+      baseVoice: CANONICAL_BASE_VOICE,
       pitchRate: 0.87,
       gravelAmount: 0.42,
       chestResonanceDb: 5.2,
@@ -196,7 +209,7 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
     fallbackRate: 0.86,
     badge: 'Vocal Signature • Low E2',
     accentColor: 'amber',
-    auditionSample: 'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your absolute command.'
+    auditionSample: AUDITION_LINE_1911_ABSOLUTE
   },
   'Iron-Adaptive': {
     id: 'Iron-Adaptive',
@@ -205,7 +218,7 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
     description: 'The definitive Jeremy Irons vocal signature. Unhurried cadence, Low-E chest resonance, razor-sharp aristocratic diction, and dry sardonic authority.',
     isDefault: false,
     config: {
-      baseVoice: 'Charon',
+      baseVoice: CANONICAL_BASE_VOICE,
       pitchRate: 0.87,
       gravelAmount: 0.42,
       chestResonanceDb: 5.2,
@@ -224,7 +237,7 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
     fallbackRate: 0.86,
     badge: 'Canonical Core',
     accentColor: 'amber',
-    auditionSample: 'The 1911s are loaded and the silver polished, Principal. System substrate running without friction.'
+    auditionSample: AUDITION_LINE_1911_SUBSTRATE
   },
   'Clinical-Analytical': {
     id: 'Clinical-Analytical',
@@ -233,7 +246,7 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
     description: 'Tightened analog resonance for clean articulated transients and steady Low-E baritone delivery. Tuned for raw algorithmic deconstructions.',
     isDefault: false,
     config: {
-      baseVoice: 'Charon',
+      baseVoice: CANONICAL_BASE_VOICE,
       pitchRate: 0.88,
       gravelAmount: 0.30,
       chestResonanceDb: 4.0,
@@ -261,7 +274,7 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
     description: 'Reserved, steady Low-E foundation with softened consonant edges and relaxed aristocratic delivery for quiet operational quarters.',
     isDefault: false,
     config: {
-      baseVoice: 'Charon',
+      baseVoice: CANONICAL_BASE_VOICE,
       pitchRate: 0.86,
       gravelAmount: 0.35,
       chestResonanceDb: 5.8,
@@ -286,6 +299,41 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
 
 export const DEFAULT_JEREMY_IRONS_CONFIG: JeremyIronsConfig = VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'].config;
 
+export function resolveMergedDSPConfig(
+  profile?: VoiceModulationProfile,
+  formantPresetKey?: string,
+  overrides?: Partial<JeremyIronsConfig>
+): JeremyIronsConfig {
+  const profileMeta =
+    (profile && VOICE_MODULATION_PROFILES[profile]) ||
+    VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
+  const preset = formantPresetKey ? JEREMY_IRONS_FORMANT_PRESETS[formantPresetKey] : undefined;
+
+  const base: JeremyIronsConfig = preset
+    ? {
+        ...profileMeta.config,
+        formantPresetName: preset.id,
+        f1Hz: preset.f1Hz,
+        f1GainDb: preset.f1GainDb,
+        f2Hz: preset.f2Hz,
+        f2GainDb: preset.f2GainDb,
+        f3Hz: preset.f3Hz,
+        f3GainDb: preset.f3GainDb,
+        vocalTractLengthFactor: preset.vocalTractLengthFactor,
+        chestResonanceDb: preset.chestResonanceDb,
+        articulationDb: preset.articulationDb,
+        gravelAmount: preset.gravelAmount,
+        pitchRate: preset.pitchRate,
+        speechRate: preset.speechRate
+      }
+    : { ...profileMeta.config };
+
+  return {
+    ...base,
+    ...(overrides || {})
+  };
+}
+
 // Predefined Canonical Voice Profiles for Emulator
 export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
   {
@@ -294,6 +342,7 @@ export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
     tagline: 'Vocal Signature • Formant-Shifted Aristocratic Baritone',
     description: 'The dedicated Jeremy Irons vocal signature and default speech tone. Formant-shifted Web Audio DSP core simulating his extended vocal tract length (1.14x), deep pharyngeal resonance (F1: 380Hz, +6.2dB), lingual retraction (F2: 1350Hz, -3.0dB), and piercing actor projection (F3: 2680Hz, +6.5dB).',
     accent: 'british_aristocrat',
+    baseVoice: CANONICAL_BASE_VOICE,
     isCanonical: true,
     isDefault: true,
     badge: 'Vocal Signature • Default',
@@ -302,7 +351,7 @@ export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
       {
         id: 'clip-irons-sig-1',
         name: 'The 1911s Loaded & Silver Polished',
-        transcription: 'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your command.',
+        transcription: AUDITION_LINE_1911,
         durationSeconds: 4.8,
         uploadedAt: 1725840000000,
         source: 'canonical_preset',
@@ -355,7 +404,7 @@ export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
       preferredVoiceNames: ['George', 'Microsoft George', 'Daniel', 'Arthur', 'Oliver', 'Ryan', 'Google UK English Male', 'Alfred', 'Alex']
     },
     systemPromptStyle: 'dry, gravelly, aristocratic British baritone, steady low-E chest register, unhurried measured cadence, sharp sardonic wit',
-    auditionSample: 'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your absolute command.'
+    auditionSample: AUDITION_LINE_1911_ABSOLUTE
   },
   {
     id: 'iron-adaptive',
@@ -363,6 +412,7 @@ export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
     tagline: 'Alfred Pennyworth • Low-E British Aristocratic Baritone',
     description: 'The definitive Jeremy Irons vocal signature. Unhurried cadence, steady Low-E chest resonance, dry sardonic British inflection, and gravelly aristocratic authority.',
     accent: 'british_aristocrat',
+    baseVoice: CANONICAL_BASE_VOICE,
     isCanonical: true,
     isDefault: false,
     badge: 'Identity Canonical',
@@ -371,7 +421,7 @@ export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
       {
         id: 'clip-irons-1',
         name: '1911s Loaded & Silver Polished',
-        transcription: 'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your command.',
+        transcription: AUDITION_LINE_1911,
         durationSeconds: 4.8,
         uploadedAt: 1725840000000,
         source: 'canonical_preset',
@@ -413,7 +463,7 @@ export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
       preferredVoiceNames: ['George', 'Microsoft George', 'Daniel', 'Arthur', 'Oliver', 'Ryan', 'Google UK English Male', 'Alfred']
     },
     systemPromptStyle: 'dry, gravelly, aristocratic British baritone, steady low-E chest register, unhurried cadence, understated authority',
-    auditionSample: 'The 1911s are loaded and the silver is polished, Principal. All systems operational without friction.'
+    auditionSample: AUDITION_LINE_1911_OPERATIONAL
   },
   {
     id: 'british-aristocrat',
@@ -421,6 +471,7 @@ export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
     tagline: 'J.A.R.V.I.S. / Bettany Class • Controlled Low-E RP',
     description: 'Crisply articulated British Received Pronunciation anchored in a steady Low-E baritone register without drifting sharp.',
     accent: 'british_rp',
+    baseVoice: CANONICAL_BASE_VOICE,
     isCanonical: false,
     isDefault: false,
     badge: 'High RP Aristocrat',
@@ -461,6 +512,7 @@ export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
     tagline: 'Anchored Low-E • Combat Operational Readiness',
     description: 'Low-E reinforced authoritative command voice. Firm chest gravity without dropping into muddy sub-harmonic distortion.',
     accent: 'american_baritone',
+    baseVoice: CANONICAL_BASE_VOICE,
     isCanonical: false,
     isDefault: false,
     badge: 'Low-E Tactical',
@@ -987,14 +1039,25 @@ export function splitIntoSentenceChunks(text: string, maxChunkLength: number = 2
   return chunks.filter((c) => c.length > 0);
 }
 
+export interface VoiceSpeakOptions extends Partial<JeremyIronsConfig> {
+  stylePromptOverride?: string;
+  accentOverride?: VoiceAccentType;
+}
+
 export interface VoicePlaybackState {
   isSpeaking: boolean;
   text: string;
   profile: VoiceProfile;
+  profiles: VoiceProfile[];
   legacyProfile: VoiceModulationProfile;
+  config: JeremyIronsConfig;
+  activeFormantPreset: string;
   currentChunk?: number;
   totalChunks?: number;
 }
+
+const VOICE_CONFIG_STORAGE_KEY = 'ZEREO_JEREMY_IRONS_CONFIG';
+const ACTIVE_FORMANT_PRESET_STORAGE_KEY = 'ZEREO_ACTIVE_FORMANT_PRESET';
 
 /**
  * Central Voice Playback & Profiles Manager
@@ -1005,6 +1068,8 @@ class JeremyIronsPlaybackManager {
   private isCurrentlySpeaking = false;
   private activeText = '';
   private activeProfileId: string = 'jeremy-irons-signature';
+  private activeFormantPreset: string = 'sovereign-gravitas';
+  private activeConfig: JeremyIronsConfig = { ...DEFAULT_JEREMY_IRONS_CONFIG };
   private profiles: VoiceProfile[] = [...CANONICAL_VOICE_PROFILES];
   private subscribers: Set<(state: VoicePlaybackState) => void> = new Set();
   
@@ -1021,8 +1086,109 @@ class JeremyIronsPlaybackManager {
       if (savedProfileId) {
         this.activeProfileId = savedProfileId;
       }
+      const savedFormant = localStorage.getItem(ACTIVE_FORMANT_PRESET_STORAGE_KEY);
+      if (savedFormant && JEREMY_IRONS_FORMANT_PRESETS[savedFormant]) {
+        this.activeFormantPreset = savedFormant;
+      }
+      this.activeConfig = this.loadStoredConfig();
+      if (this.activeConfig.formantPresetName && JEREMY_IRONS_FORMANT_PRESETS[this.activeConfig.formantPresetName]) {
+        this.activeFormantPreset = this.activeConfig.formantPresetName;
+      }
       void this.initialize();
     }
+  }
+
+  private normalizeConfig(parsed?: Partial<JeremyIronsConfig> | null): JeremyIronsConfig {
+    const allowedVoices = new Set(['Charon', 'Fenrir', 'Orus']);
+    const migratedBase: 'Charon' | 'Fenrir' | 'Orus' =
+      parsed?.baseVoice && allowedVoices.has(parsed.baseVoice) ? parsed.baseVoice : CANONICAL_BASE_VOICE;
+    const rawGravel = typeof parsed?.gravelAmount === 'number' ? parsed.gravelAmount : DEFAULT_JEREMY_IRONS_CONFIG.gravelAmount;
+    return {
+      ...DEFAULT_JEREMY_IRONS_CONFIG,
+      ...(parsed || {}),
+      baseVoice: migratedBase,
+      pitchRate: clampLowEPitchRate(parsed?.pitchRate),
+      gravelAmount: rawGravel > 0.7 ? 0.42 : rawGravel
+    };
+  }
+
+  private loadStoredConfig(): JeremyIronsConfig {
+    if (typeof window === 'undefined') return { ...DEFAULT_JEREMY_IRONS_CONFIG };
+    try {
+      const rawCfg = localStorage.getItem(VOICE_CONFIG_STORAGE_KEY);
+      if (rawCfg) {
+        const parsed = JSON.parse(rawCfg);
+        const normalized = this.normalizeConfig(parsed);
+        if (parsed?.baseVoice !== normalized.baseVoice) {
+          localStorage.setItem(VOICE_CONFIG_STORAGE_KEY, JSON.stringify(normalized));
+        }
+        return normalized;
+      }
+    } catch {}
+    return { ...DEFAULT_JEREMY_IRONS_CONFIG };
+  }
+
+  private persistConfig(cfg: JeremyIronsConfig) {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(VOICE_CONFIG_STORAGE_KEY, JSON.stringify(cfg));
+    } catch {}
+  }
+
+  public getConfig(): JeremyIronsConfig {
+    return { ...this.activeConfig };
+  }
+
+  public updateConfig(changes: Partial<JeremyIronsConfig>): JeremyIronsConfig {
+    this.activeConfig = this.normalizeConfig({
+      ...this.activeConfig,
+      ...changes
+    });
+    if (changes.formantPresetName && JEREMY_IRONS_FORMANT_PRESETS[changes.formantPresetName]) {
+      this.activeFormantPreset = changes.formantPresetName;
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(ACTIVE_FORMANT_PRESET_STORAGE_KEY, this.activeFormantPreset);
+        } catch {}
+      }
+    }
+    this.persistConfig(this.activeConfig);
+    this.notify();
+    return this.getConfig();
+  }
+
+  public resetConfig(): JeremyIronsConfig {
+    this.activeFormantPreset = 'sovereign-gravitas';
+    this.activeConfig = { ...DEFAULT_JEREMY_IRONS_CONFIG };
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(ACTIVE_FORMANT_PRESET_STORAGE_KEY, this.activeFormantPreset);
+      } catch {}
+    }
+    this.persistConfig(this.activeConfig);
+    this.notify();
+    return this.getConfig();
+  }
+
+  public getFormantPreset(): string {
+    return this.activeFormantPreset;
+  }
+
+  public setFormantPreset(presetKey: string): boolean {
+    const preset = JEREMY_IRONS_FORMANT_PRESETS[presetKey];
+    if (!preset) return false;
+    this.activeFormantPreset = presetKey;
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(ACTIVE_FORMANT_PRESET_STORAGE_KEY, presetKey);
+      } catch {}
+    }
+    this.activeConfig = resolveMergedDSPConfig('Jeremy-Irons-Signature', presetKey, {
+      baseVoice: this.activeConfig.baseVoice || CANONICAL_BASE_VOICE
+    });
+    this.persistConfig(this.activeConfig);
+    void this.setActiveProfile('jeremy-irons-signature', true);
+    return true;
   }
 
   /**
@@ -1078,7 +1244,41 @@ class JeremyIronsPlaybackManager {
     return this.profiles.find(p => p.id === this.activeProfileId) || this.profiles[0] || CANONICAL_VOICE_PROFILES[0];
   }
 
-  public async setActiveProfile(profileId: string): Promise<boolean> {
+  private syncConfigFromProfile(profile: VoiceProfile) {
+    const legacy = this.mapProfileIdToLegacy(profile.id);
+    const meta = legacy ? VOICE_MODULATION_PROFILES[legacy] : undefined;
+    const dsp = profile.dspConfig;
+    const formants = dsp?.formants;
+    const nextConfig: JeremyIronsConfig = {
+      ...(meta?.config || DEFAULT_JEREMY_IRONS_CONFIG),
+      baseVoice: profile.baseVoice || this.activeConfig.baseVoice || CANONICAL_BASE_VOICE,
+      pitchRate: clampLowEPitchRate(dsp?.pitchMultiplier ?? meta?.config.pitchRate),
+      gravelAmount: dsp?.gravelSaturation ?? meta?.config.gravelAmount ?? 0.42,
+      chestResonanceDb: dsp?.chestResonanceDb ?? meta?.config.chestResonanceDb ?? 5.2,
+      articulationDb: dsp?.articulationBoostDb ?? meta?.config.articulationDb ?? 1.6,
+      speechRate: dsp?.speechRate ?? meta?.config.speechRate ?? 0.90,
+      formantPresetName: dsp?.formantPresetName || meta?.config.formantPresetName || this.activeFormantPreset,
+      f1Hz: formants?.f1Hz ?? meta?.config.f1Hz,
+      f1GainDb: formants?.f1GainDb ?? meta?.config.f1GainDb,
+      f2Hz: formants?.f2Hz ?? meta?.config.f2Hz,
+      f2GainDb: formants?.f2GainDb ?? meta?.config.f2GainDb,
+      f3Hz: formants?.f3Hz ?? meta?.config.f3Hz,
+      f3GainDb: formants?.f3GainDb ?? meta?.config.f3GainDb,
+      vocalTractLengthFactor: formants?.vocalTractLengthFactor ?? meta?.config.vocalTractLengthFactor
+    };
+    this.activeConfig = nextConfig;
+    if (nextConfig.formantPresetName && JEREMY_IRONS_FORMANT_PRESETS[nextConfig.formantPresetName]) {
+      this.activeFormantPreset = nextConfig.formantPresetName;
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(ACTIVE_FORMANT_PRESET_STORAGE_KEY, this.activeFormantPreset);
+        } catch {}
+      }
+    }
+    this.persistConfig(this.activeConfig);
+  }
+
+  public async setActiveProfile(profileId: string, skipConfigSync: boolean = false): Promise<boolean> {
     const found = this.profiles.find(p => p.id === profileId);
     if (!found) return false;
 
@@ -1089,6 +1289,12 @@ class JeremyIronsPlaybackManager {
       cachedVoiceLock = null;
     }
 
+    if (!skipConfigSync) {
+      this.syncConfigFromProfile(found);
+    }
+
+    this.notify();
+
     try {
       await fetch('/api/voice/profiles/active', {
         method: 'POST',
@@ -1097,7 +1303,6 @@ class JeremyIronsPlaybackManager {
       });
     } catch (_) {}
 
-    this.notify();
     return true;
   }
 
@@ -1107,6 +1312,10 @@ class JeremyIronsPlaybackManager {
       this.profiles[existingIndex] = profile;
     } else {
       this.profiles.push(profile);
+    }
+
+    if (profile.id === this.activeProfileId) {
+      this.syncConfigFromProfile(profile);
     }
 
     try {
@@ -1130,6 +1339,8 @@ class JeremyIronsPlaybackManager {
     this.profiles = this.profiles.filter(p => p.id !== profileId);
     if (this.activeProfileId === profileId) {
       this.activeProfileId = 'jeremy-irons-signature';
+      const fallback = this.getActiveProfile();
+      this.syncConfigFromProfile(fallback);
     }
 
     try {
@@ -1174,26 +1385,49 @@ class JeremyIronsPlaybackManager {
     return true;
   }
 
-  public getLegacyProfile(): VoiceModulationProfile {
-    const profile = this.getActiveProfile();
-    if (profile.id === 'jeremy-irons-signature') return 'Jeremy-Irons-Signature';
-    if (profile.id === 'british-aristocrat') return 'Clinical-Analytical';
-    if (profile.id === 'tactical-commander') return 'Subtle-Steward';
-    if (profile.id === 'iron-adaptive') return 'Iron-Adaptive';
+  private mapProfileIdToLegacy(profileId: string): VoiceModulationProfile {
+    if (profileId === 'jeremy-irons-signature') return 'Jeremy-Irons-Signature';
+    if (profileId === 'british-aristocrat') return 'Clinical-Analytical';
+    if (profileId === 'tactical-commander') return 'Subtle-Steward';
+    if (profileId === 'iron-adaptive') return 'Iron-Adaptive';
     return 'Jeremy-Irons-Signature';
   }
 
-  public subscribe(cb: (state: { isSpeaking: boolean; text: string; profile: VoiceProfile; legacyProfile: VoiceModulationProfile; currentChunk?: number; totalChunks?: number }) => void): () => void {
+  public getLegacyProfile(): VoiceModulationProfile {
+    return this.mapProfileIdToLegacy(this.getActiveProfile().id);
+  }
+
+  public subscribe(cb: (state: VoicePlaybackState) => void): () => void {
     this.subscribers.add(cb);
-    cb({ isSpeaking: this.isCurrentlySpeaking, text: this.activeText, profile: this.getActiveProfile(), legacyProfile: this.getLegacyProfile() });
+    cb({
+      isSpeaking: this.isCurrentlySpeaking,
+      text: this.activeText,
+      profile: this.getActiveProfile(),
+      profiles: [...this.profiles],
+      legacyProfile: this.getLegacyProfile(),
+      config: this.getConfig(),
+      activeFormantPreset: this.activeFormantPreset
+    });
     return () => this.subscribers.delete(cb);
   }
 
   private notify(currentChunk?: number, totalChunks?: number) {
     const profile = this.getActiveProfile();
     const legacyProfile = this.getLegacyProfile();
+    const config = this.getConfig();
+    const profiles = [...this.profiles];
     for (const sub of this.subscribers) {
-      sub({ isSpeaking: this.isCurrentlySpeaking, text: this.activeText, profile, legacyProfile, currentChunk, totalChunks });
+      sub({
+        isSpeaking: this.isCurrentlySpeaking,
+        text: this.activeText,
+        profile,
+        profiles,
+        legacyProfile,
+        config,
+        activeFormantPreset: this.activeFormantPreset,
+        currentChunk,
+        totalChunks
+      });
     }
   }
 
@@ -1360,7 +1594,7 @@ class JeremyIronsPlaybackManager {
    */
   public async speak(
     rawText: string,
-    customConfig?: Partial<JeremyIronsConfig>,
+    customConfig?: VoiceSpeakOptions,
     onStart?: () => void,
     onEnded?: () => void
   ): Promise<boolean> {
@@ -1390,41 +1624,26 @@ class JeremyIronsPlaybackManager {
     this.notify(1, chunks.length);
 
     try {
-      let savedCfg: Partial<JeremyIronsConfig> | undefined = customConfig;
-      if (!savedCfg && typeof window !== 'undefined') {
-        try {
-          const rawCfg = localStorage.getItem('ZEREO_JEREMY_IRONS_CONFIG');
-          if (rawCfg) {
-            const parsed = JSON.parse(rawCfg);
-            const allowedVoices = new Set(['Charon', 'Fenrir', 'Orus']);
-            const migratedBase = allowedVoices.has(parsed?.baseVoice) ? parsed.baseVoice : 'Charon';
-            const migrated = {
-              ...parsed,
-              baseVoice: migratedBase,
-              pitchRate: clampLowEPitchRate(parsed?.pitchRate),
-              gravelAmount: typeof parsed?.gravelAmount === 'number' && parsed.gravelAmount > 0.7 ? 0.42 : parsed?.gravelAmount
-            };
-            savedCfg = migrated;
-            if (parsed?.baseVoice !== migratedBase) {
-              localStorage.setItem('ZEREO_JEREMY_IRONS_CONFIG', JSON.stringify(migrated));
-            }
-          }
-        } catch {}
-      }
+      const { stylePromptOverride, accentOverride, ...dspOverrides } = customConfig || {};
+      const effectiveCfg: Partial<JeremyIronsConfig> = {
+        ...this.activeConfig,
+        ...dspOverrides
+      };
 
-      const stylePrompt = activeProfile.systemPromptStyle;
-      const requestedBase = savedCfg?.baseVoice as string | undefined;
+      const stylePrompt = stylePromptOverride || activeProfile.systemPromptStyle;
+      const targetAccent = accentOverride || activeProfile.accent;
+      const requestedBase = (effectiveCfg.baseVoice || activeProfile.baseVoice) as string | undefined;
       const baseVoice: 'Charon' | 'Fenrir' | 'Orus' =
         requestedBase === 'Fenrir' || requestedBase === 'Orus' || requestedBase === 'Charon'
           ? requestedBase
-          : 'Charon';
+          : CANONICAL_BASE_VOICE;
 
       // Prefetch chunk 0 immediately
       let nextBufferPromise: Promise<AudioBuffer | null> | null = generateTTS(
         chunks[0],
         baseVoice,
         stylePrompt,
-        activeProfile.accent
+        targetAccent
       ).catch(() => null);
 
       for (let i = 0; i < chunks.length; i++) {
@@ -1438,7 +1657,7 @@ class JeremyIronsPlaybackManager {
             chunks[i + 1],
             baseVoice,
             stylePrompt,
-            activeProfile.accent
+            targetAccent
           ).catch(() => null);
         } else {
           nextBufferPromise = null;
@@ -1449,11 +1668,11 @@ class JeremyIronsPlaybackManager {
 
         let playedViaAudio = false;
         if (audioBuffer) {
-          playedViaAudio = await this.playAudioBuffer(audioBuffer, activeProfile, savedCfg, currentGen);
+          playedViaAudio = await this.playAudioBuffer(audioBuffer, activeProfile, effectiveCfg, currentGen);
         }
 
         if (!playedViaAudio && currentGen === this.playbackGenerationId) {
-          await this.speakChunkViaSpeechSynthesis(chunks[i], activeProfile, currentGen, savedCfg);
+          await this.speakChunkViaSpeechSynthesis(chunks[i], activeProfile, currentGen, effectiveCfg);
         }
       }
 
@@ -1575,7 +1794,7 @@ class JeremyIronsPlaybackManager {
 
         const formants = profile.dspConfig.formants;
         const config: JeremyIronsConfig = {
-          baseVoice: 'Charon',
+          baseVoice: profile.baseVoice || CANONICAL_BASE_VOICE,
           pitchRate: clampLowEPitchRate(profile.dspConfig.pitchMultiplier ?? LOW_E_TARGET_PITCH_RATE),
           gravelAmount: profile.dspConfig.gravelSaturation ?? 0.42,
           chestResonanceDb: profile.dspConfig.chestResonanceDb ?? 5.2,
@@ -1647,7 +1866,7 @@ class JeremyIronsPlaybackManager {
       'Subtle-Steward': 'tactical-commander'
     };
     const targetId = idMap[profile] || 'jeremy-irons-signature';
-    this.setActiveProfile(targetId);
+    void this.setActiveProfile(targetId);
   }
 }
 

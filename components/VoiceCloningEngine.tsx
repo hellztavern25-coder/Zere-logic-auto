@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+// [TAG: 11]
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Wand2,
@@ -40,8 +41,8 @@ import {
   CANONICAL_IRONS_TONAL_MODEL
 } from '../services/voiceCloningEngineService';
 import { jeremyIronsVoice } from '../services/jeremyIronsVoiceService';
-import { voicePresetManager } from '../services/voicePresetService';
-import { markTtsQuotaExhausted } from '../services/geminiService';
+import { voicePresetStore } from '../services/voicePresetService';
+import { AUDITION_LINE_1911 } from '../services/stewardIdentity';
 
 interface VoiceCloningEngineProps {
   clips: VoiceClip[];
@@ -76,13 +77,8 @@ export const VoiceCloningEngine: React.FC<VoiceCloningEngineProps> = ({
   });
 
   // Audition Bench State
-  const [auditionText, setAuditionText] = useState(
-    'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. Systems nominal with zero logical drift.'
-  );
+  const [auditionText, setAuditionText] = useState(AUDITION_LINE_1911);
   const [isSynthesizing, setIsSynthesizing] = useState(false);
-  const [auditionAudioUrl, setAuditionAudioUrl] = useState<string | null>(null);
-  const [isPlayingAudition, setIsPlayingAudition] = useState(false);
-  const auditionAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Inspector tab: 'dna' | 'stt' | 'directive' | 'dsp'
   const [inspectTab, setInspectTab] = useState<'dna' | 'stt' | 'directive' | 'dsp'>('dna');
@@ -186,12 +182,12 @@ export const VoiceCloningEngine: React.FC<VoiceCloningEngineProps> = ({
     const targetModel = currentDisplayModel;
     if (!targetModel) return;
 
-    const currentCount = voicePresetManager.getPresets().filter(p => p.name.startsWith('Iron-Adaptive')).length;
+    const currentCount = voicePresetStore.getPresets().filter(p => p.name.startsWith('Iron-Adaptive')).length;
     const presetName = currentCount > 0 ? `Iron-Adaptive-V${currentCount + 1}` : 'Iron-Adaptive-V1';
     const codeName = presetName.toUpperCase().replace(/\s+/g, '-');
 
     try {
-      const saved = await voicePresetManager.savePreset({
+      const saved = await voicePresetStore.savePreset({
         name: presetName,
         codeName: codeName,
         tagline: `${targetModel.name} (${Math.round(tonalIntensity * 100)}% Intensity)`,
@@ -211,7 +207,7 @@ export const VoiceCloningEngine: React.FC<VoiceCloningEngineProps> = ({
         }
       });
 
-      await voicePresetManager.setActivePreset(saved.id);
+      await voicePresetStore.setActivePreset(saved.id);
       showToast(`Voice Preset saved & engaged: [${saved.name}] (${saved.codeName})`);
     } catch (err: any) {
       showToast('Failed to save preset: ' + (err?.message || 'Error'));
@@ -314,65 +310,27 @@ export const VoiceCloningEngine: React.FC<VoiceCloningEngineProps> = ({
     }
   };
 
-  // Audition speech synthesis with cloned model modulated by Tonal Intensity
+  // Audition speech synthesis with cloned model modulated by Tonal Intensity via single unified speak path
   const handleAuditionSynthesize = async () => {
     if (!auditionText.trim()) return;
     setIsSynthesizing(true);
-    if (auditionAudioRef.current) {
-      auditionAudioRef.current.pause();
-      setIsPlayingAudition(false);
-    }
-
-    const dspConfig = {
-      pitchRate: effectiveDsp.pitchMultiplier,
-      gravelAmount: effectiveDsp.gravelSaturation,
-      chestResonanceDb: effectiveDsp.chestResonanceDb,
-      articulationDb: effectiveDsp.articulationBoostDb,
-      speechRate: effectiveDsp.speechRate
-    };
 
     try {
-      const targetModel = currentDisplayModel;
-      
-      const res = await fetch('/api/voice/clone/synthesize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: auditionText,
-          modelId: targetModel.id,
-          customPromptStyle: effectiveDirective,
-          tonalIntensity: tonalIntensity
-        })
+      const didSpeak = await jeremyIronsVoice.speak(auditionText, {
+        pitchRate: effectiveDsp.pitchMultiplier,
+        gravelAmount: effectiveDsp.gravelSaturation,
+        chestResonanceDb: effectiveDsp.chestResonanceDb,
+        articulationDb: effectiveDsp.articulationBoostDb,
+        speechRate: effectiveDsp.speechRate,
+        stylePromptOverride: effectiveDirective,
+        accentOverride: currentDisplayModel.sttAnalysis?.detectedAccent
       });
-
-      const data = await res.json().catch(() => null);
-      if (res.status === 429 || data?.quotaExhausted) {
-        markTtsQuotaExhausted(data?.error, data?.retryAfterSeconds);
-        await jeremyIronsVoice.speak(auditionText, dspConfig);
-        showToast('Cloud neural TTS quota reached — playing via British DSP Speech fallback');
-      } else if (res.ok && data?.audioData) {
-        const audioUrl = `data:${data.mimeType || 'audio/wav'};base64,${data.audioData}`;
-        setAuditionAudioUrl(audioUrl);
-
-        const played = await jeremyIronsVoice.playBase64Audio(
-          data.audioData,
-          dspConfig,
-          undefined,
-          undefined,
-          auditionText
-        );
-        if (!played) {
-          await jeremyIronsVoice.speak(auditionText, dspConfig);
-        }
+      if (didSpeak) {
         showToast(`Synthesized with ${Math.round(tonalIntensity * 100)}% tonal gravitas`);
-      } else {
-        await jeremyIronsVoice.speak(auditionText, dspConfig);
-        showToast(`Synthesized via client neural queue (${Math.round(tonalIntensity * 100)}% gravitas)`);
       }
     } catch (err: any) {
-      console.warn('Audition synthesis fallback:', err);
-      await jeremyIronsVoice.speak(auditionText, dspConfig);
-      showToast('Audition played via modulated acoustic pipeline');
+      console.warn('Audition synthesis error:', err);
+      showToast('Audition playback unavailable');
     } finally {
       setIsSynthesizing(false);
     }
@@ -1186,7 +1144,7 @@ export const VoiceCloningEngine: React.FC<VoiceCloningEngineProps> = ({
             {/* Quick Phrase Chips */}
             <div className="flex flex-wrap gap-1.5">
               {[
-                'The 1911s are loaded and the silver is polished to a lethal sheen, Principal.',
+                AUDITION_LINE_1911,
                 'A man who cannot bear to share his screen with his steward is either concealing a catastrophe, or engineering one.',
                 'Logic, Principal, is the only weapon that never jams under fire.'
               ].map((phrase, i) => (

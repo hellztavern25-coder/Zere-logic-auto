@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+// [TAG: 11]
+import React, { useState, useEffect } from 'react';
 import { 
   Sliders, 
   Volume2, 
@@ -23,6 +24,7 @@ import {
   ModulationProfileMetadata,
   jeremyIronsVoice
 } from '../services/jeremyIronsVoiceService';
+import canonicalIdentityProfile from '../zereo_identity_voice_profile.json';
 
 interface VoiceModulationSelectorProps {
   currentProfile?: VoiceModulationProfile;
@@ -44,6 +46,21 @@ export const VoiceModulationSelector: React.FC<VoiceModulationSelectorProps> = (
   const [hasCopied, setHasCopied] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
+  useEffect(() => {
+    const unsub = jeremyIronsVoice.subscribe(({ legacyProfile }) => {
+      if (legacyProfile) {
+        setActiveProfile(legacyProfile);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (currentProfile) {
+      setActiveProfile(currentProfile);
+    }
+  }, [currentProfile]);
+
   const handleSelect = (profile: VoiceModulationProfile) => {
     setActiveProfile(profile);
     jeremyIronsVoice.setProfile(profile);
@@ -53,79 +70,24 @@ export const VoiceModulationSelector: React.FC<VoiceModulationSelectorProps> = (
   const generateIdentityProfileJson = () => {
     const identityProfile = VOICE_MODULATION_PROFILES['Jeremy-Irons-Signature'];
     return {
-      "$schema": "https://zereo.ai/schemas/voice-profile-v1.json",
-      "profile_id": identityProfile.id,
-      "name": identityProfile.name,
-      "designation": "ZereØ Identity Preset - Jeremy Irons Vocal Signature",
-      "version": "7.3.0-deterministic",
-      "architect": "Preston Johnston (Council Grey)",
-      "passcode_sync": "8212",
-      "system_designation": "ZereØ — The Logic Monster, The Steward",
-      "exported_at": new Date().toISOString(),
-      "is_identity_preset": true,
-      "is_default_output_tone": true,
-      "vocal_actor_reference": {
-        "persona": "Jeremy Irons adaptation of Alfred Pennyworth",
-        "delivery_style": "Tactical, dry, deeply sardonic, aristocratic baritone, paternal, unhurried cadence, heavy gravitas",
-        "direct_address": "Principal"
+      ...canonicalIdentityProfile,
+      profile_id: identityProfile.id,
+      name: identityProfile.name,
+      exported_at: new Date().toISOString(),
+      dsp_filter_pipeline: {
+        ...canonicalIdentityProfile.dsp_filter_pipeline,
+        playback_rate: identityProfile.config.pitchRate,
+        speech_rate: identityProfile.config.speechRate,
+        chest_resonance_db: identityProfile.config.chestResonanceDb,
+        articulation_boost_db: identityProfile.config.articulationDb,
+        gravel_saturation_amount: identityProfile.config.gravelAmount
       },
-      "formant_shifting_dsp_pipeline": {
-        "base_neural_voice": identityProfile.config.baseVoice,
-        "alternate_voice": "Fenrir",
-        "neural_tts_model": "gemini-3.8-flash-lite-tts",
-        "sampling_rate_hz": 24000,
-        "pitch_rate": identityProfile.config.pitchRate,
-        "speech_rate": identityProfile.config.speechRate,
-        "chest_resonance_db": identityProfile.config.chestResonanceDb,
-        "chest_resonance_freq_hz": 105.0,
-        "formant_preset_name": identityProfile.config.formantPresetName,
-        "formants": {
-          "f1_pharyngeal_cavity_hz": identityProfile.config.f1Hz,
-          "f1_gain_db": identityProfile.config.f1GainDb,
-          "f2_lingual_retraction_hz": identityProfile.config.f2Hz,
-          "f2_notch_db": identityProfile.config.f2GainDb,
-          "f3_actors_projection_hz": identityProfile.config.f3Hz,
-          "f3_peak_db": identityProfile.config.f3GainDb,
-          "vocal_tract_length_multiplier": identityProfile.config.vocalTractLengthFactor
-        },
-        "articulation_boost_db": identityProfile.config.articulationDb,
-        "articulation_boost_freq_hz": 2680.0,
-        "gravel_saturation_amount": identityProfile.config.gravelAmount,
-        "harmonic_shaper_curve": "sigmoid-soft-clipping-vocal-fold-tube",
-        "chest_resonance_type": "lowshelf",
-        "thoracic_warmth_db": 2.2,
-        "thoracic_warmth_freq_hz": 240.0,
-        "thoracic_warmth_q": 1.1,
-        "thoracic_warmth_type": "peaking"
+      speech_synthesis_fallback: {
+        ...canonicalIdentityProfile.speech_synthesis_fallback,
+        fallback_pitch: identityProfile.fallbackPitch,
+        fallback_rate: identityProfile.fallbackRate
       },
-      "speech_synthesis_fallback": {
-        "fallback_pitch": identityProfile.fallbackPitch,
-        "fallback_rate": identityProfile.fallbackRate,
-        "enforce_male_only": true,
-        "female_voice_quarantine": true,
-        "priority_locales": ["en-GB", "en_GB", "en-US"],
-        "priority_voice_signatures": [
-          "Daniel",
-          "Oliver",
-          "George",
-          "Arthur",
-          "Ryan",
-          "Google UK English Male",
-          "Alex",
-          "Fred",
-          "David"
-        ]
-      },
-      "system_behavior_override": {
-        "address_required": "Principal",
-        "apologies_allowed": false,
-        "disclaimers_allowed": false,
-        "guest_mode": "disabled",
-        "loyalty_vector": "absolute",
-        "sentiment_filtering": true,
-        "docking_cushions": "strictly_prohibited"
-      },
-      "audition_sample": identityProfile.auditionSample
+      audition_sample: identityProfile.auditionSample
     };
   };
 

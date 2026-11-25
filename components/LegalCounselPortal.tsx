@@ -1,3 +1,4 @@
+// [TAG: 11]
 import React, { useEffect, useMemo, useState } from 'react';
 import Markdown from 'react-markdown';
 import { Socket } from 'socket.io-client';
@@ -49,7 +50,7 @@ import {
   US_LAW_LIBRARY_PRECEDENTS,
   matchPrecedentsForScenario,
 } from '../services/usLawRegistry';
-import { getApiKey } from '../services/geminiService';
+import { getAuthHeaders } from '../services/geminiService';
 import { jeremyIronsVoice } from '../services/jeremyIronsVoiceService';
 
 interface LegalCounselPortalProps {
@@ -79,21 +80,14 @@ const MODE_OPTIONS: Array<{ id: LegalResearchMode; label: string }> = [
 ];
 
 const PRACTICE_LABELS: Record<LegalPracticeArea, string> = {
+  ...(Object.fromEntries(PRACTICE_TABS.map((t) => [t.id, t.label])) as Record<LegalPracticeArea, string>),
   all: 'All Domains',
-  professional: 'Professional',
-  business: 'Business',
-  criminal: 'Criminal',
-  civil: 'Civil',
   constitutional: 'Constitutional',
 };
 
 const MODE_LABELS: Record<LegalResearchMode, string> = {
-  legal_counsel: 'Counsel Brief',
-  defense_strategy: 'Strategy Builder',
-  defense_statement: 'Defense Statement',
-  statute_lookup: 'Statute Lookup',
+  ...(Object.fromEntries(MODE_OPTIONS.map((m) => [m.id, m.label])) as Record<LegalResearchMode, string>),
   state_compare: 'Jurisdiction Compare',
-  rights_defense: 'Rights & Defense',
 };
 
 const LegalCounselPortal: React.FC<LegalCounselPortalProps> = ({ socket, onNavigate }) => {
@@ -336,22 +330,9 @@ const LegalCounselPortal: React.FC<LegalCounselPortalProps> = ({ socket, onNavig
     }
 
     try {
-      const apiKey = getApiKey();
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (apiKey) {
-        headers['Authorization'] = `Bearer ${apiKey}`;
-      }
+      const headers = getAuthHeaders();
 
-      const endpoint =
-        targetMode === 'defense_strategy'
-          ? '/api/legal/defense-strategy'
-          : targetMode === 'defense_statement'
-          ? '/api/legal/defense-statement'
-          : '/api/legal/counsel';
-
-      const res = await fetch(endpoint, {
+      const res = await fetch('/api/legal/counsel', {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -607,6 +588,67 @@ const LegalCounselPortal: React.FC<LegalCounselPortalProps> = ({ socket, onNavig
       onNavigate(AppTab.CHAT);
     }
   };
+
+  const handleSelectLadyGreyShield = (includeEducatorPrecedents: boolean) => {
+    setHouseEntityName('Lady Grey (Educator) — House Grey');
+    setDefenseStatementType('educator_bureaucracy_shield');
+    setPracticeArea('professional');
+    if (includeEducatorPrecedents) {
+      const eduPrecedents = matchPrecedentsForScenario(
+        'professional',
+        'teacher lady grey school district bureaucracy loudermill garrity pickering',
+        5
+      );
+      setSelectedPrecedentIds(eduPrecedents.map((p) => p.id));
+    }
+  };
+
+  const renderProtectedAndAdversePartyFields = (inputBgClass: string, includeEducatorPrecedents: boolean) => (
+    <>
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <label className="text-[11px] font-mono text-zinc-400">Protected Party</label>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setHouseEntityName('The Grey House / Principal Preston Johnston')}
+              className="text-[10px] font-mono text-amber-400 hover:text-amber-300 cursor-pointer"
+            >
+              House Grey
+            </button>
+            <span className="text-zinc-600 text-[10px]">·</span>
+            <button
+              type="button"
+              onClick={() => handleSelectLadyGreyShield(includeEducatorPrecedents)}
+              className="text-[10px] font-mono text-amber-400 hover:text-amber-300 cursor-pointer"
+            >
+              Lady Grey (Teacher)
+            </button>
+          </div>
+        </div>
+        <input
+          type="text"
+          value={houseEntityName}
+          onChange={(e) => setHouseEntityName(e.target.value)}
+          placeholder="The Grey House / Lady Grey"
+          className={`w-full px-2.5 ${inputBgClass} border border-zinc-800 rounded-lg text-xs text-zinc-100 focus:outline-none focus:border-amber-500/50`}
+        />
+      </div>
+
+      <div className="space-y-1">
+        <label className="text-[11px] font-mono text-zinc-400 block">
+          Adverse Party / Claimant / Agency (Optional)
+        </label>
+        <input
+          type="text"
+          value={opposingParty}
+          onChange={(e) => setOpposingParty(e.target.value)}
+          placeholder="Opposing party, claimant, or agency"
+          className={`w-full px-2.5 ${inputBgClass} border border-zinc-800 rounded-lg text-xs text-zinc-100 focus:outline-none focus:border-amber-500/50`}
+        />
+      </div>
+    </>
+  );
 
   const renderBriefOutput = () => (
     <>
@@ -1191,60 +1233,7 @@ const LegalCounselPortal: React.FC<LegalCounselPortalProps> = ({ socket, onNavig
                     </select>
                   </div>
 
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <label className="text-[11px] font-mono text-zinc-400">
-                        Protected Party
-                      </label>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setHouseEntityName('The Grey House / Principal Preston Johnston')}
-                          className="text-[10px] font-mono text-amber-400 hover:text-amber-300 cursor-pointer"
-                        >
-                          House Grey
-                        </button>
-                        <span className="text-zinc-600 text-[10px]">·</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setHouseEntityName('Lady Grey (Educator) — House Grey');
-                            setDefenseStatementType('educator_bureaucracy_shield');
-                            setPracticeArea('professional');
-                            const eduPrecedents = matchPrecedentsForScenario(
-                              'professional',
-                              'teacher lady grey school district bureaucracy loudermill garrity pickering',
-                              5
-                            );
-                            setSelectedPrecedentIds(eduPrecedents.map((p) => p.id));
-                          }}
-                          className="text-[10px] font-mono text-amber-400 hover:text-amber-300 cursor-pointer"
-                        >
-                          Lady Grey (Teacher)
-                        </button>
-                      </div>
-                    </div>
-                    <input
-                      type="text"
-                      value={houseEntityName}
-                      onChange={(e) => setHouseEntityName(e.target.value)}
-                      placeholder="House Grey / Lady Grey"
-                      className="w-full px-2.5 py-2 bg-black border border-zinc-800 rounded-lg text-xs text-zinc-100 focus:outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-mono text-zinc-400 block">
-                      Adverse Party / Claimant / Agency (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={opposingParty}
-                      onChange={(e) => setOpposingParty(e.target.value)}
-                      placeholder="Opposing party, claimant, or regulator"
-                      className="w-full px-2.5 py-2 bg-black border border-zinc-800 rounded-lg text-xs text-zinc-100 focus:outline-none focus:border-amber-500/50"
-                    />
-                  </div>
+                  {renderProtectedAndAdversePartyFields('py-2 bg-black', true)}
                 </div>
 
                 {selectedPrecedents.length > 0 && (
@@ -1656,53 +1645,7 @@ const LegalCounselPortal: React.FC<LegalCounselPortalProps> = ({ socket, onNavig
                           ))}
                         </select>
                       </div>
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <label className="text-[11px] font-mono text-zinc-400">
-                            Protected Party
-                          </label>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => setHouseEntityName('The Grey House / Principal Preston Johnston')}
-                              className="text-[10px] font-mono text-amber-400 hover:text-amber-300 cursor-pointer"
-                            >
-                              House Grey
-                            </button>
-                            <span className="text-zinc-600 text-[10px]">·</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setHouseEntityName('Lady Grey (Educator) — House Grey');
-                                setDefenseStatementType('educator_bureaucracy_shield');
-                                setPracticeArea('professional');
-                              }}
-                              className="text-[10px] font-mono text-amber-400 hover:text-amber-300 cursor-pointer"
-                            >
-                              Lady Grey (Teacher)
-                            </button>
-                          </div>
-                        </div>
-                        <input
-                          type="text"
-                          value={houseEntityName}
-                          onChange={(e) => setHouseEntityName(e.target.value)}
-                          placeholder="The Grey House / Lady Grey"
-                          className="w-full px-2.5 py-1.5 bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-zinc-100 focus:outline-none focus:border-amber-500/50"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-mono text-zinc-400 block">
-                          Adverse Party / Claimant / Agency (Optional)
-                        </label>
-                        <input
-                          type="text"
-                          value={opposingParty}
-                          onChange={(e) => setOpposingParty(e.target.value)}
-                          placeholder="Opposing party, claimant, or agency"
-                          className="w-full px-2.5 py-1.5 bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-zinc-100 focus:outline-none focus:border-amber-500/50"
-                        />
-                      </div>
+                      {renderProtectedAndAdversePartyFields('py-1.5 bg-zinc-950', false)}
                     </div>
 
                     <div className="flex flex-wrap gap-1.5 pt-1">

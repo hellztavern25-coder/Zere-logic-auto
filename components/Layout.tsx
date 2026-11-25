@@ -1,27 +1,12 @@
+// [TAG: 11]
 import React, { useState, useEffect } from 'react';
-import { 
-  MessageSquare, 
-  Image as ImageIcon, 
-  Mic, 
-  LineChart, 
-  Search, 
+import {
   Menu,
   X,
   Terminal,
-  Database,
-  Share2,
-  Home as HomeIcon,
-  Share as ShareIcon,
-  Settings,
-  Wrench,
-  Eye,
-  Cpu,
-  Headphones,
-  FolderOpen,
   BrainCircuit,
   AlertTriangle,
   ShieldCheck,
-  Scale
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Socket } from 'socket.io-client';
@@ -29,6 +14,7 @@ import { AppTab } from '../types';
 import ButlerAvatar from './ButlerAvatar';
 import NeuralBroker from './NeuralBroker';
 import { headerPulse, HeaderPulseState } from '../services/headerPulseService';
+import { TAB_TITLES, getVisibleNavItems } from '../services/navigationConfig';
 
 interface LayoutProps {
   activeTab: AppTab;
@@ -39,26 +25,6 @@ interface LayoutProps {
   isPrincipalMode?: boolean;
   socket?: Socket | null;
 }
-
-const TAB_TITLES: Record<AppTab, string> = {
-  [AppTab.HOME]: 'Home',
-  [AppTab.CHAT]: 'Dialogue Core',
-  [AppTab.FILES]: 'Vault & Files',
-  [AppTab.ASSISTANT]: 'Assistant Daemon',
-  [AppTab.VOICE]: 'Voice Portal',
-  [AppTab.VOICE_EMULATOR]: 'Voice Emulator',
-  [AppTab.CREATIVE]: 'Creative Studio',
-  [AppTab.ANALYTICS]: 'Logic Analytics',
-  [AppTab.GROUNDING]: 'Grounding Intel',
-  [AppTab.MEMORY]: 'Memory Core',
-  [AppTab.NEXUS]: 'Neural Nexus',
-  [AppTab.SHARE]: 'Share ZereØ',
-  [AppTab.SYSTEM]: 'System Control',
-  [AppTab.WORKSHOP]: 'Neural Forge',
-  [AppTab.SNAPSHOT]: 'Optical Intel',
-  [AppTab.ACOUSTIC_ROOM]: 'Acoustic Lattice',
-  [AppTab.LEGAL]: 'Legal Counsel'
-};
 
 const HARMONIC_BAR_HEIGHTS = [0.45, 0.82, 1.0, 0.68, 0.52];
 
@@ -127,42 +93,7 @@ const Layout: React.FC<LayoutProps> = ({
     };
   }, [socket]);
 
-  const navItems = isPrincipalMode ? [
-    { id: AppTab.CHAT, icon: MessageSquare, label: 'Dialogue Core' },
-    { id: AppTab.LEGAL, icon: Scale, label: 'Legal Counsel' },
-    { id: AppTab.FILES, icon: FolderOpen, label: 'Add Files / Vault' },
-    { id: AppTab.ASSISTANT, icon: Cpu, label: 'Assistant Daemon' },
-    { id: AppTab.VOICE, icon: Mic, label: 'Voice Portal' },
-    { id: AppTab.VOICE_EMULATOR, icon: Headphones, label: 'Voice Emulator' },
-    { id: AppTab.ACOUSTIC_ROOM, icon: BrainCircuit, label: 'Acoustic Lattice' },
-    { id: AppTab.CREATIVE, icon: ImageIcon, label: 'Creative Studio' },
-    { id: AppTab.MEMORY, icon: Database, label: 'Memory Core' },
-    { id: AppTab.NEXUS, icon: Share2, label: 'Neural Nexus' },
-    { id: AppTab.WORKSHOP, icon: Wrench, label: 'Neural Forge' },
-    { id: AppTab.ANALYTICS, icon: LineChart, label: 'Logic Analytics' },
-    { id: AppTab.GROUNDING, icon: Search, label: 'Grounding Intel' },
-    { id: AppTab.SNAPSHOT, icon: Eye, label: 'Optical Intel' },
-    { id: AppTab.SHARE, icon: ShareIcon, label: 'Share ZereØ' },
-    { id: AppTab.SYSTEM, icon: Settings, label: 'System Control' },
-    { id: AppTab.HOME, icon: HomeIcon, label: 'Home' },
-  ] : [
-    { id: AppTab.HOME, icon: HomeIcon, label: 'Home' },
-    { id: AppTab.CHAT, icon: MessageSquare, label: 'Chat' },
-    { id: AppTab.LEGAL, icon: Scale, label: 'Legal Counsel' },
-    { id: AppTab.FILES, icon: FolderOpen, label: 'Add Files' },
-    { id: AppTab.ASSISTANT, icon: Cpu, label: 'Assistant Daemon' },
-    { id: AppTab.VOICE_EMULATOR, icon: Headphones, label: 'Voice Emulator' },
-    { id: AppTab.CREATIVE, icon: ImageIcon, label: 'Creative Studio' },
-    { id: AppTab.VOICE, icon: Mic, label: 'Voice Portal' },
-    { id: AppTab.ANALYTICS, icon: LineChart, label: 'Logic Analytics' },
-    { id: AppTab.GROUNDING, icon: Search, label: 'Grounding' },
-    { id: AppTab.MEMORY, icon: Database, label: 'Memory Core' },
-    { id: AppTab.NEXUS, icon: Share2, label: 'Neural Nexus' },
-    { id: AppTab.SHARE, icon: ShareIcon, label: 'Share ZereØ' },
-    { id: AppTab.SYSTEM, icon: Settings, label: 'System Control' },
-    { id: AppTab.WORKSHOP, icon: Wrench, label: 'Neural Forge' },
-    { id: AppTab.SNAPSHOT, icon: Eye, label: 'Optical Intel' },
-  ];
+  const navItems = getVisibleNavItems(isPrincipalMode);
 
   const handleNavClick = (tab: AppTab) => {
     setActiveTab(tab);
@@ -225,15 +156,15 @@ const Layout: React.FC<LayoutProps> = ({
       <nav className="flex-1 overflow-y-auto space-y-1.5 pr-1">
         {navItems.map((item) => (
           <button
-            key={item.id}
-            onClick={() => handleNavClick(item.id)}
+            key={item.tab}
+            onClick={() => handleNavClick(item.tab)}
             className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl transition-all duration-200 group ${
-              activeTab === item.id 
+              activeTab === item.tab 
               ? 'bg-red-900/30 text-amber-400 border border-red-800 shadow-lg shadow-red-900/20' 
               : 'text-zinc-500 hover:text-amber-200 hover:bg-red-900/10 border border-transparent'
             }`}
           >
-            <item.icon className={`w-5 h-5 ${activeTab === item.id ? 'text-amber-400' : 'group-hover:text-amber-400'}`} />
+            <item.icon className={`w-5 h-5 ${activeTab === item.tab ? 'text-amber-400' : 'group-hover:text-amber-400'}`} />
             <span className="font-bold text-xs uppercase tracking-widest">{item.label}</span>
           </button>
         ))}

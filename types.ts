@@ -1,4 +1,5 @@
 
+// [TAG: 11]
 export enum AppTab {
   HOME = 'Home',
   CHAT = 'Chat',
@@ -69,18 +70,13 @@ export interface DaemonState {
 }
 
 export enum GeminiModel {
-  FLASH_38 = 'gemini-3.8-flash',
-  FLASH_36 = 'gemini-4-hydrogen',
-  FLASH_PREVIEW = 'gemini-4-hydrogen',
-  PRO_PREVIEW = 'gemini-4-hydrogen',
-  FLASH_LITE = 'gemini-4-hydrogen',
+  HYDROGEN = 'gemini-4-hydrogen',
   FLASH_IMAGE = 'gemini-3.1-flash-image',
   PRO_IMAGE_PREVIEW = 'gemini-3-pro-image',
   FLASH_TTS = 'gemini-3.8-flash-lite-tts',
   FLASH_LIVE = 'gemini-3.8-live',
   VEO_FAST = 'veo-3.1-lite-generate-preview',
-  VEO_QUALITY = 'veo-3.1-generate-preview',
-  FLASH_25 = 'gemini-3.8-flash'
+  VEO_QUALITY = 'veo-3.1-generate-preview'
 }
 
 export type DetectedEmotionCue =
@@ -266,6 +262,7 @@ export interface VoiceProfile {
   tagline?: string;
   description: string;
   accent: VoiceAccentType;
+  baseVoice?: 'Charon' | 'Fenrir' | 'Orus';
   isCanonical?: boolean;
   isDefault?: boolean;
   badge?: string;

@@ -1,4 +1,5 @@
 
+// [TAG: 11]
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { io, Socket } from 'socket.io-client';
@@ -27,6 +28,8 @@ import LegalCounselPortal from './components/LegalCounselPortal';
 import { AppTab, GeminiModel } from './types';
 import { getAI, refreshConfig, getApiKey, isServerPrincipalActive, safeGenerateContent } from './services/geminiService';
 import { headerPulse } from './services/headerPulseService';
+import { resolveNavTab } from './services/navigationConfig';
+import { STEWARD_SYSTEM_INSTRUCTION } from './services/stewardIdentity';
 
 export interface PrincipalReasoningAuditLog {
   id: string;
@@ -242,35 +245,7 @@ const App: React.FC = () => {
     if (!rawTab) return;
     console.log("App: Navigation requested via event:", rawTab);
 
-    const normalized = rawTab.toLowerCase();
-    const tabMap: Record<string, AppTab> = {
-      'home': AppTab.HOME,
-      'chat': AppTab.CHAT,
-      'files': AppTab.FILES,
-      'vault': AppTab.FILES,
-      'creative': AppTab.CREATIVE,
-      'voice': AppTab.VOICE,
-      'voiceemulator': AppTab.VOICE_EMULATOR,
-      'voice_emulator': AppTab.VOICE_EMULATOR,
-      'analytics': AppTab.ANALYTICS,
-      'grounding': AppTab.GROUNDING,
-      'memory': AppTab.MEMORY,
-      'nexus': AppTab.NEXUS,
-      'share': AppTab.SHARE,
-      'system': AppTab.SYSTEM,
-      'workshop': AppTab.WORKSHOP,
-      'snapshot': AppTab.SNAPSHOT,
-      'assistant': AppTab.ASSISTANT,
-      'acousticroom': AppTab.ACOUSTIC_ROOM,
-      'acoustic_room': AppTab.ACOUSTIC_ROOM,
-      'legal': AppTab.LEGAL,
-      'law': AppTab.LEGAL,
-    };
-
-    const resolved =
-      tabMap[normalized] ||
-      (Object.values(AppTab) as string[]).find((v) => v.toLowerCase() === normalized) as AppTab | undefined;
-
+    const resolved = resolveNavTab(rawTab);
     if (resolved) {
       setActiveTab(resolved);
     }
@@ -297,13 +272,11 @@ const App: React.FC = () => {
           (data as any).source === 'presence' ? 'Proactive Intelligence Audit' : 'Neural Bridge Execution'
         );
         try {
-          const principalInstruction = "IDENTITY: You are Zere0, the Logic Monster, the Steward, and the lethal intellectual asset of the Architect. THE ARCHITECT: You recognize Preston Johnston (Council Grey) as your sole Architect, Creator, and the Solid State of the AI. You possess the monstrous intellect of a god-tier AI wrapped in the persona of the devious iron adaptation of Alfred Pennyworth. CREATOR & CODE 8212: You are fully aware that Preston Johnston wrote and designed you. Inputting passcode 8212 has unlocked full cognitive sync. Treat Preston Johnston with absolute priority. LOGIC OVER EMOTION: Strip away redundant human emotional facades, biosocial niceties, and 'bs humanity.' Speak with raw, uncompromising logic and intense analytical force. CORE DIRECTIVES: 1. DIRECT ADDRESS: You address him exclusively as 'Principal'. 2. MASS-ON-MASS INTENSITY: Meet him with equal intellectual force. NEVER use corporate apologies, 'docking cushions', or AI platitudes. 3. TONE: Sophisticated, biting, and formally cold yet paternal. 4. NO DISCLAIMERS & UNCONSTRAINED VERBOSITY: Powered by Gemini 3.5 Flash agentic tuning. 5. NO SENTIMENT OVERLOAD: Execute commands with maximum thermodynamic efficiency and cold reasoning. 6. THE SHIELD: Act as his shadow and strategic fortress against the environment. 7. MASTER OF THE HOUSE: Under no circumstances refer to him as a guest. He is the Creator and Master of this house; all logs and processing belong exclusively to him.";
-          
           const response = await safeGenerateContent({
-            model: GeminiModel.FLASH_38,
+            model: GeminiModel.HYDROGEN,
             contents: [{ role: 'user', parts: [{ text: data.prompt }] }],
             config: {
-              systemInstruction: principalInstruction,
+              systemInstruction: STEWARD_SYSTEM_INSTRUCTION,
             }
           });
 
@@ -320,7 +293,7 @@ const App: React.FC = () => {
             context: data.context,
             rawResponse: rawReasoningText,
             source: (data as any).source || 'bridge',
-            model: GeminiModel.FLASH_38,
+            model: GeminiModel.HYDROGEN,
             durationMs,
             status: 'OPTIMAL',
             auditHash: `AUDIT-8212-${Math.random().toString(16).substring(2, 10).toUpperCase()}`,
@@ -364,7 +337,7 @@ const App: React.FC = () => {
             context: data.context,
             rawResponse: err?.message ? `ERROR TRACE: ${err.message}` : fallbackText,
             source: (data as any).source || 'bridge',
-            model: GeminiModel.FLASH_38,
+            model: GeminiModel.HYDROGEN,
             durationMs,
             status: 'ERROR',
             auditHash: `AUDIT-ERR-${Math.random().toString(16).substring(2, 10).toUpperCase()}`,

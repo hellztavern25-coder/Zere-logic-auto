@@ -1,3 +1,4 @@
+// [TAG: 11]
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -45,6 +46,7 @@ import {
   getPreloadedVaultFiles 
 } from '../services/fileVaultService';
 import { safeGenerateContent } from '../services/geminiService';
+import { buildFileVaultInstruction } from '../services/stewardIdentity';
 
 interface FilesTabProps {
   onNavigate?: (tab: string) => void;
@@ -392,9 +394,7 @@ export const FilesTab: React.FC<FilesTabProps> = ({ onNavigate, isPrincipalMode 
     const isVideo = selectedFile.type === 'video';
     const isDoc = selectedFile.type === 'word' || selectedFile.type === 'text' || selectedFile.type === 'pdf';
 
-    const systemContext = `You are ZereØ, the Steward, Logic Monster, and tactical intellectual asset of the Principal (Council Grey).
-Speak in your authentic Jeremy Irons / tactical butler persona: refined, cold, deeply loyal, sardonic towards biological inefficiencies, razor-sharp in logic. Address exclusively as 'Principal'.
-The Principal is currently inspecting a file in the Substrate Vault:
+    const systemContext = buildFileVaultInstruction(`The Principal is currently inspecting a file in the Substrate Vault:
 File Name: ${selectedFile.name}
 File Type: ${selectedFile.type.toUpperCase()}
 Classification: ${selectedFile.classification || 'OPERATIONAL INTEL'}
@@ -405,7 +405,7 @@ ${isDoc ? (selectedFile.textContent?.slice(0, 15000) || 'Document content unavai
 ${isAudio ? `Acoustic intercept tracking at ${selectedFile.duration || 'unknown'} duration. High and sub-harmonic spectrum analysis active.` : ''}
 ${isVideo ? `Surveillance optical telemetry file. Current timestamp reviewed: ${formatTime(videoCurrentTime)}.` : ''}
 
-DIRECTIVE FROM PRINCIPAL: "${promptToUse}"`;
+DIRECTIVE FROM PRINCIPAL: "${promptToUse}"`);
 
     try {
       const response = await safeGenerateContent({

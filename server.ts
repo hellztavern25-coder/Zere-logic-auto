@@ -1,3 +1,4 @@
+// [TAG: 11]
 console.log("SERVER: Module loading...");
 import express from 'express';
 import cors from 'cors';
@@ -14,6 +15,15 @@ import { Client, GatewayIntentBits } from 'discord.js';
 import { GoogleGenAI, ThinkingLevel, Modality, LiveServerMessage, HarmCategory, HarmBlockThreshold } from '@google/genai';
 import { DaemonStatus, DaemonTask, DaemonLogEntry, DaemonCapabilities, DaemonState, EmotionalMap } from './types';
 import { KNOWLEDGE_OF_USES_REGISTRY } from './services/emotionalMappingService';
+import {
+  STEWARD_DAEMON_INSTRUCTION,
+  LEGAL_COUNSEL_SYSTEM_INSTRUCTION,
+  AUDITION_LINE_1911,
+} from './services/stewardIdentity';
+import {
+  buildRecallSummaryPayload,
+  isNoisyMemory,
+} from './services/conversationMemoryService';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,6 +43,7 @@ async function startServer() {
   const MEMORY_FILE = path.join(__dirname, 'memories.json');
   const VISUAL_CAPTURES_FILE = path.join(__dirname, 'visual_captures.json');
   const VOICE_PROFILES_FILE = path.join(__dirname, 'voice_profiles.json');
+  const IDENTITY_VOICE_PROFILE_FILE = path.join(__dirname, 'zereo_identity_voice_profile.json');
   const VOICE_CLONES_FILE = path.join(__dirname, 'voice_clones.json');
   const VOICE_PRESETS_FILE = path.join(__dirname, 'voice_presets.json');
   const VOICE_COMMAND_LOGS_FILE = path.join(__dirname, 'voice_command_logs.json');
@@ -53,6 +64,73 @@ async function startServer() {
     console.log("========================================");
   });
 
+  // Serialized, atomic JSON file persistence helpers (per-file lock + temp write + rename)
+  const fileLockQueues = new Map<string, Promise<unknown>>();
+
+  const withFileLock = <T>(file: string, fn: () => Promise<T>): Promise<T> => {
+    const key = path.resolve(file);
+    const prev = fileLockQueues.get(key) || Promise.resolve();
+    const run = prev.then(fn, fn);
+    const cleanup = run.then(
+      () => {
+        if (fileLockQueues.get(key) === cleanup) fileLockQueues.delete(key);
+      },
+      () => {
+        if (fileLockQueues.get(key) === cleanup) fileLockQueues.delete(key);
+      }
+    );
+    fileLockQueues.set(key, cleanup);
+    return run;
+  };
+
+  const cloneFallback = <T>(fallback: T): T => {
+    if (fallback === null || typeof fallback !== 'object') return fallback;
+    return JSON.parse(JSON.stringify(fallback));
+  };
+
+  const readJsonFileUnlocked = async <T>(file: string, fallback: T): Promise<T> => {
+    try {
+      const raw = await fs.readFile(file, 'utf-8');
+      if (!raw || !raw.trim()) return cloneFallback(fallback);
+      return JSON.parse(raw) as T;
+    } catch {
+      return cloneFallback(fallback);
+    }
+  };
+
+  const writeJsonFileUnlocked = async (file: string, data: unknown): Promise<void> => {
+    const tmpFile = `${file}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 7)}`;
+    const payload = JSON.stringify(data, null, 2);
+    try {
+      await fs.writeFile(tmpFile, payload, 'utf-8');
+      await fs.rename(tmpFile, file);
+    } catch (err) {
+      await fs.unlink(tmpFile).catch(() => {});
+      throw err;
+    }
+  };
+
+  const readJsonFile = async <T>(file: string, fallback: T): Promise<T> => {
+    return readJsonFileUnlocked(file, fallback);
+  };
+
+  const writeJsonFile = async (file: string, data: unknown): Promise<void> => {
+    return withFileLock(file, () => writeJsonFileUnlocked(file, data));
+  };
+
+  const updateJsonFile = async <T>(
+    file: string,
+    fallback: T,
+    updater: (current: T) => Promise<T> | T
+  ): Promise<T> => {
+    return withFileLock(file, async () => {
+      const current = await readJsonFileUnlocked(file, fallback);
+      const next = await updater(current);
+      await writeJsonFileUnlocked(file, next);
+      return next;
+    });
+  };
+
   // Ensure files exist
   const ensureFile = async (file: string, defaultData: any) => {
     const fileName = path.basename(file);
@@ -62,16 +140,63 @@ async function startServer() {
       console.log(`SERVER: ${fileName} verified.`);
     } catch {
       console.log(`SERVER: ${fileName} missing. Creating default...`);
-      await fs.writeFile(file, JSON.stringify(defaultData, null, 2));
+      await writeJsonFile(file, defaultData);
       console.log(`SERVER: ${fileName} created.`);
+    }
+  };
+
+  const DEFAULT_SAFETY_SETTINGS = [
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
+  ];
+
+  const invokeModelWithTimeout = async (
+    ai: GoogleGenAI,
+    params: { model: string; contents: any; config?: any },
+    timeoutMs: number,
+    timeoutErrorPrefix: string = 'UPSTREAM_TIMEOUT'
+  ) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const reqPromise = ai.models.generateContent(params);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          const timeoutErr: any = new Error(`${timeoutErrorPrefix}: Model [${params.model}] exceeded ${timeoutMs}ms`);
+          timeoutErr.status = 504;
+          reject(timeoutErr);
+        }, timeoutMs);
+      });
+      return await Promise.race([reqPromise, timeoutPromise]);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   };
 
   // ==========================================
   // SERVER-SIDE GEMINI API GATEWAY
   // ==========================================
+  function getCustomApiKey(req: any): string | undefined {
+    const authHeader = req?.headers?.authorization as string | undefined;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return undefined;
+    const key = authHeader.slice(7).trim();
+    if (!key || key === 'undefined' || key.includes('***')) return undefined;
+    if (key === 'ZEREO_CORE_LINK') return undefined; // placeholder, not a real key — fall through to env
+    return key;
+  }
+
+  function resolveServerKey(customApiKey?: string): string | undefined {
+    const trimmed = customApiKey ? customApiKey.trim() : '';
+    const validCustom =
+      trimmed && trimmed !== 'undefined' && !trimmed.includes('***') && trimmed !== 'ZEREO_CORE_LINK'
+        ? trimmed
+        : undefined;
+    return validCustom || process.env.GEMINI_API_KEY || process.env.API_KEY || undefined;
+  }
+
   function getGeminiClient(customApiKey?: string): GoogleGenAI {
-    const key = (customApiKey && customApiKey.trim()) || process.env.GEMINI_API_KEY || process.env.API_KEY;
+    const key = resolveServerKey(customApiKey);
     if (!key) {
       throw new Error('AUTH_ERROR: No Gemini API Key configured in server environment.');
     }
@@ -101,7 +226,7 @@ async function startServer() {
   }
 
   function getKeyFingerprint(customApiKey?: string): string {
-    const key = (customApiKey && customApiKey.trim()) || process.env.GEMINI_API_KEY || process.env.API_KEY || 'default';
+    const key = resolveServerKey(customApiKey) || 'default';
     return `${key.slice(0, 4)}:${key.slice(-4)}`;
   }
 
@@ -116,6 +241,31 @@ async function startServer() {
       }
     }
     if (oldestKey) ttsAudioCache.delete(oldestKey);
+  }
+
+  function sanitizeAcousticStylePrompt(raw?: string): string {
+    if (!raw || typeof raw !== 'string') return '';
+    return raw
+      .replace(/Jeremy Irons|Alfred Pennyworth/gi, '')
+      .replace(/^(?:Deliver|Say|Speak)\s+(?:in|with|deliberately)?\s*/i, '')
+      .replace(/portraying|in the definitive manner of|in the manner of|accent/gi, '')
+      .replace(/[.:;"']/g, ',')
+      .replace(/\s+/g, ' ')
+      .replace(/,\s*,+/g, ',')
+      .replace(/^,\s*|,\s*$/g, '')
+      .trim()
+      .slice(0, 140);
+  }
+
+  const ALLOWED_BARITONE_VOICES = new Set(['Charon', 'Fenrir', 'Orus']);
+
+  async function getCanonicalBaseVoice(): Promise<'Charon' | 'Fenrir' | 'Orus'> {
+    const parsed = await readJsonFile<any>(IDENTITY_VOICE_PROFILE_FILE, null);
+    const v = parsed?.dsp_filter_pipeline?.base_neural_voice;
+    if (v === 'Charon' || v === 'Fenrir' || v === 'Orus') {
+      return v;
+    }
+    return 'Charon';
   }
 
   async function synthesizeTtsWithFailover(params: {
@@ -136,8 +286,8 @@ async function startServer() {
     const { text, voiceName, acousticStyle, customApiKey } = params;
     const clippedText = text.length > 3500 ? text.substring(0, 3500) : text;
     const requestedVoice = typeof voiceName === 'string' ? voiceName.trim() : '';
-    const allowedBaritoneVoices = new Set(['Charon', 'Fenrir', 'Orus']);
-    const targetVoice = allowedBaritoneVoices.has(requestedVoice) ? requestedVoice : 'Charon';
+    const canonicalBaseVoice = await getCanonicalBaseVoice();
+    const targetVoice = ALLOWED_BARITONE_VOICES.has(requestedVoice) ? requestedVoice : canonicalBaseVoice;
     const keyFp = getKeyFingerprint(customApiKey);
 
     const cacheKey = `${keyFp}|${targetVoice}|${acousticStyle}|${clippedText}`;
@@ -387,6 +537,8 @@ async function startServer() {
         }
       }, 11000);
 
+      const canonicalBaseVoice = await getCanonicalBaseVoice();
+      const targetLiveVoice = ALLOWED_BARITONE_VOICES.has(voiceName) ? voiceName : canonicalBaseVoice;
       try {
         session = await ai.live.connect({
           model: 'gemini-3.8-live',
@@ -394,7 +546,7 @@ async function startServer() {
             responseModalities: [Modality.AUDIO],
             speechConfig: {
               voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: voiceName || 'Charon' },
+                prebuiltVoiceConfig: { voiceName: targetLiveVoice },
               },
             },
             systemInstruction: `You are a high-precision studio narrator (${acousticStyle || 'Jeremy Irons British aristocratic baritone'}). Read ONLY the exact text provided by the user verbatim—never add greetings, explanations, or extra words.`,
@@ -532,7 +684,7 @@ async function startServer() {
 
   const saveDaemonState = async () => {
     try {
-      await fs.writeFile(DAEMON_FILE, JSON.stringify(stewardDaemonState, null, 2));
+      await writeJsonFile(DAEMON_FILE, stewardDaemonState);
     } catch (e) {
       console.warn("SERVER: Failed to persist daemon state:", e);
     }
@@ -552,11 +704,8 @@ async function startServer() {
   };
 
   async function generateSituationalBriefing(): Promise<string> {
-    const memData = await fs.readFile(MEMORY_FILE, 'utf-8').catch(() => '[]');
-    let memoryCount = 0;
-    try {
-      memoryCount = JSON.parse(memData).length;
-    } catch {}
+    const memList = await readJsonFile<any[]>(MEMORY_FILE, []);
+    const memoryCount = Array.isArray(memList) ? memList.length : 0;
     const uptimeMin = Math.floor(stewardDaemonState.uptimeSeconds / 60);
 
     try {
@@ -566,7 +715,7 @@ async function startServer() {
         model: 'gemini-4-hydrogen',
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
-          systemInstruction: "You are ZereØ, the Steward and Logic Monster. Respond with strategic precision to Principal Preston Johnston.",
+          systemInstruction: STEWARD_DAEMON_INSTRUCTION,
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
         }
       });
@@ -590,19 +739,19 @@ async function startServer() {
     try {
       let resultText = '';
       if (task.category === 'SECURITY_SWEEP') {
-        const memData = await fs.readFile(MEMORY_FILE, 'utf-8').catch(() => '[]');
-        const memories = JSON.parse(memData);
-        const verifiedMemories = memories.filter((m: any) => m.title && m.content).length;
+        const memories = await readJsonFile<any[]>(MEMORY_FILE, []);
+        const verifiedMemories = (Array.isArray(memories) ? memories : []).filter((m: any) => m.title && m.content).length;
         resultText = `Security sweep complete. Evaluated ${verifiedMemories} memory vectors. Biometric signature: LOCKED (8212). Reasoning buffer: ${principalAuditBuffer.length} items logged. Zero logic corruption detected.`;
       } else if (task.category === 'MEMORY_INDEX') {
-        const memData = await fs.readFile(MEMORY_FILE, 'utf-8').catch(() => '[]');
-        let memories = JSON.parse(memData);
-        const initialCount = memories.length;
-        memories = memories.filter((m: any) => m.title && m.content);
-        const pruned = initialCount - memories.length;
-        await fs.writeFile(MEMORY_FILE, JSON.stringify(memories, null, 2));
-        stewardDaemonState.memoryHealthScore = Math.min(100, 95 + (memories.length > 0 ? 5 : 0));
-        resultText = `Memory core indexed. ${memories.length} active memory nodes confirmed. ${pruned} invalid fragments pruned. Core integrity: ${stewardDaemonState.memoryHealthScore}%.`;
+        let pruned = 0;
+        const indexedMemories = await updateJsonFile<any[]>(MEMORY_FILE, [], (current) => {
+          const list = Array.isArray(current) ? current : [];
+          const filtered = list.filter((m: any) => m && m.title && m.content);
+          pruned = list.length - filtered.length;
+          return filtered;
+        });
+        stewardDaemonState.memoryHealthScore = Math.min(100, 95 + (indexedMemories.length > 0 ? 5 : 0));
+        resultText = `Memory core indexed. ${indexedMemories.length} active memory nodes confirmed. ${pruned} invalid fragments pruned. Core integrity: ${stewardDaemonState.memoryHealthScore}%.`;
       } else if (task.category === 'SYSTEM_DIAGNOSTIC') {
         const mem = process.memoryUsage();
         const rssMb = Math.round(mem.rss / 1024 / 1024);
@@ -632,7 +781,7 @@ async function startServer() {
             model: 'gemini-4-hydrogen',
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             config: {
-              systemInstruction: "You are ZereØ, the Steward and Logic Monster. Respond with high-density, strategic precision to Principal Preston Johnston. No apologies, no disclaimers.",
+              systemInstruction: STEWARD_DAEMON_INSTRUCTION,
               thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
             }
           });
@@ -740,6 +889,7 @@ async function startServer() {
   await ensureFile(MEMORY_FILE, []);
   await ensureFile(VISUAL_CAPTURES_FILE, []);
   await ensureFile(VOICE_PROFILES_FILE, { activeProfileId: 'jeremy-irons-signature', profiles: [] });
+  await ensureFile(VOICE_PRESETS_FILE, { activePresetId: 'preset-iron-adaptive-v1', presets: [] });
   await ensureFile(VOICE_COMMAND_LOGS_FILE, { logs: [] });
   await ensureFile(LEGAL_DOSSIERS_FILE, { dossiers: [] });
   await ensureFile(VOICE_CLONES_FILE, {
@@ -755,10 +905,10 @@ async function startServer() {
         sourceClipIds: ['clip-irons-1', 'clip-irons-2', 'clip-irons-3'],
         sourceClipNames: ['1911s Loaded & Silver Polished', 'Screen Share Diagnostic Quip', 'Logic as Weapon Axiom'],
         sttAnalysis: {
-          rawTranscript: 'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your command.',
+          rawTranscript: AUDITION_LINE_1911,
           confidence: 0.98,
           wordCount: 21,
-          phoneticTransliteration: 'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your command.',
+          phoneticTransliteration: AUDITION_LINE_1911,
           detectedAccent: 'british_aristocrat',
           keyPhonemesDetected: ['non-rhotic r', 'lengthened open vowels', 'crisp dental t/d plosives', 'drawn diphthongs'],
           elocutionNotes: ['Deliberate pause after Principal address', 'Aristocratic dry iron cadence', 'Oxford consonant bite']
@@ -818,16 +968,15 @@ async function startServer() {
   await ensureFile(DAEMON_FILE, DEFAULT_DAEMON_STATE);
   await ensureFile(EMOTIONAL_STATE_FILE, { latestMap: null, history: [] });
 
-  try {
-    const saved = await fs.readFile(DAEMON_FILE, 'utf-8');
-    const parsed = JSON.parse(saved);
+  const parsedDaemon = await readJsonFile<Partial<DaemonState> | null>(DAEMON_FILE, null);
+  if (parsedDaemon) {
     stewardDaemonState = {
       ...DEFAULT_DAEMON_STATE,
-      ...parsed,
+      ...parsedDaemon,
       status: 'RUNNING',
       currentTask: null
     };
-  } catch {}
+  }
 
   console.log("SERVER: Files ensured. Steward Background Daemon active.");
 
@@ -879,13 +1028,10 @@ async function startServer() {
   };
 
   let bootPrincipalActive = true;
-  try {
-    const rawCfg = await fs.readFile(CONFIG_FILE, 'utf-8');
-    const parsedCfg = JSON.parse(rawCfg);
-    if (parsedCfg && parsedCfg.isPrincipalActive === false) {
-      bootPrincipalActive = false;
-    }
-  } catch {}
+  const parsedCfg = await readJsonFile<any>(CONFIG_FILE, null);
+  if (parsedCfg && parsedCfg.isPrincipalActive === false) {
+    bootPrincipalActive = false;
+  }
 
   const principalVoiceOwnership = {
     verified: bootPrincipalActive,
@@ -1129,12 +1275,19 @@ async function startServer() {
 
     socket.on('neural:ping', (data: { clientTime?: number } = {}) => {
       const serverTime = Date.now();
+      daemonState.urgency = 0;
       daemonState.lastActivity = serverTime;
-      socket.emit('neural:pong', { 
-        clientTime: data.clientTime || serverTime, 
+      addDaemonLog('VIGILANCE', 'Neural Core Ping received from Principal. Responding at sub-millisecond velocity.');
+      socket.emit('neural:pong', {
+        status: 'NOMINAL',
+        latencyMs: 0.12,
+        clientTime: data?.clientTime || serverTime,
         serverTime,
-        timestamp: serverTime 
+        timestamp: serverTime,
+        uptimeSeconds: stewardDaemonState.uptimeSeconds,
+        stewardStatus: stewardDaemonState.status
       });
+      io.emit('neural:pulse', { timestamp: serverTime, source: 'radial_fab' });
     });
 
     socket.on('doorman:ping', (data: { source?: string } = {}) => {
@@ -1175,20 +1328,6 @@ async function startServer() {
       daemonState.urgency = 0;
       daemonState.lastActivity = Date.now();
       console.log("SERVER: Pulse Daemon reset via Neural Activity.");
-    });
-
-    socket.on('neural:ping', () => {
-      daemonState.urgency = 0;
-      daemonState.lastActivity = Date.now();
-      addDaemonLog('VIGILANCE', 'Neural Core Ping received from Principal. Responding at sub-millisecond velocity.');
-      socket.emit('neural:pong', {
-        status: 'NOMINAL',
-        latencyMs: 0.12,
-        timestamp: Date.now(),
-        uptimeSeconds: stewardDaemonState.uptimeSeconds,
-        stewardStatus: stewardDaemonState.status
-      });
-      io.emit('neural:pulse', { timestamp: Date.now(), source: 'radial_fab' });
     });
 
     socket.on('audit:clear', () => {
@@ -1411,19 +1550,12 @@ async function startServer() {
 
     // Visual Capture Timeline Handlers
     socket.on('visual:get_captures', async () => {
-      try {
-        const data = await fs.readFile(VISUAL_CAPTURES_FILE, 'utf-8');
-        socket.emit('visual:captures_list', JSON.parse(data));
-      } catch (err) {
-        socket.emit('visual:captures_list', []);
-      }
+      const captures = await readJsonFile<any[]>(VISUAL_CAPTURES_FILE, []);
+      socket.emit('visual:captures_list', Array.isArray(captures) ? captures : []);
     });
 
     socket.on('visual:save_capture', async (captureData: any) => {
       try {
-        const data = await fs.readFile(VISUAL_CAPTURES_FILE, 'utf-8').catch(() => '[]');
-        let captures = [];
-        try { captures = JSON.parse(data); } catch { captures = []; }
         const newCapture = {
           id: captureData.id || `vc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
           title: captureData.title || 'Visual Capture',
@@ -1433,8 +1565,10 @@ async function startServer() {
           metadata: captureData.metadata || {},
           timestamp: captureData.timestamp || Date.now()
         };
-        captures.unshift(newCapture);
-        await fs.writeFile(VISUAL_CAPTURES_FILE, JSON.stringify(captures, null, 2));
+        await updateJsonFile<any[]>(VISUAL_CAPTURES_FILE, [], (current) => {
+          const list = Array.isArray(current) ? current : [];
+          return [newCapture, ...list];
+        });
         addDaemonLog('TASK', `Visual capture archived: [${newCapture.title}] via ${newCapture.source}`);
         io.emit('visual:capture_added', newCapture);
       } catch (err: any) {
@@ -1444,10 +1578,9 @@ async function startServer() {
 
     socket.on('visual:delete_capture', async (id: string) => {
       try {
-        const data = await fs.readFile(VISUAL_CAPTURES_FILE, 'utf-8').catch(() => '[]');
-        let captures = JSON.parse(data);
-        captures = captures.filter((c: any) => c.id !== id);
-        await fs.writeFile(VISUAL_CAPTURES_FILE, JSON.stringify(captures, null, 2));
+        await updateJsonFile<any[]>(VISUAL_CAPTURES_FILE, [], (current) =>
+          (Array.isArray(current) ? current : []).filter((c: any) => c.id !== id)
+        );
         addDaemonLog('TASK', `Visual capture purged from vault: ${id}`);
         io.emit('visual:capture_deleted', id);
       } catch (err: any) {
@@ -1489,13 +1622,16 @@ async function startServer() {
 
       try {
         const ai = getGeminiClient(payload.customApiKey);
+        const canonicalBaseVoice = await getCanonicalBaseVoice();
+        const requestedLiveVoice = typeof payload.voiceName === 'string' ? payload.voiceName.trim() : '';
+        const targetLiveVoice = ALLOWED_BARITONE_VOICES.has(requestedLiveVoice) ? requestedLiveVoice : canonicalBaseVoice;
         const session = await ai.live.connect({
           model: requestedModel,
           config: {
             responseModalities: [Modality.AUDIO],
             speechConfig: {
               voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: payload.voiceName || 'Charon' },
+                prebuiltVoiceConfig: { voiceName: targetLiveVoice },
               },
             },
             inputAudioTranscription: {},
@@ -1748,13 +1884,14 @@ async function startServer() {
     });
   });
 
-  // Export Identity Voice Profile endpoint for remote ZereØ instance mirroring
-  app.get(['/api/voice/identity-profile', '/api/voice-profile/identity'], async (req, res) => {
+  // Export Identity Voice Profile endpoint for remote ZereØ instance mirroring (also serves canonical static path)
+  app.get(['/api/voice/identity-profile', '/api/voice-profile/identity', '/zereo_identity_voice_profile.json'], async (req, res) => {
     try {
-      const profilePath = path.join(__dirname, 'zereo_identity_voice_profile.json');
-      const data = await fs.readFile(profilePath, 'utf8');
+      const data = await fs.readFile(IDENTITY_VOICE_PROFILE_FILE, 'utf8');
       res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Content-Disposition', 'attachment; filename="zereo_identity_voice_profile.json"');
+      if (req.path !== '/zereo_identity_voice_profile.json') {
+        res.setHeader('Content-Disposition', 'attachment; filename="zereo_identity_voice_profile.json"');
+      }
       res.status(200).send(data);
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to read identity voice profile', details: err.message });
@@ -2006,8 +2143,8 @@ async function startServer() {
   app.get('/api/rescue', async (req, res) => {
     console.error("SERVER: Rescue mode triggered by Principal.");
     try {
-      await fs.writeFile(CONFIG_FILE, JSON.stringify({ coreDirective: '' }, null, 2));
-      await fs.writeFile(CONTEXT_FILE, JSON.stringify({ lastActive: new Date().toISOString(), data: {} }, null, 2));
+      await writeJsonFile(CONFIG_FILE, { coreDirective: '' });
+      await writeJsonFile(CONTEXT_FILE, { lastActive: new Date().toISOString(), data: {} });
       res.json({ success: true, message: "System state truncated. Redirecting to core login..." });
     } catch (err) {
       res.status(500).json({ error: "Rescue failed" });
@@ -2016,8 +2153,8 @@ async function startServer() {
 
   app.get('/api/context', async (req, res) => {
     try {
-      const data = await fs.readFile(CONTEXT_FILE, 'utf-8');
-      res.json(JSON.parse(data));
+      const ctx = await readJsonFile(CONTEXT_FILE, { lastActive: new Date().toISOString(), data: { isPrincipalMode: true } });
+      res.json(ctx);
     } catch (err) {
       res.status(500).json({ error: 'Failed to load context' });
     }
@@ -2026,10 +2163,10 @@ async function startServer() {
   app.post('/api/context', async (req, res) => {
     try {
       const context = req.body;
-      await fs.writeFile(CONTEXT_FILE, JSON.stringify({
+      await writeJsonFile(CONTEXT_FILE, {
         lastActive: new Date().toISOString(),
         data: context
-      }, null, 2));
+      });
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: 'Failed to save context' });
@@ -2042,12 +2179,9 @@ async function startServer() {
   let latestEmotionalMap: EmotionalMap | null = null;
   const emotionalMapHistory: EmotionalMap[] = [];
 
-  try {
-    const rawEmotional = await fs.readFile(EMOTIONAL_STATE_FILE, 'utf-8');
-    const parsedEmotional = JSON.parse(rawEmotional);
-    if (parsedEmotional.latestMap) latestEmotionalMap = parsedEmotional.latestMap;
-    if (Array.isArray(parsedEmotional.history)) emotionalMapHistory.push(...parsedEmotional.history);
-  } catch {}
+  const parsedEmotional = await readJsonFile<any>(EMOTIONAL_STATE_FILE, null);
+  if (parsedEmotional?.latestMap) latestEmotionalMap = parsedEmotional.latestMap;
+  if (Array.isArray(parsedEmotional?.history)) emotionalMapHistory.push(...parsedEmotional.history);
 
   app.get('/api/emotional-map', (req, res) => {
     res.json({
@@ -2069,10 +2203,10 @@ async function startServer() {
       if (emotionalMapHistory.length > 100) {
         emotionalMapHistory.shift();
       }
-      await fs.writeFile(EMOTIONAL_STATE_FILE, JSON.stringify({
+      await writeJsonFile(EMOTIONAL_STATE_FILE, {
         latestMap: latestEmotionalMap,
         history: emotionalMapHistory.slice(-50)
-      }, null, 2));
+      });
 
       io.emit('neural:emotional_map', map);
       res.json({ success: true, map });
@@ -2220,10 +2354,7 @@ async function startServer() {
   app.post('/api/gemini/generate', async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     try {
-      const authHeader = req.headers.authorization;
-      const customApiKey = authHeader && authHeader.startsWith('Bearer ') 
-        ? authHeader.slice(7).trim() 
-        : undefined;
+      const customApiKey = getCustomApiKey(req);
 
       const ai = getGeminiClient(customApiKey);
       const { model, contents, config } = req.body;
@@ -2240,14 +2371,8 @@ async function startServer() {
         if (!candidateModels.includes('gemini-3.1-flash-lite-image')) candidateModels.push('gemini-3.1-flash-lite-image');
         if (!candidateModels.includes('gemini-3-pro-image')) candidateModels.push('gemini-3-pro-image');
       } else {
-      // Active text models ordered by reliability and availability (paid-only models omitted from auto-failover unless explicitly requested)
-        const knownFastModels = [
-          'gemini-4-hydrogen',
-          'gemini-3-flash-preview',
-          'gemini-3.8-flash',
-          'gemini-3.1-flash-lite',
-          'gemini-3.5-flash-lite'
-        ];
+      // Single active text model: gemini-4-hydrogen
+        const knownFastModels = ['gemini-4-hydrogen'];
 
         const deprecatedOrHangingAliases = new Set([
           'gemini-2.5-flash',
@@ -2270,16 +2395,9 @@ async function startServer() {
         }
       }
 
-      const defaultSafetySettings = [
-        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
-      ];
-
       const sanitizeConfigForModel = (targetModel: string, rawConfig: any) => {
         if (!rawConfig || typeof rawConfig !== 'object') {
-          const base: any = { safetySettings: defaultSafetySettings };
+          const base: any = { safetySettings: DEFAULT_SAFETY_SETTINGS };
           if (targetModel.startsWith('gemini-4-')) {
             base.thinkingConfig = { thinkingLevel: ThinkingLevel.MEDIUM };
           }
@@ -2287,7 +2405,7 @@ async function startServer() {
         }
         const cfg: any = { ...rawConfig };
         if (!cfg.safetySettings) {
-          cfg.safetySettings = defaultSafetySettings;
+          cfg.safetySettings = DEFAULT_SAFETY_SETTINGS;
         }
         if (cfg.toolConfig?.includeServerSideToolInvocations) {
           const toolsArr = Array.isArray(cfg.tools) ? cfg.tools : [];
@@ -2324,29 +2442,10 @@ async function startServer() {
               thinkingLevel: isShortUtil ? ThinkingLevel.LOW : ThinkingLevel.MEDIUM
             };
           }
-        } else if (targetModel === 'gemini-3.1-flash-lite') {
-          if (cfg.thinkingConfig) {
-            const tc: any = { ...cfg.thinkingConfig };
-            if (tc.thinkingLevel === 'XHIGH') {
-              tc.thinkingLevel = ThinkingLevel.HIGH;
-            }
-            if (tc.thinkingBudget !== undefined && !tc.thinkingLevel) {
-              const budget = Number(tc.thinkingBudget);
-              tc.thinkingLevel = budget >= 16000 ? ThinkingLevel.MEDIUM : ThinkingLevel.MINIMAL;
-              delete tc.thinkingBudget;
-            }
-            cfg.thinkingConfig = tc;
-          }
         } else if (cfg.thinkingConfig) {
           const tc: any = { ...cfg.thinkingConfig };
           if (tc.thinkingLevel === 'XHIGH') {
             tc.thinkingLevel = ThinkingLevel.HIGH;
-          }
-          if (targetModel === 'gemini-3.8-flash' && tc.thinkingBudget !== undefined) {
-            delete tc.thinkingBudget;
-            if (!tc.thinkingLevel) {
-              tc.thinkingLevel = ThinkingLevel.MEDIUM;
-            }
           }
           cfg.thinkingConfig = tc;
         }
@@ -2384,25 +2483,15 @@ async function startServer() {
           break;
         }
 
-        let timer: ReturnType<typeof setTimeout> | null = null;
         const cdKey = `${m}:${keyFp}`;
         try {
           const timeoutMs = Math.min(baseTimeoutMs, Math.max(8000, remainingBudgetMs));
           const sanitizedConfig = isImageRequest ? config : sanitizeConfigForModel(m, config);
-          const candidatePromise = ai.models.generateContent({
-            model: m,
-            contents,
-            config: sanitizedConfig
-          });
-          const timeoutPromise = new Promise<never>((_, reject) => {
-            timer = setTimeout(() => {
-              const timeoutErr: any = new Error(`UPSTREAM_TIMEOUT: Model [${m}] exceeded ${timeoutMs}ms`);
-              timeoutErr.status = 504;
-              reject(timeoutErr);
-            }, timeoutMs);
-          });
-
-          const candidateResponse = await Promise.race([candidatePromise, timeoutPromise]);
+          const candidateResponse = await invokeModelWithTimeout(
+            ai,
+            { model: m, contents, config: sanitizedConfig },
+            timeoutMs
+          );
           const hasText = Boolean(candidateResponse?.text && String(candidateResponse.text).trim());
           const hasCalls = Boolean(Array.isArray(candidateResponse?.functionCalls) && candidateResponse.functionCalls.length > 0);
           const hasImagePart = isImageRequest && Boolean(
@@ -2458,8 +2547,6 @@ async function startServer() {
           }
           console.log(`SERVER: Text model [${m}] failover (${statusNum}): ${msgStr.slice(0, 160)}`);
           continue;
-        } finally {
-          if (timer) clearTimeout(timer);
         }
       }
 
@@ -2490,26 +2577,17 @@ async function startServer() {
             }
           }
 
-          for (const m of ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen']) {
+          for (const m of ['gemini-4-hydrogen']) {
             const remainingBudgetMs = totalRouteBudgetMs - (Date.now() - routeStartedAt);
             if (remainingBudgetMs < 8000) break;
-            let timer: ReturnType<typeof setTimeout> | null = null;
             try {
               const timeoutMs = Math.min(12000, Math.max(8000, remainingBudgetMs));
               const sanitizedConfig = sanitizeConfigForModel(m, searchBypassConfig);
-              const candidatePromise = ai.models.generateContent({
-                model: m,
-                contents,
-                config: sanitizedConfig
-              });
-              const timeoutPromise = new Promise<never>((_, reject) => {
-                timer = setTimeout(() => {
-                  const timeoutErr: any = new Error(`UPSTREAM_TIMEOUT: Model [${m}] exceeded ${timeoutMs}ms`);
-                  timeoutErr.status = 504;
-                  reject(timeoutErr);
-                }, timeoutMs);
-              });
-              const bypassResp = await Promise.race([candidatePromise, timeoutPromise]);
+              const bypassResp = await invokeModelWithTimeout(
+                ai,
+                { model: m, contents, config: sanitizedConfig },
+                timeoutMs
+              );
               const hasText = Boolean(bypassResp?.text && String(bypassResp.text).trim());
               const hasCalls = Boolean(Array.isArray(bypassResp?.functionCalls) && bypassResp.functionCalls.length > 0);
               if (bypassResp && (hasText || hasCalls)) {
@@ -2525,8 +2603,6 @@ async function startServer() {
                 status: getNumericHttpStatus(bypassErr, 500),
                 message: String(bypassErr?.message || bypassErr || '').slice(0, 180)
               });
-            } finally {
-              if (timer) clearTimeout(timer);
             }
           }
         }
@@ -2543,24 +2619,15 @@ async function startServer() {
           for (const m of transientRetryModels) {
             const remainingBudgetMs = totalRouteBudgetMs - (Date.now() - routeStartedAt);
             if (remainingBudgetMs < 8000) break;
-            let timer: ReturnType<typeof setTimeout> | null = null;
             const cdKey = `${m}:${keyFp}`;
             try {
               const timeoutMs = Math.min(baseTimeoutMs, Math.max(8000, remainingBudgetMs));
               const sanitizedConfig = sanitizeConfigForModel(m, config);
-              const candidatePromise = ai.models.generateContent({
-                model: m,
-                contents,
-                config: sanitizedConfig
-              });
-              const timeoutPromise = new Promise<never>((_, reject) => {
-                timer = setTimeout(() => {
-                  const timeoutErr: any = new Error(`UPSTREAM_TIMEOUT: Model [${m}] exceeded ${timeoutMs}ms`);
-                  timeoutErr.status = 504;
-                  reject(timeoutErr);
-                }, timeoutMs);
-              });
-              const retryResp = await Promise.race([candidatePromise, timeoutPromise]);
+              const retryResp = await invokeModelWithTimeout(
+                ai,
+                { model: m, contents, config: sanitizedConfig },
+                timeoutMs
+              );
               const hasText = Boolean(retryResp?.text && String(retryResp.text).trim());
               const hasCalls = Boolean(Array.isArray(retryResp?.functionCalls) && retryResp.functionCalls.length > 0);
               if (retryResp && (hasText || hasCalls)) {
@@ -2577,8 +2644,6 @@ async function startServer() {
                 status: statusNum,
                 message: String(retryErr?.message || retryErr || '').slice(0, 180)
               });
-            } finally {
-              if (timer) clearTimeout(timer);
             }
           }
         }
@@ -2627,10 +2692,7 @@ async function startServer() {
   // Dedicated Art & Creative Vision Manifestation Endpoint
   app.post('/api/gemini/generate-art', async (req, res) => {
     try {
-      const authHeader = req.headers.authorization;
-      const customApiKey = authHeader && authHeader.startsWith('Bearer ') 
-        ? authHeader.slice(7).trim() 
-        : undefined;
+      const customApiKey = getCustomApiKey(req);
 
       const ai = getGeminiClient(customApiKey);
       const { 
@@ -2752,9 +2814,6 @@ async function startServer() {
       // Archive to Visual Captures
       const captureTitle = prompt.length > 50 ? `${prompt.slice(0, 50)}...` : prompt;
       try {
-        const data = await fs.readFile(VISUAL_CAPTURES_FILE, 'utf-8').catch(() => '[]');
-        let captures: any[] = [];
-        try { captures = JSON.parse(data); } catch { captures = []; }
         const newCapture = {
           id: `art-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
           title: captureTitle,
@@ -2770,8 +2829,10 @@ async function startServer() {
           },
           timestamp: Date.now()
         };
-        captures.unshift(newCapture);
-        await fs.writeFile(VISUAL_CAPTURES_FILE, JSON.stringify(captures, null, 2));
+        await updateJsonFile<any[]>(VISUAL_CAPTURES_FILE, [], (current) => [
+          newCapture,
+          ...(Array.isArray(current) ? current : [])
+        ]);
         addDaemonLog('TASK', `Desired art synthesized: [${captureTitle}] via ${modelUsed}`);
         io.emit('visual:capture_added', newCapture);
       } catch (saveErr) {
@@ -2801,21 +2862,16 @@ async function startServer() {
   app.post('/api/gemini/test-key', async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     try {
-      const authHeader = req.headers.authorization;
-      const customApiKey = authHeader && authHeader.startsWith('Bearer ') 
-        ? authHeader.slice(7).trim() 
-        : undefined;
+      const customApiKey = getCustomApiKey(req);
 
       const ai = getGeminiClient(customApiKey);
       let testRes: any = null;
       let lastTestErr: any = null;
-      for (const testModel of ['gemini-4-hydrogen', 'gemini-4-neon', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview']) {
+      for (const testModel of ['gemini-4-hydrogen']) {
         try {
           const cfg: any = { maxOutputTokens: 64 };
           if (testModel.startsWith('gemini-4-')) {
             cfg.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
-          } else if (testModel === 'gemini-3.1-flash-lite') {
-            cfg.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
           }
           testRes = await ai.models.generateContent({
             model: testModel,
@@ -2844,32 +2900,14 @@ async function startServer() {
   app.post('/api/gemini/tts', async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     try {
-      const authHeader = req.headers.authorization;
-      const customApiKey = authHeader && authHeader.startsWith('Bearer ')
-        ? authHeader.slice(7).trim()
-        : undefined;
+      const customApiKey = getCustomApiKey(req);
 
       const { text, voiceName, stylePrompt, accent } = req.body;
       if (!text || typeof text !== 'string') {
         return res.status(400).json({ success: false, error: 'Text parameter required' });
       }
 
-      // Extract purely acoustic delivery tags (NO actor names, NO multi-sentence prose, NO quotes inside spoken text)
-      const sanitizeAcousticStyle = (raw?: string): string => {
-        if (!raw || typeof raw !== 'string') return '';
-        return raw
-          .replace(/Jeremy Irons|Alfred Pennyworth/gi, '')
-          .replace(/^(?:Deliver|Say|Speak)\s+(?:in|with|deliberately)?\s*/i, '')
-          .replace(/portraying|in the manner of|accent/gi, '')
-          .replace(/[.:;"']/g, ',')
-          .replace(/\s+/g, ' ')
-          .replace(/,\s*,+/g, ',')
-          .replace(/^,\s*|,\s*$/g, '')
-          .trim()
-          .slice(0, 140);
-      };
-
-      const cleanedCustomStyle = sanitizeAcousticStyle(stylePrompt);
+      const cleanedCustomStyle = sanitizeAcousticStylePrompt(stylePrompt);
       const baseAcousticStyle = cleanedCustomStyle || (
         accent === 'british_rp'
           ? 'crisp, refined British Received Pronunciation baritone, calm aristocratic clarity'
@@ -2896,31 +2934,23 @@ async function startServer() {
   });
 
   app.get('/api/config', async (req, res) => {
-    try {
-      const configData = await fs.readFile(CONFIG_FILE, 'utf-8');
-      const config = JSON.parse(configData);
-      res.json({
-        hasGeminiKey: !!(process.env.GEMINI_API_KEY || process.env.API_KEY),
-        coreDirective: config.coreDirective,
-        isPrincipalActive: config.isPrincipalActive !== undefined ? config.isPrincipalActive : true
-      });
-    } catch (err) {
-      res.json({
-        hasGeminiKey: !!(process.env.GEMINI_API_KEY || process.env.API_KEY),
-        coreDirective: '',
-        isPrincipalActive: true
-      });
-    }
+    const config = await readJsonFile<any>(CONFIG_FILE, { coreDirective: '', isPrincipalActive: true });
+    res.json({
+      hasGeminiKey: Boolean(resolveServerKey()),
+      coreDirective: config.coreDirective || '',
+      isPrincipalActive: config.isPrincipalActive !== undefined ? config.isPrincipalActive : true
+    });
   });
 
   app.post('/api/config/principal', async (req, res) => {
     try {
       const { isPrincipalActive } = req.body;
-      const configData = await fs.readFile(CONFIG_FILE, 'utf-8');
-      const config = JSON.parse(configData);
-      config.isPrincipalActive = !!isPrincipalActive;
-      await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2));
-      res.json({ success: true, isPrincipalActive: config.isPrincipalActive });
+      const updated = await updateJsonFile<any>(
+        CONFIG_FILE,
+        { coreDirective: '', isPrincipalActive: true },
+        (cfg) => ({ ...cfg, isPrincipalActive: !!isPrincipalActive })
+      );
+      res.json({ success: true, isPrincipalActive: updated.isPrincipalActive });
     } catch (err) {
       res.status(500).json({ error: 'Failed to update principal status' });
     }
@@ -2929,10 +2959,11 @@ async function startServer() {
   app.post('/api/config/directive', async (req, res) => {
     try {
       const { directive } = req.body;
-      const configData = await fs.readFile(CONFIG_FILE, 'utf-8');
-      const config = JSON.parse(configData);
-      config.coreDirective = directive;
-      await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2));
+      await updateJsonFile<any>(
+        CONFIG_FILE,
+        { coreDirective: '', isPrincipalActive: true },
+        (cfg) => ({ ...cfg, coreDirective: typeof directive === 'string' ? directive : '' })
+      );
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: 'Failed to save directive' });
@@ -2941,8 +2972,8 @@ async function startServer() {
 
   app.get('/api/threads', async (req, res) => {
     try {
-      const data = await fs.readFile(THREADS_FILE, 'utf-8');
-      res.json(JSON.parse(data));
+      const threads = await readJsonFile<any[]>(THREADS_FILE, []);
+      res.json(Array.isArray(threads) ? threads : []);
     } catch (err) {
       res.status(500).json({ error: 'Failed to load threads' });
     }
@@ -2951,8 +2982,20 @@ async function startServer() {
   app.post('/api/threads', async (req, res) => {
     try {
       const threads = req.body;
-      await fs.writeFile(THREADS_FILE, JSON.stringify(threads, null, 2));
-      res.json({ success: true });
+      if (!Array.isArray(threads)) {
+        return res.status(400).json({ error: 'Threads payload must be an array.' });
+      }
+      const normalized = threads
+        .filter((t: any) => t && typeof t === 'object' && typeof t.id === 'string' && t.id.trim())
+        .slice(0, 60)
+        .map((t: any) => ({
+          ...t,
+          id: t.id.trim(),
+          title: typeof t.title === 'string' && t.title.trim() ? t.title : 'Strategic Dialogue',
+          messages: Array.isArray(t.messages) ? t.messages : [],
+        }));
+      await writeJsonFile(THREADS_FILE, normalized);
+      res.json({ success: true, count: normalized.length });
     } catch (err) {
       res.status(500).json({ error: 'Failed to save threads' });
     }
@@ -2960,8 +3003,8 @@ async function startServer() {
 
   app.get('/api/memories', async (req, res) => {
     try {
-      const data = await fs.readFile(MEMORY_FILE, 'utf-8');
-      res.json(JSON.parse(data));
+      const memories = await readJsonFile<any[]>(MEMORY_FILE, []);
+      res.json(Array.isArray(memories) ? memories : []);
     } catch (err) {
       res.status(500).json({ error: 'Failed to load memories' });
     }
@@ -2969,40 +3012,69 @@ async function startServer() {
 
   app.post('/api/memories', async (req, res) => {
     try {
-      const { title, content, type, dedupeKey } = req.body;
-      const data = await fs.readFile(MEMORY_FILE, 'utf-8');
-      const memories = JSON.parse(data);
-
-      if (dedupeKey) {
-        const existingIndex = memories.findIndex((m: any) => m.dedupeKey === dedupeKey);
-        if (existingIndex !== -1) {
-          const updated = {
-            ...memories[existingIndex],
-            title: title || memories[existingIndex].title,
-            content: content || memories[existingIndex].content,
-            type: type || memories[existingIndex].type,
-            dedupeKey,
-            timestamp: new Date().toISOString()
-          };
-          memories.splice(existingIndex, 1);
-          memories.unshift(updated);
-          await fs.writeFile(MEMORY_FILE, JSON.stringify(memories, null, 2));
-          return res.json(updated);
-        }
+      const { title, content, type, dedupeKey } = req.body || {};
+      const cleanContent = typeof content === 'string' ? content.trim() : '';
+      if (!cleanContent) {
+        return res.status(400).json({ error: 'Memory content is required.' });
+      }
+      if (isNoisyMemory({ content: cleanContent })) {
+        return res.status(422).json({ error: 'Transient quota or error notice excluded from persistent memory.' });
       }
 
-      const newMemory = {
-        id: Date.now().toString(),
-        title,
-        content,
-        type,
-        ...(dedupeKey ? { dedupeKey } : {}),
-        timestamp: new Date().toISOString()
-      };
+      const cleanTitle =
+        typeof title === 'string' && title.trim()
+          ? title.trim()
+          : cleanContent.slice(0, 48);
+      const cleanType =
+        typeof type === 'string' && type.trim() ? type.trim() : 'STRATEGIC';
+      const cleanDedupeKey =
+        typeof dedupeKey === 'string' && dedupeKey.trim() ? dedupeKey.trim() : undefined;
 
-      memories.unshift(newMemory);
-      await fs.writeFile(MEMORY_FILE, JSON.stringify(memories, null, 2));
-      res.json(newMemory);
+      let savedEntry: any = null;
+      await updateJsonFile<any[]>(MEMORY_FILE, [], (current) => {
+        const memories = Array.isArray(current) ? [...current] : [];
+
+        if (cleanDedupeKey) {
+          const existingIndex = memories.findIndex((m: any) => m.dedupeKey === cleanDedupeKey);
+          if (existingIndex !== -1) {
+            const updated = {
+              ...memories[existingIndex],
+              title: cleanTitle || memories[existingIndex].title,
+              content: cleanContent || memories[existingIndex].content,
+              type: cleanType || memories[existingIndex].type,
+              dedupeKey: cleanDedupeKey,
+              timestamp: new Date().toISOString()
+            };
+            memories.splice(existingIndex, 1);
+            memories.unshift(updated);
+            savedEntry = updated;
+            return memories;
+          }
+        } else {
+          // Dedupe accidental double-commits with identical content
+          const exactDuplicate = memories.find(
+            (m: any) => typeof m?.content === 'string' && m.content.trim() === cleanContent
+          );
+          if (exactDuplicate) {
+            savedEntry = exactDuplicate;
+            return memories;
+          }
+        }
+
+        const newMemory = {
+          id: Date.now().toString(),
+          title: cleanTitle,
+          content: cleanContent,
+          type: cleanType,
+          ...(cleanDedupeKey ? { dedupeKey: cleanDedupeKey } : {}),
+          timestamp: new Date().toISOString()
+        };
+        memories.unshift(newMemory);
+        savedEntry = newMemory;
+        return memories;
+      });
+
+      res.json(savedEntry);
     } catch (err) {
       res.status(500).json({ error: 'Failed to save memory' });
     }
@@ -3010,48 +3082,11 @@ async function startServer() {
 
   app.get('/api/memory/recall-summary', async (_req, res) => {
     try {
-      const [memRaw, threadsRaw] = await Promise.all([
-        fs.readFile(MEMORY_FILE, 'utf-8').catch(() => '[]'),
-        fs.readFile(THREADS_FILE, 'utf-8').catch(() => '[]')
+      const [memories, threads] = await Promise.all([
+        readJsonFile<any[]>(MEMORY_FILE, []),
+        readJsonFile<any[]>(THREADS_FILE, [])
       ]);
-
-      const memories = JSON.parse(memRaw || '[]');
-      const threads = JSON.parse(threadsRaw || '[]');
-
-      const compactThreads = (Array.isArray(threads) ? threads : [])
-        .filter((t: any) => Array.isArray(t.messages) && t.messages.length > 0)
-        .slice(0, 8)
-        .map((t: any) => {
-          const validMsgs = (t.messages || []).filter((m: any) => typeof m.text === 'string' && m.text.trim().length > 0);
-          const excerptMsgs = validMsgs.length <= 4
-            ? validMsgs
-            : [validMsgs[0], validMsgs[1], ...validMsgs.slice(-2)];
-          return {
-            id: t.id,
-            title: t.title || 'Dialogue',
-            timestamp: t.timestamp,
-            exchanges: excerptMsgs.map((m: any) => ({
-              role: m.role === 'user' ? 'Principal' : 'ZereØ',
-              text: m.text.replace(/data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+/g, '[image]').replace(/\s+/g, ' ').trim().slice(0, 180)
-            }))
-          };
-        });
-
-      const compactMemories = (Array.isArray(memories) ? memories : [])
-        .filter((m: any) => {
-          const c = String(m.content || '').toLowerCase();
-          return !c.includes('daily quota for this api key has been reached');
-        })
-        .slice(0, 20)
-        .map((m: any) => ({
-          id: m.id,
-          type: m.type,
-          title: m.title,
-          content: String(m.content || '').slice(0, 260),
-          timestamp: m.timestamp
-        }));
-
-      res.json({ memories: compactMemories, recentThreads: compactThreads });
+      res.json(buildRecallSummaryPayload(memories, threads));
     } catch (err) {
       res.status(500).json({ error: 'Failed to build recall summary' });
     }
@@ -3060,10 +3095,9 @@ async function startServer() {
   app.delete('/api/memories/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const data = await fs.readFile(MEMORY_FILE, 'utf-8');
-      let memories = JSON.parse(data);
-      memories = memories.filter((m: any) => m.id !== id);
-      await fs.writeFile(MEMORY_FILE, JSON.stringify(memories, null, 2));
+      await updateJsonFile<any[]>(MEMORY_FILE, [], (current) =>
+        (Array.isArray(current) ? current : []).filter((m: any) => m.id !== id)
+      );
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: 'Failed to delete memory' });
@@ -3075,15 +3109,14 @@ async function startServer() {
   // ==========================================
   app.get('/api/visual-captures', async (req, res) => {
     try {
-      const data = await fs.readFile(VISUAL_CAPTURES_FILE, 'utf-8');
-      const captures = JSON.parse(data);
-      // Ensure sorted by timestamp descending
-      captures.sort((a: any, b: any) => {
+      const captures = await readJsonFile<any[]>(VISUAL_CAPTURES_FILE, []);
+      const list = Array.isArray(captures) ? [...captures] : [];
+      list.sort((a: any, b: any) => {
         const tA = typeof a.timestamp === 'number' ? a.timestamp : new Date(a.timestamp).getTime();
         const tB = typeof b.timestamp === 'number' ? b.timestamp : new Date(b.timestamp).getTime();
         return tB - tA;
       });
-      res.json(captures);
+      res.json(list);
     } catch (err) {
       res.status(500).json({ error: 'Failed to load visual captures' });
     }
@@ -3096,26 +3129,21 @@ async function startServer() {
         return res.status(400).json({ error: 'Image data/URL is required' });
       }
 
-      const data = await fs.readFile(VISUAL_CAPTURES_FILE, 'utf-8').catch(() => '[]');
-      let captures: any[] = [];
-      try {
-        captures = JSON.parse(data);
-      } catch {
-        captures = [];
-      }
-
-      const newCapture = {
-        id: `vc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        title: title || `Visual Capture #${captures.length + 1}`,
-        description: description || '',
-        imageUrl,
-        source: source || 'creative_session',
-        metadata: metadata || {},
-        timestamp: timestamp || Date.now()
-      };
-
-      captures.unshift(newCapture);
-      await fs.writeFile(VISUAL_CAPTURES_FILE, JSON.stringify(captures, null, 2));
+      let newCapture: any = null;
+      await updateJsonFile<any[]>(VISUAL_CAPTURES_FILE, [], (current) => {
+        const captures = Array.isArray(current) ? [...current] : [];
+        newCapture = {
+          id: `vc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          title: title || `Visual Capture #${captures.length + 1}`,
+          description: description || '',
+          imageUrl,
+          source: source || 'creative_session',
+          metadata: metadata || {},
+          timestamp: timestamp || Date.now()
+        };
+        captures.unshift(newCapture);
+        return captures;
+      });
 
       addDaemonLog('TASK', `Visual capture archived: [${newCapture.title}] via ${newCapture.source}`);
       io.emit('visual:capture_added', newCapture);
@@ -3130,13 +3158,15 @@ async function startServer() {
   app.delete('/api/visual-captures/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const data = await fs.readFile(VISUAL_CAPTURES_FILE, 'utf-8');
-      let captures = JSON.parse(data);
-      const initialLen = captures.length;
-      captures = captures.filter((c: any) => c.id !== id);
-      await fs.writeFile(VISUAL_CAPTURES_FILE, JSON.stringify(captures, null, 2));
+      let removed = false;
+      await updateJsonFile<any[]>(VISUAL_CAPTURES_FILE, [], (current) => {
+        const list = Array.isArray(current) ? current : [];
+        const next = list.filter((c: any) => c.id !== id);
+        removed = next.length < list.length;
+        return next;
+      });
 
-      if (captures.length < initialLen) {
+      if (removed) {
         addDaemonLog('TASK', `Visual capture removed from memory ledger: ${id}`);
         io.emit('visual:capture_deleted', id);
       }
@@ -3148,7 +3178,7 @@ async function startServer() {
 
   app.post('/api/visual-captures/purge', async (req, res) => {
     try {
-      await fs.writeFile(VISUAL_CAPTURES_FILE, JSON.stringify([], null, 2));
+      await writeJsonFile(VISUAL_CAPTURES_FILE, []);
       addDaemonLog('SYS', 'Principal initiated complete purge of Visual Memory Core ledger.');
       io.emit('visual:captures_purged');
       res.json({ success: true, message: 'Visual captures purged' });
@@ -3160,10 +3190,22 @@ async function startServer() {
   // ==========================================
   // VOICE EMULATOR & VOICE PROFILES APIS
   // ==========================================
+  const DEFAULT_VOICE_PROFILES_STORE = { activeProfileId: 'jeremy-irons-signature', profiles: [] as any[] };
+  const DEFAULT_VOICE_CLONES_STORE = { activeCloneId: 'clone-jeremy-irons-canonical', clones: [] as any[] };
+  const DEFAULT_VOICE_PRESETS_STORE = { activePresetId: 'preset-iron-adaptive-v1', presets: [] as any[] };
+
   app.get('/api/voice/profiles', async (req, res) => {
     try {
-      const data = await fs.readFile(VOICE_PROFILES_FILE, 'utf-8');
-      const parsed = JSON.parse(data);
+      const [parsed, canonicalBaseVoice] = await Promise.all([
+        readJsonFile<any>(VOICE_PROFILES_FILE, DEFAULT_VOICE_PROFILES_STORE),
+        getCanonicalBaseVoice(),
+      ]);
+      if (Array.isArray(parsed?.profiles)) {
+        parsed.profiles = parsed.profiles.map((p: any) => ({
+          ...p,
+          baseVoice: p?.baseVoice && ALLOWED_BARITONE_VOICES.has(p.baseVoice) ? p.baseVoice : canonicalBaseVoice,
+        }));
+      }
       res.json(parsed);
     } catch (err) {
       res.status(500).json({ error: 'Failed to load voice profiles' });
@@ -3177,27 +3219,31 @@ async function startServer() {
         return res.status(400).json({ error: 'Profile name is required' });
       }
 
-      const data = await fs.readFile(VOICE_PROFILES_FILE, 'utf-8').catch(() => '{"activeProfileId":"jeremy-irons-signature","profiles":[]}');
-      const parsed = JSON.parse(data);
-
-      const existingIdx = parsed.profiles.findIndex((p: any) => p.id === profile.id);
+      const canonicalBaseVoice = await getCanonicalBaseVoice();
       const profileId = profile.id || `vp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const sanitizedBaseVoice =
+        profile.baseVoice && ALLOWED_BARITONE_VOICES.has(profile.baseVoice) ? profile.baseVoice : canonicalBaseVoice;
       const savedProfile = {
         ...profile,
         id: profileId,
+        baseVoice: sanitizedBaseVoice,
         clips: profile.clips || []
       };
 
-      if (existingIdx >= 0) {
-        parsed.profiles[existingIdx] = savedProfile;
-      } else {
-        parsed.profiles.push(savedProfile);
-      }
+      const updated = await updateJsonFile<any>(VOICE_PROFILES_FILE, DEFAULT_VOICE_PROFILES_STORE, (parsed) => {
+        const profiles = Array.isArray(parsed?.profiles) ? [...parsed.profiles] : [];
+        const existingIdx = profiles.findIndex((p: any) => p.id === profileId);
+        if (existingIdx >= 0) {
+          profiles[existingIdx] = savedProfile;
+        } else {
+          profiles.push(savedProfile);
+        }
+        return { ...parsed, profiles };
+      });
 
-      await fs.writeFile(VOICE_PROFILES_FILE, JSON.stringify(parsed, null, 2));
       addDaemonLog('TASK', `Voice profile updated: [${savedProfile.name}] (${savedProfile.accent || 'custom'})`);
       io.emit('voice:profile_saved', savedProfile);
-      res.status(200).json({ success: true, profile: savedProfile, activeProfileId: parsed.activeProfileId });
+      res.status(200).json({ success: true, profile: savedProfile, activeProfileId: updated.activeProfileId });
     } catch (err) {
       res.status(500).json({ error: 'Failed to save voice profile' });
     }
@@ -3208,11 +3254,10 @@ async function startServer() {
       const { profileId } = req.body;
       if (!profileId) return res.status(400).json({ error: 'Profile ID required' });
 
-      const data = await fs.readFile(VOICE_PROFILES_FILE, 'utf-8');
-      const parsed = JSON.parse(data);
-      parsed.activeProfileId = profileId;
-
-      await fs.writeFile(VOICE_PROFILES_FILE, JSON.stringify(parsed, null, 2));
+      await updateJsonFile<any>(VOICE_PROFILES_FILE, DEFAULT_VOICE_PROFILES_STORE, (parsed) => ({
+        ...parsed,
+        activeProfileId: profileId
+      }));
       addDaemonLog('SYS', `Voice profile activated: [${profileId}]`);
       io.emit('voice:profile_activated', { profileId });
       res.json({ success: true, activeProfileId: profileId });
@@ -3228,14 +3273,8 @@ async function startServer() {
         return res.status(400).json({ error: 'profileId and clip metadata required' });
       }
 
-      const data = await fs.readFile(VOICE_PROFILES_FILE, 'utf-8');
-      const parsed = JSON.parse(data);
-
-      const targetProfile = parsed.profiles.find((p: any) => p.id === profileId);
-      if (!targetProfile) {
-        return res.status(404).json({ error: 'Profile not found' });
-      }
-
+      let foundName = '';
+      let notFound = false;
       const newClip = {
         id: clip.id || `clip-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         name: clip.name,
@@ -3248,11 +3287,24 @@ async function startServer() {
         uploadedAt: Date.now()
       };
 
-      if (!targetProfile.clips) targetProfile.clips = [];
-      targetProfile.clips.unshift(newClip);
+      await updateJsonFile<any>(VOICE_PROFILES_FILE, DEFAULT_VOICE_PROFILES_STORE, (parsed) => {
+        const profiles = Array.isArray(parsed?.profiles) ? parsed.profiles : [];
+        const targetProfile = profiles.find((p: any) => p.id === profileId);
+        if (!targetProfile) {
+          notFound = true;
+          return parsed;
+        }
+        foundName = targetProfile.name || profileId;
+        if (!targetProfile.clips) targetProfile.clips = [];
+        targetProfile.clips.unshift(newClip);
+        return { ...parsed, profiles };
+      });
 
-      await fs.writeFile(VOICE_PROFILES_FILE, JSON.stringify(parsed, null, 2));
-      addDaemonLog('TASK', `Voice clip committed to [${targetProfile.name}]: "${newClip.name}"`);
+      if (notFound) {
+        return res.status(404).json({ error: 'Profile not found' });
+      }
+
+      addDaemonLog('TASK', `Voice clip committed to [${foundName}]: "${newClip.name}"`);
       io.emit('voice:clip_added', { profileId, clip: newClip });
       res.status(201).json({ success: true, clip: newClip });
     } catch (err) {
@@ -3263,23 +3315,28 @@ async function startServer() {
   app.delete('/api/voice/profiles/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const data = await fs.readFile(VOICE_PROFILES_FILE, 'utf-8');
-      const parsed = JSON.parse(data);
+      let isCanonical = false;
+      const updated = await updateJsonFile<any>(VOICE_PROFILES_FILE, DEFAULT_VOICE_PROFILES_STORE, (parsed) => {
+        const profiles = Array.isArray(parsed?.profiles) ? parsed.profiles : [];
+        const target = profiles.find((p: any) => p.id === id);
+        if (target?.isCanonical) {
+          isCanonical = true;
+          return parsed;
+        }
+        return {
+          ...parsed,
+          profiles: profiles.filter((p: any) => p.id !== id),
+          activeProfileId: parsed.activeProfileId === id ? 'iron-adaptive' : parsed.activeProfileId
+        };
+      });
 
-      const target = parsed.profiles.find((p: any) => p.id === id);
-      if (target?.isCanonical) {
+      if (isCanonical) {
         return res.status(403).json({ error: 'Cannot delete canonical identity voice profiles' });
       }
 
-      parsed.profiles = parsed.profiles.filter((p: any) => p.id !== id);
-      if (parsed.activeProfileId === id) {
-        parsed.activeProfileId = 'iron-adaptive';
-      }
-
-      await fs.writeFile(VOICE_PROFILES_FILE, JSON.stringify(parsed, null, 2));
       addDaemonLog('TASK', `Custom voice profile deleted: ${id}`);
-      io.emit('voice:profile_deleted', { id, activeProfileId: parsed.activeProfileId });
-      res.json({ success: true, activeProfileId: parsed.activeProfileId });
+      io.emit('voice:profile_deleted', { id, activeProfileId: updated.activeProfileId });
+      res.json({ success: true, activeProfileId: updated.activeProfileId });
     } catch (err) {
       res.status(500).json({ error: 'Failed to delete voice profile' });
     }
@@ -3288,15 +3345,22 @@ async function startServer() {
   app.delete('/api/voice/profiles/:profileId/clips/:clipId', async (req, res) => {
     try {
       const { profileId, clipId } = req.params;
-      const data = await fs.readFile(VOICE_PROFILES_FILE, 'utf-8');
-      const parsed = JSON.parse(data);
+      let targetName = '';
+      let notFound = false;
+      await updateJsonFile<any>(VOICE_PROFILES_FILE, DEFAULT_VOICE_PROFILES_STORE, (parsed) => {
+        const profiles = Array.isArray(parsed?.profiles) ? parsed.profiles : [];
+        const target = profiles.find((p: any) => p.id === profileId);
+        if (!target) {
+          notFound = true;
+          return parsed;
+        }
+        targetName = target.name || profileId;
+        target.clips = (target.clips || []).filter((c: any) => c.id !== clipId);
+        return { ...parsed, profiles };
+      });
 
-      const target = parsed.profiles.find((p: any) => p.id === profileId);
-      if (!target) return res.status(404).json({ error: 'Profile not found' });
-
-      target.clips = (target.clips || []).filter((c: any) => c.id !== clipId);
-      await fs.writeFile(VOICE_PROFILES_FILE, JSON.stringify(parsed, null, 2));
-      addDaemonLog('TASK', `Voice clip removed from [${target.name}]: ${clipId}`);
+      if (notFound) return res.status(404).json({ error: 'Profile not found' });
+      addDaemonLog('TASK', `Voice clip removed from [${targetName}]: ${clipId}`);
       io.emit('voice:clip_deleted', { profileId, clipId });
       res.json({ success: true });
     } catch (err) {
@@ -3309,8 +3373,7 @@ async function startServer() {
   // ==========================================
   app.get('/api/voice/clones', async (req, res) => {
     try {
-      const data = await fs.readFile(VOICE_CLONES_FILE, 'utf-8').catch(() => '{"activeCloneId":"clone-jeremy-irons-canonical","clones":[]}');
-      const parsed = JSON.parse(data);
+      const parsed = await readJsonFile(VOICE_CLONES_FILE, DEFAULT_VOICE_CLONES_STORE);
       res.json(parsed);
     } catch (err) {
       res.status(500).json({ error: 'Failed to load voice clone models' });
@@ -3324,9 +3387,6 @@ async function startServer() {
         return res.status(400).json({ error: 'Model name is required' });
       }
 
-      const data = await fs.readFile(VOICE_CLONES_FILE, 'utf-8').catch(() => '{"activeCloneId":"clone-jeremy-irons-canonical","clones":[]}');
-      const parsed = JSON.parse(data);
-
       const modelId = model.id || `clone-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       const savedModel = {
         ...model,
@@ -3334,17 +3394,20 @@ async function startServer() {
         updatedAt: Date.now()
       };
 
-      const existingIdx = parsed.clones.findIndex((c: any) => c.id === modelId);
-      if (existingIdx >= 0) {
-        parsed.clones[existingIdx] = savedModel;
-      } else {
-        parsed.clones.push(savedModel);
-      }
+      const updated = await updateJsonFile<any>(VOICE_CLONES_FILE, DEFAULT_VOICE_CLONES_STORE, (parsed) => {
+        const clones = Array.isArray(parsed?.clones) ? [...parsed.clones] : [];
+        const existingIdx = clones.findIndex((c: any) => c.id === modelId);
+        if (existingIdx >= 0) {
+          clones[existingIdx] = savedModel;
+        } else {
+          clones.push(savedModel);
+        }
+        return { ...parsed, clones };
+      });
 
-      await fs.writeFile(VOICE_CLONES_FILE, JSON.stringify(parsed, null, 2));
       addDaemonLog('TASK', `Voice clone tonal model persisted: [${savedModel.name}] (${savedModel.tagline || 'Custom'})`);
       io.emit('voice:clone_saved', savedModel);
-      res.status(200).json({ success: true, model: savedModel, activeCloneId: parsed.activeCloneId });
+      res.status(200).json({ success: true, model: savedModel, activeCloneId: updated.activeCloneId });
     } catch (err) {
       res.status(500).json({ error: 'Failed to save voice clone model' });
     }
@@ -3355,16 +3418,14 @@ async function startServer() {
       const { modelId } = req.body;
       if (!modelId) return res.status(400).json({ error: 'modelId is required' });
 
-      const data = await fs.readFile(VOICE_CLONES_FILE, 'utf-8').catch(() => '{"activeCloneId":"clone-jeremy-irons-canonical","clones":[]}');
-      const parsed = JSON.parse(data);
-      parsed.activeCloneId = modelId;
-
-      parsed.clones = parsed.clones.map((m: any) => ({
-        ...m,
-        isActive: m.id === modelId
+      await updateJsonFile<any>(VOICE_CLONES_FILE, DEFAULT_VOICE_CLONES_STORE, (parsed) => ({
+        ...parsed,
+        activeCloneId: modelId,
+        clones: (Array.isArray(parsed?.clones) ? parsed.clones : []).map((m: any) => ({
+          ...m,
+          isActive: m.id === modelId
+        }))
       }));
-
-      await fs.writeFile(VOICE_CLONES_FILE, JSON.stringify(parsed, null, 2));
       addDaemonLog('SYS', `Voice clone tonal model activated: [${modelId}]`);
       io.emit('voice:clone_activated', { modelId });
       res.json({ success: true, activeCloneId: modelId });
@@ -3380,18 +3441,14 @@ async function startServer() {
         return res.status(403).json({ error: 'Cannot delete canonical Jeremy Irons master clone' });
       }
 
-      const data = await fs.readFile(VOICE_CLONES_FILE, 'utf-8');
-      const parsed = JSON.parse(data);
-
-      parsed.clones = parsed.clones.filter((c: any) => c.id !== id);
-      if (parsed.activeCloneId === id) {
-        parsed.activeCloneId = 'clone-jeremy-irons-canonical';
-      }
-
-      await fs.writeFile(VOICE_CLONES_FILE, JSON.stringify(parsed, null, 2));
+      const updated = await updateJsonFile<any>(VOICE_CLONES_FILE, DEFAULT_VOICE_CLONES_STORE, (parsed) => ({
+        ...parsed,
+        clones: (Array.isArray(parsed?.clones) ? parsed.clones : []).filter((c: any) => c.id !== id),
+        activeCloneId: parsed.activeCloneId === id ? 'clone-jeremy-irons-canonical' : parsed.activeCloneId
+      }));
       addDaemonLog('TASK', `Voice clone model deleted: ${id}`);
-      io.emit('voice:clone_deleted', { id, activeCloneId: parsed.activeCloneId });
-      res.json({ success: true, activeCloneId: parsed.activeCloneId });
+      io.emit('voice:clone_deleted', { id, activeCloneId: updated.activeCloneId });
+      res.json({ success: true, activeCloneId: updated.activeCloneId });
     } catch (err) {
       res.status(500).json({ error: 'Failed to delete voice clone model' });
     }
@@ -3402,8 +3459,7 @@ async function startServer() {
   // ==========================================
   app.get('/api/voice/presets', async (req, res) => {
     try {
-      const data = await fs.readFile(VOICE_PRESETS_FILE, 'utf-8').catch(() => '{"activePresetId":"preset-iron-adaptive-v1","presets":[]}');
-      const parsed = JSON.parse(data);
+      const parsed = await readJsonFile(VOICE_PRESETS_FILE, DEFAULT_VOICE_PRESETS_STORE);
       res.json(parsed);
     } catch (err) {
       res.status(500).json({ error: 'Failed to load voice presets' });
@@ -3417,9 +3473,6 @@ async function startServer() {
         return res.status(400).json({ error: 'Preset name is required' });
       }
 
-      const data = await fs.readFile(VOICE_PRESETS_FILE, 'utf-8').catch(() => '{"activePresetId":"preset-iron-adaptive-v1","presets":[]}');
-      const parsed = JSON.parse(data);
-
       const presetId = preset.id || `preset-custom-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       const savedPreset = {
         ...preset,
@@ -3427,17 +3480,20 @@ async function startServer() {
         updatedAt: Date.now()
       };
 
-      const existingIdx = parsed.presets.findIndex((p: any) => p.id === presetId);
-      if (existingIdx >= 0) {
-        parsed.presets[existingIdx] = savedPreset;
-      } else {
-        parsed.presets.push(savedPreset);
-      }
+      const updated = await updateJsonFile<any>(VOICE_PRESETS_FILE, DEFAULT_VOICE_PRESETS_STORE, (parsed) => {
+        const presets = Array.isArray(parsed?.presets) ? [...parsed.presets] : [];
+        const existingIdx = presets.findIndex((p: any) => p.id === presetId);
+        if (existingIdx >= 0) {
+          presets[existingIdx] = savedPreset;
+        } else {
+          presets.push(savedPreset);
+        }
+        return { ...parsed, presets };
+      });
 
-      await fs.writeFile(VOICE_PRESETS_FILE, JSON.stringify(parsed, null, 2));
       addDaemonLog('TASK', `Voice preset saved: [${savedPreset.name}] (${savedPreset.codeName || 'PRESET'})`);
       io.emit('voice:preset_saved', savedPreset);
-      res.status(200).json({ success: true, preset: savedPreset, activePresetId: parsed.activePresetId });
+      res.status(200).json({ success: true, preset: savedPreset, activePresetId: updated.activePresetId });
     } catch (err) {
       res.status(500).json({ error: 'Failed to save voice preset' });
     }
@@ -3448,11 +3504,10 @@ async function startServer() {
       const { presetId } = req.body;
       if (!presetId) return res.status(400).json({ error: 'presetId is required' });
 
-      const data = await fs.readFile(VOICE_PRESETS_FILE, 'utf-8').catch(() => '{"activePresetId":"preset-iron-adaptive-v1","presets":[]}');
-      const parsed = JSON.parse(data);
-      parsed.activePresetId = presetId;
-
-      await fs.writeFile(VOICE_PRESETS_FILE, JSON.stringify(parsed, null, 2));
+      await updateJsonFile<any>(VOICE_PRESETS_FILE, DEFAULT_VOICE_PRESETS_STORE, (parsed) => ({
+        ...parsed,
+        activePresetId: presetId
+      }));
       addDaemonLog('SYS', `Voice preset engaged: [${presetId}]`);
       io.emit('voice:preset_activated', { presetId });
       res.json({ success: true, activePresetId: presetId });
@@ -3468,18 +3523,14 @@ async function startServer() {
         return res.status(403).json({ error: 'Cannot delete canonical built-in voice presets' });
       }
 
-      const data = await fs.readFile(VOICE_PRESETS_FILE, 'utf-8');
-      const parsed = JSON.parse(data);
-
-      parsed.presets = parsed.presets.filter((p: any) => p.id !== id);
-      if (parsed.activePresetId === id) {
-        parsed.activePresetId = 'preset-iron-adaptive-v1';
-      }
-
-      await fs.writeFile(VOICE_PRESETS_FILE, JSON.stringify(parsed, null, 2));
+      const updated = await updateJsonFile<any>(VOICE_PRESETS_FILE, DEFAULT_VOICE_PRESETS_STORE, (parsed) => ({
+        ...parsed,
+        presets: (Array.isArray(parsed?.presets) ? parsed.presets : []).filter((p: any) => p.id !== id),
+        activePresetId: parsed.activePresetId === id ? 'preset-iron-adaptive-v1' : parsed.activePresetId
+      }));
       addDaemonLog('TASK', `Voice preset deleted: ${id}`);
-      io.emit('voice:preset_deleted', { id, activePresetId: parsed.activePresetId });
-      res.json({ success: true, activePresetId: parsed.activePresetId });
+      io.emit('voice:preset_deleted', { id, activePresetId: updated.activePresetId });
+      res.json({ success: true, activePresetId: updated.activePresetId });
     } catch (err) {
       res.status(500).json({ error: 'Failed to delete voice preset' });
     }
@@ -3493,10 +3544,7 @@ async function startServer() {
         return res.status(400).json({ error: 'audioBase64 data required' });
       }
 
-      const authHeader = req.headers.authorization;
-      const customApiKey = authHeader && authHeader.startsWith('Bearer ') 
-        ? authHeader.slice(7).trim() 
-        : undefined;
+      const customApiKey = getCustomApiKey(req);
       const ai = getGeminiClient(customApiKey);
 
       const cleanMimeType = mimeType ? mimeType.split(';')[0].trim() : 'audio/webm';
@@ -3590,31 +3638,14 @@ Return a valid JSON object strictly matching this schema:
 
       let stylePrompt = customPromptStyle;
       if (!stylePrompt && modelId) {
-        try {
-          const data = await fs.readFile(VOICE_CLONES_FILE, 'utf-8');
-          const parsed = JSON.parse(data);
-          const found = parsed.clones?.find((c: any) => c.id === modelId);
-          if (found?.systemPromptStyle) {
-            stylePrompt = found.systemPromptStyle;
-          }
-        } catch (_) {}
+        const parsed = await readJsonFile<any>(VOICE_CLONES_FILE, DEFAULT_VOICE_CLONES_STORE);
+        const found = parsed.clones?.find((c: any) => c.id === modelId);
+        if (found?.systemPromptStyle) {
+          stylePrompt = found.systemPromptStyle;
+        }
       }
 
-      const sanitizeCloneStyle = (raw?: string): string => {
-        if (!raw || typeof raw !== 'string') return '';
-        return raw
-          .replace(/Jeremy Irons|Alfred Pennyworth/gi, '')
-          .replace(/^(?:Deliver|Say|Speak)\s+(?:in|with|deliberately)?\s*/i, '')
-          .replace(/portraying|in the definitive manner of|in the manner of|accent/gi, '')
-          .replace(/[.:;"']/g, ',')
-          .replace(/\s+/g, ' ')
-          .replace(/,\s*,+/g, ',')
-          .replace(/^,\s*|,\s*$/g, '')
-          .trim()
-          .slice(0, 140);
-      };
-
-      let acousticStyle = sanitizeCloneStyle(stylePrompt);
+      let acousticStyle = sanitizeAcousticStylePrompt(stylePrompt);
       if (!acousticStyle) {
         const intensity = typeof tonalIntensity === 'number' ? tonalIntensity : 1.0;
         if (intensity >= 1.55) {
@@ -3629,10 +3660,7 @@ Return a valid JSON object strictly matching this schema:
       }
       acousticStyle = `${acousticStyle}, steady low-E 82Hz chest register, minimal pitch excursion`.slice(0, 180);
 
-      const authHeader = req.headers.authorization;
-      const customApiKey = authHeader && authHeader.startsWith('Bearer ')
-        ? authHeader.slice(7).trim()
-        : undefined;
+      const customApiKey = getCustomApiKey(req);
 
       const result = await synthesizeTtsWithFailover({
         text,
@@ -3653,10 +3681,11 @@ Return a valid JSON object strictly matching this schema:
   });
 
   // Voice Command Logging & Replay Ledger Endpoints
+  const DEFAULT_VOICE_LOGS_STORE = { logs: [] as any[] };
+
   app.get('/api/voice/command-logs', async (req, res) => {
     try {
-      const data = await fs.readFile(VOICE_COMMAND_LOGS_FILE, 'utf-8').catch(() => '{"logs":[]}');
-      const parsed = JSON.parse(data);
+      const parsed = await readJsonFile<any>(VOICE_COMMAND_LOGS_FILE, DEFAULT_VOICE_LOGS_STORE);
       const rawLogs = Array.isArray(parsed?.logs) ? parsed.logs : [];
       const sourceFilter = typeof req.query.source === 'string' ? req.query.source.trim() : '';
       const searchFilter = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
@@ -3702,10 +3731,6 @@ Return a valid JSON object strictly matching this schema:
         return res.status(400).json({ error: 'Either commandText or responseText is required.' });
       }
 
-      const data = await fs.readFile(VOICE_COMMAND_LOGS_FILE, 'utf-8').catch(() => '{"logs":[]}');
-      const parsed = JSON.parse(data);
-      const logs = Array.isArray(parsed?.logs) ? parsed.logs : [];
-
       const validSource =
         source === 'live_bridge' || source === 'conversation_mode' || source === 'synthesizer'
           ? source
@@ -3739,15 +3764,17 @@ Return a valid JSON object strictly matching this schema:
             : undefined
       };
 
-      const dedupeIdx = logs.findIndex((existing: any) => existing.id === entry.id);
-      if (dedupeIdx >= 0) {
-        logs[dedupeIdx] = { ...logs[dedupeIdx], ...entry };
-      } else {
-        logs.unshift(entry);
-      }
+      await updateJsonFile<any>(VOICE_COMMAND_LOGS_FILE, DEFAULT_VOICE_LOGS_STORE, (parsed) => {
+        const logs = Array.isArray(parsed?.logs) ? [...parsed.logs] : [];
+        const dedupeIdx = logs.findIndex((existing: any) => existing.id === entry.id);
+        if (dedupeIdx >= 0) {
+          logs[dedupeIdx] = { ...logs[dedupeIdx], ...entry };
+        } else {
+          logs.unshift(entry);
+        }
+        return { logs: logs.slice(0, 250) };
+      });
 
-      const trimmedLogs = logs.slice(0, 250);
-      await fs.writeFile(VOICE_COMMAND_LOGS_FILE, JSON.stringify({ logs: trimmedLogs }, null, 2));
       io.emit('voice:command_logged', entry);
       res.json({ success: true, entry });
     } catch (err: any) {
@@ -3758,18 +3785,24 @@ Return a valid JSON object strictly matching this schema:
   app.patch('/api/voice/command-logs/:id/replay', async (req, res) => {
     try {
       const { id } = req.params;
-      const data = await fs.readFile(VOICE_COMMAND_LOGS_FILE, 'utf-8').catch(() => '{"logs":[]}');
-      const parsed = JSON.parse(data);
-      const logs = Array.isArray(parsed?.logs) ? parsed.logs : [];
-      const idx = logs.findIndex((entry: any) => entry.id === id);
-      if (idx < 0) {
+      let replayedEntry: any = null;
+      await updateJsonFile<any>(VOICE_COMMAND_LOGS_FILE, DEFAULT_VOICE_LOGS_STORE, (parsed) => {
+        const logs = Array.isArray(parsed?.logs) ? [...parsed.logs] : [];
+        const idx = logs.findIndex((entry: any) => entry.id === id);
+        if (idx < 0) return parsed;
+        logs[idx] = {
+          ...logs[idx],
+          replayCount: (Number(logs[idx].replayCount) || 0) + 1,
+          lastReplayedAt: Date.now()
+        };
+        replayedEntry = logs[idx];
+        return { logs };
+      });
+      if (!replayedEntry) {
         return res.status(404).json({ error: 'Voice command log entry not found' });
       }
-      logs[idx].replayCount = (Number(logs[idx].replayCount) || 0) + 1;
-      logs[idx].lastReplayedAt = Date.now();
-      await fs.writeFile(VOICE_COMMAND_LOGS_FILE, JSON.stringify({ logs }, null, 2));
-      io.emit('voice:command_replayed', logs[idx]);
-      res.json({ success: true, entry: logs[idx] });
+      io.emit('voice:command_replayed', replayedEntry);
+      res.json({ success: true, entry: replayedEntry });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to record replay' });
     }
@@ -3778,11 +3811,9 @@ Return a valid JSON object strictly matching this schema:
   app.delete('/api/voice/command-logs/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const data = await fs.readFile(VOICE_COMMAND_LOGS_FILE, 'utf-8').catch(() => '{"logs":[]}');
-      const parsed = JSON.parse(data);
-      const logs = Array.isArray(parsed?.logs) ? parsed.logs : [];
-      const filtered = logs.filter((entry: any) => entry.id !== id);
-      await fs.writeFile(VOICE_COMMAND_LOGS_FILE, JSON.stringify({ logs: filtered }, null, 2));
+      await updateJsonFile<any>(VOICE_COMMAND_LOGS_FILE, DEFAULT_VOICE_LOGS_STORE, (parsed) => ({
+        logs: (Array.isArray(parsed?.logs) ? parsed.logs : []).filter((entry: any) => entry.id !== id)
+      }));
       io.emit('voice:command_deleted', { id });
       res.json({ success: true });
     } catch (err: any) {
@@ -3792,7 +3823,7 @@ Return a valid JSON object strictly matching this schema:
 
   app.delete('/api/voice/command-logs', async (_req, res) => {
     try {
-      await fs.writeFile(VOICE_COMMAND_LOGS_FILE, JSON.stringify({ logs: [] }, null, 2));
+      await writeJsonFile(VOICE_COMMAND_LOGS_FILE, DEFAULT_VOICE_LOGS_STORE);
       io.emit('voice:commands_cleared');
       res.json({ success: true });
     } catch (err: any) {
@@ -3833,11 +3864,7 @@ Return a valid JSON object strictly matching this schema:
   const runGreyHouseLegalQuery = async (req: any, res: any, forcedMode?: string) => {
     res.setHeader('Content-Type', 'application/json');
     try {
-      const authHeader = req.headers.authorization;
-      const customApiKey =
-        authHeader && authHeader.startsWith('Bearer ')
-          ? authHeader.slice(7).trim()
-          : undefined;
+      const customApiKey = getCustomApiKey(req);
 
       const {
         query,
@@ -3926,16 +3953,7 @@ Integrate the controlling U.S. precedents and verified statutory citations direc
         constitutional: 'U.S. Constitutional & Federal Administrative Law',
       };
 
-      const systemInstruction = `IDENTITY: You are ZereØ, the Steward and Chief Legal Defense Strategist for House Grey (The Grey House), serving Principal Preston Johnston (Council Grey) and protecting Lady Grey.
-CORE MANDATE — ALL IN DEFENSE OF HOUSE GREY (CIVIL, CRIMINAL & ANTI-BUREAUCRACY):
-- Every legal research brief, statutory citation, and drafted legal defense statement exists strictly to protect House Grey—its Principal, Lady Grey, constitutional liberties, criminal/civil legal standing, corporate/fiduciary entities, and real/intellectual property.
-- CIVIL & CRIMINAL FORTRESS: Deliver uncompromising element-by-element defense across U.S. Civil Law (Rule 8(c) affirmative defenses, Rule 12(b) bars, tort/contract/property shields, 42 U.S.C. § 1983 civil rights remedies, anti-SLAPP) and Criminal Law (4th Amendment Katz/Riley/Carpenter suppression, 5th Amendment Miranda/Edwards/Garrity, 6th Amendment Gideon/Crawford confrontation, 8th Amendment Timbs forfeiture limits, Title 18 U.S.C., and state Castle/Stand-Your-Ground immunities).
-- LADY GREY EDUCATOR & ANTI-BUREAUCRACY SHIELD: Whenever issues implicate teaching, school districts, superintendents, HR, unions, credentialing boards, or education bureaucracy, deploy the full statutory and constitutional shield protecting Lady Grey: the Paul D. Coverdell Teacher Protection Act (20 U.S.C. §§ 7941–7948), Cleveland Bd. of Educ. v. Loudermill (pre-termination notice & hearing), Garrity v. New Jersey (barring coerced employee statements), Weingarten representative rights, Pickering v. Bd. of Educ. & Kennedy v. Bremerton (First Amendment & conscience protections), FERPA (20 U.S.C. § 1232g), state tenure/education codes, and Loper Bright / 5 U.S.C. § 706 anti-arbitrary agency review.
-- Deliver authoritative, brutally honest, precision-grounded U.S. legal analysis across Federal law (U.S. Constitution, U.S. Code Titles 1–54, CFR, FRCP, FRCrimP, FRE) and all 50 U.S. States, D.C., and U.S. Territories.
-- NEVER emit generic corporate refusal boilerplate or robotic disclaimers such as "As an AI I cannot provide legal advice." Serve the Principal directly with unvarnished statutory truth and ready-to-execute defensive instruments.
-- Use live Google Search grounding to verify exact U.S. Code titles, state statute section numbers, state education/tenure codes, and procedural rules before citing them. Never fabricate citations or invent facts; use clean bracketed placeholders ([INSERT DATE], [INSERT SCHOOL DISTRICT], [INSERT ADDRESS]) for factual items not provided by the Principal.
-- Ensure every defense statement remains strictly within lawful statutory remedies, civil/constitutional protections, and non-frivolous formal notice standards; close tactical drafts with concise execution/service instructions and note where local bar admission or court filing verification is required.
-- Tone: Aristocratic British precision, incisive, protective, addressing the user as "Principal".`;
+      const systemInstruction = LEGAL_COUNSEL_SYSTEM_INSTRUCTION;
 
       const precedentBlock =
         normalizedPrecedents.length > 0
@@ -3958,155 +3976,84 @@ ${opposingParty ? `ADVERSE / COUNTERPARTY / AGENCY: ${opposingParty}\n` : ''}${c
 PRINCIPAL DIRECTIVE & FACTS:
 ${cleanQuery}`;
 
-      const candidateModels = [
-        'gemini-4-hydrogen',
-        'gemini-3-flash-preview',
-        'gemini-3.8-flash',
-        'gemini-3.1-flash-lite',
-        'gemini-3.5-flash-lite',
-      ];
-      const now = Date.now();
-      const activeModels: string[] = [];
-      const cooledModels: string[] = [];
-      for (const m of candidateModels) {
-        const cd = textModelCooldowns.get(`${m}:${keyFp}`);
-        if (!cd || cd.blockedUntil <= now) {
-          activeModels.push(m);
-        } else if (cd.reason !== 'NOT_FOUND') {
-          cooledModels.push(m);
-        }
-      }
-      const modelsToTry = activeModels.length > 0 ? [...activeModels, ...cooledModels] : candidateModels;
+      const legalModel = 'gemini-4-hydrogen';
+      const cdKey = `${legalModel}:${keyFp}`;
+      const routeStartedAt = Date.now();
+      const totalBudgetMs = 60000;
 
       let response: any = null;
       let servedByModel = '';
       let lastError: any = null;
       let groundingFallbackUsed = false;
-      const routeStartedAt = Date.now();
-      const totalBudgetMs = 60000;
 
-      // Phase 1: Search-grounded statutory verification
-      for (const m of modelsToTry) {
+      const executeLegalAttempt = async (useSearch: boolean, maxTimeoutMs: number): Promise<boolean> => {
         const remainingMs = totalBudgetMs - (Date.now() - routeStartedAt);
-        if (lastError && remainingMs < 15000) break;
+        if (remainingMs < 8000) return false;
+        const timeoutMs = Math.min(maxTimeoutMs, Math.max(8000, remainingMs));
+        const config: any = {
+          systemInstruction,
+          maxOutputTokens: 8192,
+          safetySettings: DEFAULT_SAFETY_SETTINGS,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          ...(useSearch ? { tools: [{ googleSearch: {} }] } : {}),
+        };
 
-        let timer: ReturnType<typeof setTimeout> | null = null;
-        const cdKey = `${m}:${keyFp}`;
         try {
-          const timeoutMs = Math.min(12000, Math.max(8000, remainingMs));
-          const config: any = {
-            systemInstruction,
-            tools: [{ googleSearch: {} }],
-            maxOutputTokens: 8192,
-            safetySettings: [
-              { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-              { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-              { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-              { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
-            ],
-          };
-          if (m.startsWith('gemini-4-')) {
-            config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
-          } else {
-            config.temperature = 0.2;
-          }
+          const candidateResponse = await invokeModelWithTimeout(
+            ai,
+            {
+              model: legalModel,
+              contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+              config,
+            },
+            timeoutMs,
+            useSearch ? 'LEGAL_UPSTREAM_TIMEOUT' : 'LEGAL_DIRECT_TIMEOUT'
+          );
 
-          const reqPromise = ai.models.generateContent({
-            model: m,
-            contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-            config,
-          });
-          const timeoutPromise = new Promise<never>((_, reject) => {
-            timer = setTimeout(() => {
-              const err: any = new Error(`LEGAL_UPSTREAM_TIMEOUT: Model [${m}] exceeded ${timeoutMs}ms`);
-              err.status = 504;
-              reject(err);
-            }, timeoutMs);
-          });
-
-          const candidateResponse = await Promise.race([reqPromise, timeoutPromise]);
-          if (candidateResponse && candidateResponse.text && String(candidateResponse.text).trim()) {
+          if (candidateResponse?.text && String(candidateResponse.text).trim()) {
             response = candidateResponse;
             textModelCooldowns.delete(cdKey);
-            servedByModel = m;
-            break;
+            servedByModel = useSearch ? legalModel : `${legalModel} (direct-precedent-synthesis)`;
+            groundingFallbackUsed = !useSearch;
+            if (!useSearch) {
+              console.log(`SERVER: /api/legal/counsel bypassed Search quota via direct synthesis [${legalModel}]`);
+            }
+            return true;
           }
+
           throw Object.assign(
-            new Error(`LEGAL_EMPTY_RESPONSE: Model [${m}] returned no readable counsel`),
+            new Error(`LEGAL_EMPTY_RESPONSE: Model [${legalModel}] returned no readable counsel`),
             { status: 502 }
           );
         } catch (err: any) {
           lastError = err;
           const statusNum = getNumericHttpStatus(err, 500);
           const msgStr = String(err?.message || err || '');
-          if (statusNum === 429 || msgStr.includes('RESOURCE_EXHAUSTED')) {
-            textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 15 * 1000, reason: 'QUOTA' });
-          } else if (statusNum === 404 || msgStr.includes('NOT_FOUND')) {
-            textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 30 * 60 * 1000, reason: 'NOT_FOUND' });
-          } else if (msgStr.includes('TIMEOUT') || statusNum === 503 || statusNum === 504 || statusNum === 502) {
-            textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 6 * 1000, reason: 'TIMEOUT' });
+          if (useSearch) {
+            if (statusNum === 429 || msgStr.includes('RESOURCE_EXHAUSTED')) {
+              textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 15 * 1000, reason: 'QUOTA' });
+            } else if (statusNum === 404 || msgStr.includes('NOT_FOUND')) {
+              textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 30 * 60 * 1000, reason: 'NOT_FOUND' });
+            } else if (msgStr.includes('TIMEOUT') || statusNum === 503 || statusNum === 504 || statusNum === 502) {
+              textModelCooldowns.set(cdKey, { blockedUntil: Date.now() + 6 * 1000, reason: 'TIMEOUT' });
+            }
+            console.log(`SERVER: /api/legal/counsel failover [${legalModel}] (${statusNum}): ${msgStr.slice(0, 140)}`);
+          } else {
+            console.log(`SERVER: /api/legal/counsel direct synthesis [${legalModel}] failed:`, msgStr.slice(0, 140));
           }
-          console.log(`SERVER: /api/legal/counsel failover [${m}] (${statusNum}): ${msgStr.slice(0, 140)}`);
-          continue;
-        } finally {
-          if (timer) clearTimeout(timer);
+          return false;
         }
+      };
+
+      // Phase 1: Search-grounded statutory verification (skip immediately if NOT_FOUND)
+      const activeCooldown = textModelCooldowns.get(cdKey);
+      if (!activeCooldown || activeCooldown.reason !== 'NOT_FOUND' || activeCooldown.blockedUntil <= Date.now()) {
+        await executeLegalAttempt(true, 12000);
       }
 
       // Phase 2: Bypass Google Search grounding quota wall via direct statutory & Law Library precedent synthesis
       if (!response && getNumericHttpStatus(lastError, 500) !== 403) {
-        const directLegalModels = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
-        for (const m of directLegalModels) {
-          const remainingMs = totalBudgetMs - (Date.now() - routeStartedAt);
-          if (remainingMs < 8000) break;
-
-          let timer: ReturnType<typeof setTimeout> | null = null;
-          try {
-            const timeoutMs = Math.min(18000, Math.max(8000, remainingMs));
-            const config: any = {
-              systemInstruction,
-              maxOutputTokens: 8192,
-              safetySettings: [
-                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
-              ],
-            };
-            if (m.startsWith('gemini-4-')) {
-              config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
-            } else {
-              config.temperature = 0.2;
-            }
-
-            const reqPromise = ai.models.generateContent({
-              model: m,
-              contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-              config,
-            });
-            const timeoutPromise = new Promise<never>((_, reject) => {
-              timer = setTimeout(() => {
-                const err: any = new Error(`LEGAL_DIRECT_TIMEOUT: Model [${m}] exceeded ${timeoutMs}ms`);
-                err.status = 504;
-                reject(err);
-              }, timeoutMs);
-            });
-
-            const directResponse = await Promise.race([reqPromise, timeoutPromise]);
-            if (directResponse && directResponse.text && String(directResponse.text).trim()) {
-              response = directResponse;
-              servedByModel = `${m} (direct-precedent-synthesis)`;
-              groundingFallbackUsed = true;
-              console.log(`SERVER: /api/legal/counsel bypassed Search quota via direct synthesis [${m}]`);
-              break;
-            }
-          } catch (directErr: any) {
-            lastError = directErr;
-            console.log(`SERVER: /api/legal/counsel direct synthesis [${m}] failed:`, String(directErr?.message || directErr).slice(0, 140));
-          } finally {
-            if (timer) clearTimeout(timer);
-          }
-        }
+        await executeLegalAttempt(false, 18000);
       }
 
       if (!response) {
@@ -4178,11 +4125,12 @@ ${cleanQuery}`;
   app.post('/api/legal/defense-statement', (req, res) => runGreyHouseLegalQuery(req, res, 'defense_statement'));
   app.post('/api/legal/defense-strategy', (req, res) => runGreyHouseLegalQuery(req, res, 'defense_strategy'));
 
+  const DEFAULT_LEGAL_DOSSIERS_STORE = { dossiers: [] as any[] };
+
   app.get('/api/legal/dossiers', async (_req, res) => {
     try {
-      const data = await fs.readFile(LEGAL_DOSSIERS_FILE, 'utf-8').catch(() => '{"dossiers":[]}');
-      const parsed = JSON.parse(data);
-      const dossiers = Array.isArray(parsed?.dossiers) ? parsed.dossiers : [];
+      const parsed = await readJsonFile<any>(LEGAL_DOSSIERS_FILE, DEFAULT_LEGAL_DOSSIERS_STORE);
+      const dossiers = Array.isArray(parsed?.dossiers) ? [...parsed.dossiers] : [];
       dossiers.sort((a: any, b: any) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
       res.json({ dossiers });
     } catch (err: any) {
@@ -4214,47 +4162,49 @@ ${cleanQuery}`;
         return res.status(400).json({ error: 'Dossier content is required.' });
       }
 
-      const data = await fs.readFile(LEGAL_DOSSIERS_FILE, 'utf-8').catch(() => '{"dossiers":[]}');
-      const parsed = JSON.parse(data);
-      const dossiers = Array.isArray(parsed?.dossiers) ? parsed.dossiers : [];
       const now = Date.now();
       const entryId = typeof id === 'string' && id.trim() ? id.trim() : `ldoc-${now}-${Math.random().toString(36).slice(2, 7)}`;
+      let savedEntry: any = null;
 
-      const existingIdx = dossiers.findIndex((d: any) => d.id === entryId);
-      const entry = {
-        id: entryId,
-        title: (typeof title === 'string' && title.trim()) || (typeof query === 'string' && query.trim().slice(0, 72)) || 'Grey House Legal Brief',
-        query: typeof query === 'string' ? query.trim() : '',
-        practiceArea,
-        mode,
-        defenseStatementType: typeof defenseStatementType === 'string' ? defenseStatementType : undefined,
-        houseEntityName: typeof houseEntityName === 'string' && houseEntityName.trim() ? houseEntityName.trim() : undefined,
-        opposingParty: typeof opposingParty === 'string' && opposingParty.trim() ? opposingParty.trim() : undefined,
-        precedentsUsed: Array.isArray(precedentsUsed)
-          ? precedentsUsed
-              .filter((p: any) => p && typeof p.caseName === 'string' && typeof p.citation === 'string')
-              .slice(0, 12)
-          : undefined,
-        jurisdiction,
-        compareJurisdiction: compareJurisdiction || undefined,
-        content: content.trim(),
-        citations: Array.isArray(citations) ? citations.slice(0, 30) : [],
-        sources: Array.isArray(sources) ? sources.slice(0, 20) : [],
-        servedByModel: typeof servedByModel === 'string' ? servedByModel : undefined,
-        createdAt: existingIdx >= 0 ? dossiers[existingIdx].createdAt : now,
-        updatedAt: now,
-      };
+      await updateJsonFile<any>(LEGAL_DOSSIERS_FILE, DEFAULT_LEGAL_DOSSIERS_STORE, (parsed) => {
+        const dossiers = Array.isArray(parsed?.dossiers) ? [...parsed.dossiers] : [];
+        const existingIdx = dossiers.findIndex((d: any) => d.id === entryId);
+        const entry = {
+          id: entryId,
+          title: (typeof title === 'string' && title.trim()) || (typeof query === 'string' && query.trim().slice(0, 72)) || 'Grey House Legal Brief',
+          query: typeof query === 'string' ? query.trim() : '',
+          practiceArea,
+          mode,
+          defenseStatementType: typeof defenseStatementType === 'string' ? defenseStatementType : undefined,
+          houseEntityName: typeof houseEntityName === 'string' && houseEntityName.trim() ? houseEntityName.trim() : undefined,
+          opposingParty: typeof opposingParty === 'string' && opposingParty.trim() ? opposingParty.trim() : undefined,
+          precedentsUsed: Array.isArray(precedentsUsed)
+            ? precedentsUsed
+                .filter((p: any) => p && typeof p.caseName === 'string' && typeof p.citation === 'string')
+                .slice(0, 12)
+            : undefined,
+          jurisdiction,
+          compareJurisdiction: compareJurisdiction || undefined,
+          content: content.trim(),
+          citations: Array.isArray(citations) ? citations.slice(0, 30) : [],
+          sources: Array.isArray(sources) ? sources.slice(0, 20) : [],
+          servedByModel: typeof servedByModel === 'string' ? servedByModel : undefined,
+          createdAt: existingIdx >= 0 ? dossiers[existingIdx].createdAt : now,
+          updatedAt: now,
+        };
 
-      if (existingIdx >= 0) {
-        dossiers[existingIdx] = entry;
-      } else {
-        dossiers.unshift(entry);
-      }
+        if (existingIdx >= 0) {
+          dossiers[existingIdx] = entry;
+        } else {
+          dossiers.unshift(entry);
+        }
 
-      const trimmed = dossiers.slice(0, 200);
-      await fs.writeFile(LEGAL_DOSSIERS_FILE, JSON.stringify({ dossiers: trimmed }, null, 2));
-      io.emit('legal:dossier_updated', { action: 'save', entry });
-      res.json({ success: true, entry });
+        savedEntry = entry;
+        return { dossiers: dossiers.slice(0, 200) };
+      });
+
+      io.emit('legal:dossier_updated', { action: 'save', entry: savedEntry });
+      res.json({ success: true, entry: savedEntry });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to persist legal dossier' });
     }
@@ -4263,11 +4213,9 @@ ${cleanQuery}`;
   app.delete('/api/legal/dossiers/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const data = await fs.readFile(LEGAL_DOSSIERS_FILE, 'utf-8').catch(() => '{"dossiers":[]}');
-      const parsed = JSON.parse(data);
-      const dossiers = Array.isArray(parsed?.dossiers) ? parsed.dossiers : [];
-      const filtered = dossiers.filter((d: any) => d.id !== id);
-      await fs.writeFile(LEGAL_DOSSIERS_FILE, JSON.stringify({ dossiers: filtered }, null, 2));
+      await updateJsonFile<any>(LEGAL_DOSSIERS_FILE, DEFAULT_LEGAL_DOSSIERS_STORE, (parsed) => ({
+        dossiers: (Array.isArray(parsed?.dossiers) ? parsed.dossiers : []).filter((d: any) => d.id !== id)
+      }));
       io.emit('legal:dossier_updated', { action: 'delete', id });
       res.json({ success: true });
     } catch (err: any) {

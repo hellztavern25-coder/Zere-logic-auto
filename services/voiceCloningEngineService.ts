@@ -1,3 +1,4 @@
+// [TAG: 11]
 /**
  * ZEREO STEWARD INTELLIGENCE - VOICE CLONING ENGINE UTILITY
  * 
@@ -23,12 +24,12 @@ import {
   STTAnalysisResult
 } from '../types';
 import { jeremyIronsVoice } from './jeremyIronsVoiceService';
+import { AUDITION_LINE_1911 } from './stewardIdentity';
 import {
   clampLowEPitchRate,
   clampLowESpeechPitch,
   LOW_E2_HZ
 } from './voiceCalibration';
-import { generateTTS, decodeBase64, decodeAudioData } from './geminiService';
 
 export const CANONICAL_IRONS_TONAL_MODEL: PersistentTonalModel = {
   id: 'clone-jeremy-irons-canonical',
@@ -40,10 +41,10 @@ export const CANONICAL_IRONS_TONAL_MODEL: PersistentTonalModel = {
   sourceClipIds: ['clip-irons-1', 'clip-irons-2', 'clip-irons-3'],
   sourceClipNames: ['1911s Loaded & Silver Polished', 'Screen Share Diagnostic Quip', 'Logic as Weapon Axiom'],
   sttAnalysis: {
-    rawTranscript: 'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your command.',
+    rawTranscript: AUDITION_LINE_1911,
     confidence: 0.98,
     wordCount: 21,
-    phoneticTransliteration: 'The 1911s are loaded and the silver is polished to a lethal sheen, Principal. The Logic Monster is at your command.',
+    phoneticTransliteration: AUDITION_LINE_1911,
     detectedAccent: 'british_aristocrat',
     keyPhonemesDetected: ['non-rhotic r', 'lengthened open vowels', 'crisp dental t/d plosives', 'drawn diphthongs'],
     elocutionNotes: ['Deliberate pause after Principal address', 'Aristocratic dry iron cadence', 'Oxford consonant bite']
@@ -715,31 +716,6 @@ class VoiceCloningEngineService {
     };
   }
 
-  // =========================================================================
-  // TEST SYNTHESIS WITH PERSISTENT TONAL MODEL
-  // =========================================================================
-
-  public async synthesizeWithModel(
-    text: string,
-    model?: PersistentTonalModel
-  ): Promise<AudioBuffer | null> {
-    const targetModel = model || this.getActiveModel() || CANONICAL_IRONS_TONAL_MODEL;
-    const stylePrompt = targetModel.systemPromptStyle;
-
-    try {
-      // 1. Generate primary TTS via Gemini TTS using the model's systemPromptStyle
-      const audioBuffer = await generateTTS(
-        text,
-        'Charon',
-        stylePrompt,
-        targetModel.sttAnalysis.detectedAccent || 'british_aristocrat'
-      );
-      return audioBuffer;
-    } catch (err) {
-      console.warn('Gemini TTS with model failed:', err);
-      return null;
-    }
-  }
 
   public subscribe(cb: (models: PersistentTonalModel[], active: PersistentTonalModel | null) => void): () => void {
     this.subscribers.add(cb);

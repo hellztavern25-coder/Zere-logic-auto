@@ -1,7 +1,7 @@
+// [TAG: 11]
 import { VoiceTonalPreset, PresetPersonaType, PersistentTonalModel, VoiceDSPConfig } from '../types';
 import { jeremyIronsVoice } from './jeremyIronsVoiceService';
 import { voiceCloningEngine, CANONICAL_IRONS_TONAL_MODEL } from './voiceCloningEngineService';
-import { markTtsQuotaExhausted } from './geminiService';
 
 const PRESETS_STORAGE_KEY = 'zere0_voice_presets_v1';
 const ACTIVE_PRESET_KEY = 'zere0_voice_active_preset_id_v1';
@@ -210,7 +210,7 @@ export const FACTORY_VOICE_PRESETS: VoiceTonalPreset[] = [
   }
 ];
 
-class VoicePresetManagerService {
+class VoicePresetStore {
   private presets: VoiceTonalPreset[] = [];
   private activePresetId: string = 'preset-iron-adaptive-v1';
   private listeners: Set<(presets: VoiceTonalPreset[], active: VoiceTonalPreset) => void> = new Set();
@@ -539,52 +539,23 @@ class VoicePresetManagerService {
   }
 
   /**
-   * Quick audition of a preset with speech synthesis
+   * Quick audition of a preset through the single unified speak path
    */
   public async auditionPreset(
     preset: VoiceTonalPreset,
     samplePhrase?: string
   ): Promise<void> {
     const text = samplePhrase || `Preset ${preset.name} active. Systems nominal with zero logical drift, Principal.`;
-    const dspConfig = {
+    await jeremyIronsVoice.speak(text, {
       pitchRate: preset.dspConfig.pitchMultiplier,
       gravelAmount: preset.dspConfig.gravelSaturation,
       chestResonanceDb: preset.dspConfig.chestResonanceDb,
       articulationDb: preset.dspConfig.articulationBoostDb,
-      speechRate: preset.dspConfig.speechRate
-    };
-
-    try {
-      // First try server synthesis
-      const res = await fetch('/api/voice/clone/synthesize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          modelId: preset.sourceModelId,
-          customPromptStyle: preset.systemPromptDirective,
-          tonalIntensity: preset.tonalIntensity
-        })
-      });
-
-      const data = await res.json().catch(() => null);
-      if (res.status === 429 || data?.quotaExhausted) {
-        markTtsQuotaExhausted(data?.error, data?.retryAfterSeconds);
-      } else if (res.ok && data?.audioData) {
-        const played = await jeremyIronsVoice.playBase64Audio(
-          data.audioData,
-          dspConfig,
-          undefined,
-          undefined,
-          text
-        );
-        if (played) return;
-      }
-    } catch (_) {}
-
-    // Fallback to client synthesis with preset's exact DSP chain
-    await jeremyIronsVoice.speak(text, dspConfig);
+      speechRate: preset.dspConfig.speechRate,
+      stylePromptOverride: preset.systemPromptDirective
+    });
   }
 }
 
-export const voicePresetManager = new VoicePresetManagerService();
+export const voicePresetStore = new VoicePresetStore();
+export const voicePresetManager = voicePresetStore;

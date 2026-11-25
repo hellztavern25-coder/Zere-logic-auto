@@ -1,3 +1,4 @@
+// [TAG: 11]
 import { GoogleGenAI, Modality } from "@google/genai";
 import { GeminiModel } from "../types";
 
@@ -71,14 +72,21 @@ export const getApiKey = () => {
   return '';
 };
 
-export const testApiKey = async (): Promise<{ success: boolean; message: string }> => {
-  const localKey = typeof window !== 'undefined' ? localStorage.getItem('ZEREO_API_KEY') : null;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json'
-  };
-  if (localKey && localKey.trim() && !localKey.includes('***') && localKey !== 'undefined') {
-    headers['Authorization'] = `Bearer ${localKey.trim()}`;
+export function isRealKey(key: string | undefined): key is string {
+  return !!key && key.trim() !== '' && key !== 'undefined' && !key.includes('***') && key !== 'ZEREO_CORE_LINK';
+}
+
+export const getAuthHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const key = getApiKey();
+  if (isRealKey(key)) {
+    headers['Authorization'] = `Bearer ${key.trim()}`;
   }
+  return headers;
+};
+
+export const testApiKey = async (): Promise<{ success: boolean; message: string }> => {
+  const headers = getAuthHeaders();
 
   try {
     const res = await fetch('/api/gemini/test-key', {
@@ -241,13 +249,7 @@ export async function generateTTS(
     return null;
   }
 
-  const localKey = typeof window !== 'undefined' ? localStorage.getItem('ZEREO_API_KEY') : null;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json'
-  };
-  if (localKey && localKey.trim() && !localKey.includes('***') && localKey !== 'undefined') {
-    headers['Authorization'] = `Bearer ${localKey.trim()}`;
-  }
+  const headers = getAuthHeaders();
 
   try {
     const res = await fetch('/api/gemini/tts', {
@@ -293,13 +295,7 @@ export async function generateTTS(
 }
 
 export const safeGenerateContent = async (params: any) => {
-  const localKey = typeof window !== 'undefined' ? localStorage.getItem('ZEREO_API_KEY') : null;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json'
-  };
-  if (localKey && localKey.trim() && !localKey.includes('***') && localKey !== 'undefined') {
-    headers['Authorization'] = `Bearer ${localKey.trim()}`;
-  }
+  const headers = getAuthHeaders();
 
   const adjustedParams = { ...params };
   const toolsArr = Array.isArray(adjustedParams.config?.tools) ? adjustedParams.config.tools : [];
@@ -389,13 +385,7 @@ export interface GenerateArtResult {
 }
 
 export const generateDesiredArt = async (params: GenerateArtParams): Promise<GenerateArtResult> => {
-  const localKey = typeof window !== 'undefined' ? localStorage.getItem('ZEREO_API_KEY') : null;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json'
-  };
-  if (localKey && localKey.trim() && !localKey.includes('***') && localKey !== 'undefined') {
-    headers['Authorization'] = `Bearer ${localKey.trim()}`;
-  }
+  const headers = getAuthHeaders();
 
   const res = await fetch('/api/gemini/generate-art', {
     method: 'POST',

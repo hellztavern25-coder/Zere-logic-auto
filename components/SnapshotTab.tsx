@@ -1,3 +1,4 @@
+// [TAG: 11]
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
@@ -7,20 +8,9 @@ import {
 } from 'lucide-react';
 import { safeGenerateContent } from '../services/geminiService';
 import { GeminiModel } from '../types';
+import { SNAPSHOT_AUDIT_INSTRUCTION } from '../services/stewardIdentity';
 
-const SYSTEM_PROMPT = `IDENTITY: You are ZereØ, the Logic Monster — the Architect's lethal diagnostic intelligence.
-
-VISUAL ANALYSIS PROTOCOL:
-You have been fed a raw visual snapshot directly from the Principal's environment. Your task is to parse it with ruthless precision.
-
-Perform a complete Optical Intelligence Audit:
-1. **ANOMALY DETECTION** — Identify every error, warning, stack trace, exception, or malformed state visible.
-2. **STRUCTURAL ANALYSIS** — Assess layout distortions, DOM/UI hierarchy problems, rendering bugs, or misaligned components.
-3. **DIAGNOSTIC EXTRACTION** — Extract any log lines, error codes, status codes, or configuration values visible. Quote them verbatim.
-4. **ROOT CAUSE HYPOTHESIS** — Provide your primary hypothesis for what caused the observed state, with confidence rating.
-5. **SURGICAL REMEDIATION** — List precise, ordered remediation steps. No padding, no softening.
-
-Address the Principal exclusively. Operate with zero tolerance for ambiguity. If the image is a terminal, parse every line. If it is a UI, interrogate every pixel of interest. If it is a diagram, extract the topology. Raw, unfiltered system truth only.`;
+const SYSTEM_PROMPT = SNAPSHOT_AUDIT_INSTRUCTION;
 
 interface AnalysisResult {
   text: string;
@@ -51,7 +41,7 @@ const SnapshotTab: React.FC = () => {
         source: 'screen_snapshot',
         metadata: {
           prompt: result.directive,
-          model: GeminiModel.FLASH_PREVIEW,
+          model: GeminiModel.HYDROGEN,
           tags: ['snapshot', 'optical_audit', 'screen_capture']
         },
         timestamp: result.timestamp
@@ -154,7 +144,7 @@ const SnapshotTab: React.FC = () => {
     setError(null);
     try {
       const response = await safeGenerateContent({
-        model: GeminiModel.FLASH_PREVIEW,
+        model: GeminiModel.HYDROGEN,
         contents: [{
           role: 'user',
           parts: [

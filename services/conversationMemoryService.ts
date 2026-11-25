@@ -1,3 +1,4 @@
+// [TAG: 11]
 import { ChatMessage, ChatThread } from '../types';
 import { ClaudeTurnMessage } from './anthropicService';
 
@@ -39,7 +40,7 @@ function extractKeywords(text: string): string[] {
   return unique;
 }
 
-function cleanSnippet(text: string, maxLen: number): string {
+export function cleanSnippet(text: string, maxLen: number): string {
   if (!text) return '';
   const flattened = text
     .replace(/data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+/g, '[image]')
@@ -50,14 +51,83 @@ function cleanSnippet(text: string, maxLen: number): string {
   return flattened.slice(0, maxLen - 1).trimEnd() + '…';
 }
 
-function isNoisyMemory(m: StoredMemory): boolean {
-  const c = (m.content || '').toLowerCase();
+export function isNoisyMemory(m: Partial<StoredMemory> | null | undefined): boolean {
+  const c = String(m?.content || '').toLowerCase();
+  if (!c.trim()) return true;
   return (
     c.includes('daily quota for this api key has been reached') ||
     c.includes('processing arrays are temporarily exhausted') ||
     c.includes('upstream neural routing latency spike') ||
     c.includes('thermodynamic anomaly has interrupted reasoning')
   );
+}
+
+export interface CompactThreadRecall {
+  id?: string;
+  title: string;
+  timestamp?: number;
+  exchanges: Array<{ role: 'Principal' | 'ZereØ'; text: string }>;
+}
+
+export function extractThreadExcerpt(
+  thread: Partial<ChatThread>,
+  maxTextLen: number = 170
+): CompactThreadRecall | null {
+  const validMsgs = Array.isArray(thread?.messages)
+    ? thread.messages.filter((m) => typeof m?.text === 'string' && m.text.trim().length > 0 && !isTransientErrorMessage(m))
+    : [];
+  if (validMsgs.length === 0) return null;
+
+  const picks =
+    validMsgs.length <= 4
+      ? validMsgs
+      : [validMsgs[0], validMsgs[1], ...validMsgs.slice(-2)];
+
+  return {
+    id: thread.id,
+    title: thread.title || 'Dialogue',
+    timestamp: thread.timestamp,
+    exchanges: picks.map((m) => ({
+      role: m.role === 'user' ? 'Principal' : 'ZereØ',
+      text: cleanSnippet(m.text, maxTextLen),
+    })),
+  };
+}
+
+export function buildRecallSummaryPayload(
+  memories: StoredMemory[],
+  threads: ChatThread[]
+): {
+  memories: Array<{
+    id: string;
+    type: string;
+    title: string;
+    content: string;
+    timestamp: string | number;
+  }>;
+  recentThreads: CompactThreadRecall[];
+} {
+  const compactThreads = (Array.isArray(threads) ? threads : [])
+    .filter((t) => Array.isArray(t?.messages) && t.messages.length > 0)
+    .slice(0, 8)
+    .map((t) => extractThreadExcerpt(t, 180))
+    .filter((t): t is CompactThreadRecall => Boolean(t));
+
+  const compactMemories = (Array.isArray(memories) ? memories : [])
+    .filter((m) => !isNoisyMemory(m))
+    .slice(0, 20)
+    .map((m) => ({
+      id: m.id,
+      type: m.type,
+      title: m.title,
+      content: cleanSnippet(String(m.content || ''), 260),
+      timestamp: m.timestamp,
+    }));
+
+  return {
+    memories: compactMemories,
+    recentThreads: compactThreads,
+  };
 }
 
 export function isTransientErrorMessage(msg: ChatMessage): boolean {
@@ -252,8 +322,9 @@ export function buildCrossConversationRecallContext(params: {
 
   // 1. Score & select persistent memories
   const filteredMemories = memories.filter((m) => !isNoisyMemory(m));
-  const coreMemories = filteredMemories.filter((m) => m.type !== 'CONVERSATION_RECALL');
-  const episodicMemories = filteredMemories.filter((m) => m.type === 'CONVERSATION_RECALL');
+  const isEpisodic = (m: StoredMemory) => String(m.type || '').toUpperCase() === 'CONVERSATION_RECALL';
+  const coreMemories = filteredMemories.filter((m) => !isEpisodic(m));
+  const episodicMemories = filteredMemories.filter((m) => isEpisodic(m));
 
   const scoreText = (txt: string): number => {
     if (!txt || keywords.length === 0) return 0;
@@ -307,23 +378,17 @@ export function buildCrossConversationRecallContext(params: {
     .sort((a, b) => b.totalScore - a.totalScore)
     .slice(0, 5);
 
-  const threadDigests = scoredThreads.map(({ thread }) => {
-    const dateLabel = thread.timestamp
-      ? new Date(thread.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-      : 'Recent';
-    const userAndModel = (thread.messages || []).filter((m) => (m.text || '').trim().length > 0);
-    // Grab opening context + most recent 2 exchanges so both topic and conclusion are recalled
-    const picks: ChatMessage[] = [];
-    if (userAndModel.length <= 4) {
-      picks.push(...userAndModel);
-    } else {
-      picks.push(userAndModel[0], userAndModel[1], ...userAndModel.slice(-2));
-    }
-    const lines = picks.map(
-      (m) => `  ${m.role === 'user' ? 'Principal' : 'ZereØ'}: ${cleanSnippet(m.text, 170)}`
-    );
-    return `• [${thread.title || 'Dialogue'} • ${dateLabel}]\n${lines.join('\n')}`;
-  });
+  const threadDigests = scoredThreads
+    .map(({ thread }) => {
+      const excerpt = extractThreadExcerpt(thread, 170);
+      if (!excerpt) return null;
+      const dateLabel = thread.timestamp
+        ? new Date(thread.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+        : 'Recent';
+      const lines = excerpt.exchanges.map((ex) => `  ${ex.role}: ${ex.text}`);
+      return `• [${excerpt.title} • ${dateLabel}]\n${lines.join('\n')}`;
+    })
+    .filter((d): d is string => Boolean(d));
 
   const sections: string[] = [];
 
