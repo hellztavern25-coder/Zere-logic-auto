@@ -558,4 +558,3 @@ class VoicePresetStore {
 }
 
 export const voicePresetStore = new VoicePresetStore();
-export const voicePresetManager = voicePresetStore;

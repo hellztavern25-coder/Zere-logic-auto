@@ -1,5 +1,5 @@
 // [TAG: 11]
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useReducer } from 'react';
 import { 
   Sliders, 
   Volume2, 
@@ -37,9 +37,9 @@ export const VoiceModulationSelector: React.FC<VoiceModulationSelectorProps> = (
   onProfileSelect,
   className = ''
 }) => {
-  const [activeProfile, setActiveProfile] = useState<VoiceModulationProfile>(() => {
-    return currentProfile || jeremyIronsVoice.getLegacyProfile() || 'Jeremy-Irons-Signature';
-  });
+  const [, bumpVoiceStore] = useReducer((n: number) => n + 1, 0);
+  const activeProfile: VoiceModulationProfile =
+    currentProfile || jeremyIronsVoice.getLegacyProfile() || 'Jeremy-Irons-Signature';
 
   const [auditioningProfile, setAuditioningProfile] = useState<VoiceModulationProfile | null>(null);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -47,22 +47,13 @@ export const VoiceModulationSelector: React.FC<VoiceModulationSelectorProps> = (
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = jeremyIronsVoice.subscribe(({ legacyProfile }) => {
-      if (legacyProfile) {
-        setActiveProfile(legacyProfile);
-      }
+    const unsub = jeremyIronsVoice.subscribe(() => {
+      bumpVoiceStore();
     });
     return () => unsub();
   }, []);
 
-  useEffect(() => {
-    if (currentProfile) {
-      setActiveProfile(currentProfile);
-    }
-  }, [currentProfile]);
-
   const handleSelect = (profile: VoiceModulationProfile) => {
-    setActiveProfile(profile);
     jeremyIronsVoice.setProfile(profile);
     onProfileSelect?.(profile);
   };

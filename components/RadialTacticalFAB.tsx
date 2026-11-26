@@ -131,7 +131,7 @@ export const RadialTacticalFAB: React.FC<RadialTacticalFABProps> = ({
     if (typeof window !== 'undefined' && window.__CLEAR_ZEREO_AUDIT_BUFFER__) {
       const logs = window.__GET_ZEREO_AUDIT_LOGS__?.() || [];
       clearedCount = Math.max(clearedCount, logs.length);
-      window.__CLEAR_ZEREO_AUDIT_BUFFER__();
+      await window.__CLEAR_ZEREO_AUDIT_BUFFER__(false);
     }
 
     window.dispatchEvent(new CustomEvent('audit:cleared', { detail: { count: clearedCount } }));

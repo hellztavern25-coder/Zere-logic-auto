@@ -85,6 +85,11 @@ export const getAuthHeaders = (): Record<string, string> => {
   return headers;
 };
 
+export const hasServerGeminiKey = (): boolean => cachedConfig.hasGeminiKey !== false;
+
+export const hasActiveNeuralKey = (): boolean =>
+  Boolean(getAuthHeaders()['Authorization']) || hasServerGeminiKey();
+
 export const testApiKey = async (): Promise<{ success: boolean; message: string }> => {
   const headers = getAuthHeaders();
 
@@ -150,7 +155,11 @@ export const clearApiKey = () => {
 };
 
 export const getAI = () => {
-  const apiKey = getApiKey() || 'ZEREO_CORE_LINK';
+  const authHeader = getAuthHeaders()['Authorization'];
+  const apiKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  if (!isRealKey(apiKey)) {
+    throw new Error("A user-configured Gemini API key is required for direct browser SDK calls. Server-managed keys route through /api/* endpoints.");
+  }
   return new GoogleGenAI({ 
     apiKey,
     httpOptions: {

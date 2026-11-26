@@ -3197,76 +3197,256 @@ async function startServer() {
   const DEFAULT_VOICE_CLONES_STORE = { activeCloneId: 'clone-jeremy-irons-canonical', clones: [] as any[] };
   const DEFAULT_VOICE_PRESETS_STORE = { activePresetId: 'preset-iron-adaptive-v1', presets: [] as any[] };
 
-  app.get('/api/voice/profiles', async (req, res) => {
-    try {
-      const [parsed, canonicalBaseVoice] = await Promise.all([
-        readJsonFile<any>(VOICE_PROFILES_FILE, DEFAULT_VOICE_PROFILES_STORE),
-        getCanonicalBaseVoice(),
-      ]);
+  interface VoiceStoreCrudConfig {
+    basePath: string;
+    filePath: string;
+    defaultStore: Record<string, any>;
+    collectionKey: string;
+    activeKey: string;
+    fallbackActiveId: string;
+    idPrefix: string;
+    responseItemKey: string;
+    activeBodyKey: string;
+    syncIsActiveOnActivate?: boolean;
+    errors: {
+      load: string;
+      missingName: string;
+      save: string;
+      missingActiveId: string;
+      activate: string;
+      forbiddenDelete: string;
+      delete: string;
+    };
+    events: {
+      saved: string;
+      activated: string;
+      deleted: string;
+    };
+    transformOnRead?: (parsed: any) => Promise<any>;
+    prepareRecord?: (raw: any, id: string) => Promise<any>;
+    canDelete?: (id: string, parsed: any) => boolean;
+    formatSaveLog: (saved: any) => string;
+    activateLogPrefix: string;
+    deleteLogPrefix: string;
+  }
+
+  function registerVoiceStoreCrud(cfg: VoiceStoreCrudConfig) {
+    app.get(cfg.basePath, async (_req, res) => {
+      try {
+        const parsed = await readJsonFile<any>(cfg.filePath, cfg.defaultStore);
+        const result = cfg.transformOnRead ? await cfg.transformOnRead(parsed) : parsed;
+        res.json(result);
+      } catch {
+        res.status(500).json({ error: cfg.errors.load });
+      }
+    });
+
+    app.post(cfg.basePath, async (req, res) => {
+      try {
+        const raw = req.body;
+        if (!raw || !raw.name) {
+          return res.status(400).json({ error: cfg.errors.missingName });
+        }
+
+        const recordId = raw.id || `${cfg.idPrefix}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const savedRecord = cfg.prepareRecord
+          ? await cfg.prepareRecord(raw, recordId)
+          : { ...raw, id: recordId, updatedAt: Date.now() };
+
+        const updated = await updateJsonFile<any>(cfg.filePath, cfg.defaultStore, (parsed) => {
+          const items = Array.isArray(parsed?.[cfg.collectionKey]) ? [...parsed[cfg.collectionKey]] : [];
+          const existingIdx = items.findIndex((item: any) => item.id === recordId);
+          if (existingIdx >= 0) {
+            items[existingIdx] = savedRecord;
+          } else {
+            items.push(savedRecord);
+          }
+          return { ...parsed, [cfg.collectionKey]: items };
+        });
+
+        addDaemonLog('TASK', cfg.formatSaveLog(savedRecord));
+        io.emit(cfg.events.saved, savedRecord);
+        res.status(200).json({
+          success: true,
+          [cfg.responseItemKey]: savedRecord,
+          [cfg.activeKey]: updated[cfg.activeKey],
+        });
+      } catch {
+        res.status(500).json({ error: cfg.errors.save });
+      }
+    });
+
+    app.post(`${cfg.basePath}/active`, async (req, res) => {
+      try {
+        const targetId = req.body?.[cfg.activeBodyKey];
+        if (!targetId) return res.status(400).json({ error: cfg.errors.missingActiveId });
+
+        await updateJsonFile<any>(cfg.filePath, cfg.defaultStore, (parsed) => {
+          const next: any = {
+            ...parsed,
+            [cfg.activeKey]: targetId,
+          };
+          if (cfg.syncIsActiveOnActivate) {
+            const items = Array.isArray(parsed?.[cfg.collectionKey]) ? parsed[cfg.collectionKey] : [];
+            next[cfg.collectionKey] = items.map((item: any) => ({
+              ...item,
+              isActive: item.id === targetId,
+            }));
+          }
+          return next;
+        });
+        addDaemonLog('SYS', `${cfg.activateLogPrefix}: [${targetId}]`);
+        io.emit(cfg.events.activated, { [cfg.activeBodyKey]: targetId });
+        res.json({ success: true, [cfg.activeKey]: targetId });
+      } catch {
+        res.status(500).json({ error: cfg.errors.activate });
+      }
+    });
+
+    app.delete(`${cfg.basePath}/:id`, async (req, res) => {
+      try {
+        const { id } = req.params;
+        let forbidden = false;
+        const updated = await updateJsonFile<any>(cfg.filePath, cfg.defaultStore, (parsed) => {
+          if (cfg.canDelete && !cfg.canDelete(id, parsed)) {
+            forbidden = true;
+            return parsed;
+          }
+          const items = Array.isArray(parsed?.[cfg.collectionKey]) ? parsed[cfg.collectionKey] : [];
+          return {
+            ...parsed,
+            [cfg.collectionKey]: items.filter((item: any) => item.id !== id),
+            [cfg.activeKey]: parsed[cfg.activeKey] === id ? cfg.fallbackActiveId : parsed[cfg.activeKey],
+          };
+        });
+
+        if (forbidden) {
+          return res.status(403).json({ error: cfg.errors.forbiddenDelete });
+        }
+
+        addDaemonLog('TASK', `${cfg.deleteLogPrefix}: ${id}`);
+        io.emit(cfg.events.deleted, { id, [cfg.activeKey]: updated[cfg.activeKey] });
+        res.json({ success: true, [cfg.activeKey]: updated[cfg.activeKey] });
+      } catch {
+        res.status(500).json({ error: cfg.errors.delete });
+      }
+    });
+  }
+
+  registerVoiceStoreCrud({
+    basePath: '/api/voice/profiles',
+    filePath: VOICE_PROFILES_FILE,
+    defaultStore: DEFAULT_VOICE_PROFILES_STORE,
+    collectionKey: 'profiles',
+    activeKey: 'activeProfileId',
+    fallbackActiveId: 'iron-adaptive',
+    idPrefix: 'vp',
+    responseItemKey: 'profile',
+    activeBodyKey: 'profileId',
+    errors: {
+      load: 'Failed to load voice profiles',
+      missingName: 'Profile name is required',
+      save: 'Failed to save voice profile',
+      missingActiveId: 'Profile ID required',
+      activate: 'Failed to set active voice profile',
+      forbiddenDelete: 'Cannot delete canonical identity voice profiles',
+      delete: 'Failed to delete voice profile',
+    },
+    events: {
+      saved: 'voice:profile_saved',
+      activated: 'voice:profile_activated',
+      deleted: 'voice:profile_deleted',
+    },
+    transformOnRead: async (parsed) => {
+      const canonicalBaseVoice = await getCanonicalBaseVoice();
       if (Array.isArray(parsed?.profiles)) {
         parsed.profiles = parsed.profiles.map((p: any) => ({
           ...p,
           baseVoice: p?.baseVoice && ALLOWED_BARITONE_VOICES.has(p.baseVoice) ? p.baseVoice : canonicalBaseVoice,
         }));
       }
-      res.json(parsed);
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to load voice profiles' });
-    }
-  });
-
-  app.post('/api/voice/profiles', async (req, res) => {
-    try {
-      const profile = req.body;
-      if (!profile || !profile.name) {
-        return res.status(400).json({ error: 'Profile name is required' });
-      }
-
+      return parsed;
+    },
+    prepareRecord: async (profile, profileId) => {
       const canonicalBaseVoice = await getCanonicalBaseVoice();
-      const profileId = profile.id || `vp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       const sanitizedBaseVoice =
         profile.baseVoice && ALLOWED_BARITONE_VOICES.has(profile.baseVoice) ? profile.baseVoice : canonicalBaseVoice;
-      const savedProfile = {
+      return {
         ...profile,
         id: profileId,
         baseVoice: sanitizedBaseVoice,
-        clips: profile.clips || []
+        clips: profile.clips || [],
       };
-
-      const updated = await updateJsonFile<any>(VOICE_PROFILES_FILE, DEFAULT_VOICE_PROFILES_STORE, (parsed) => {
-        const profiles = Array.isArray(parsed?.profiles) ? [...parsed.profiles] : [];
-        const existingIdx = profiles.findIndex((p: any) => p.id === profileId);
-        if (existingIdx >= 0) {
-          profiles[existingIdx] = savedProfile;
-        } else {
-          profiles.push(savedProfile);
-        }
-        return { ...parsed, profiles };
-      });
-
-      addDaemonLog('TASK', `Voice profile updated: [${savedProfile.name}] (${savedProfile.accent || 'custom'})`);
-      io.emit('voice:profile_saved', savedProfile);
-      res.status(200).json({ success: true, profile: savedProfile, activeProfileId: updated.activeProfileId });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to save voice profile' });
-    }
+    },
+    canDelete: (id, parsed) => {
+      const profiles = Array.isArray(parsed?.profiles) ? parsed.profiles : [];
+      const target = profiles.find((p: any) => p.id === id);
+      return !target?.isCanonical;
+    },
+    formatSaveLog: (saved) => `Voice profile updated: [${saved.name}] (${saved.accent || 'custom'})`,
+    activateLogPrefix: 'Voice profile activated',
+    deleteLogPrefix: 'Custom voice profile deleted',
   });
 
-  app.post('/api/voice/profiles/active', async (req, res) => {
-    try {
-      const { profileId } = req.body;
-      if (!profileId) return res.status(400).json({ error: 'Profile ID required' });
+  registerVoiceStoreCrud({
+    basePath: '/api/voice/clones',
+    filePath: VOICE_CLONES_FILE,
+    defaultStore: DEFAULT_VOICE_CLONES_STORE,
+    collectionKey: 'clones',
+    activeKey: 'activeCloneId',
+    fallbackActiveId: 'clone-jeremy-irons-canonical',
+    idPrefix: 'clone',
+    responseItemKey: 'model',
+    activeBodyKey: 'modelId',
+    syncIsActiveOnActivate: true,
+    errors: {
+      load: 'Failed to load voice clone models',
+      missingName: 'Model name is required',
+      save: 'Failed to save voice clone model',
+      missingActiveId: 'modelId is required',
+      activate: 'Failed to set active voice clone model',
+      forbiddenDelete: 'Cannot delete canonical Jeremy Irons master clone',
+      delete: 'Failed to delete voice clone model',
+    },
+    events: {
+      saved: 'voice:clone_saved',
+      activated: 'voice:clone_activated',
+      deleted: 'voice:clone_deleted',
+    },
+    canDelete: (id) => id !== 'clone-jeremy-irons-canonical',
+    formatSaveLog: (saved) => `Voice clone tonal model persisted: [${saved.name}] (${saved.tagline || 'Custom'})`,
+    activateLogPrefix: 'Voice clone tonal model activated',
+    deleteLogPrefix: 'Voice clone model deleted',
+  });
 
-      await updateJsonFile<any>(VOICE_PROFILES_FILE, DEFAULT_VOICE_PROFILES_STORE, (parsed) => ({
-        ...parsed,
-        activeProfileId: profileId
-      }));
-      addDaemonLog('SYS', `Voice profile activated: [${profileId}]`);
-      io.emit('voice:profile_activated', { profileId });
-      res.json({ success: true, activeProfileId: profileId });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to set active voice profile' });
-    }
+  registerVoiceStoreCrud({
+    basePath: '/api/voice/presets',
+    filePath: VOICE_PRESETS_FILE,
+    defaultStore: DEFAULT_VOICE_PRESETS_STORE,
+    collectionKey: 'presets',
+    activeKey: 'activePresetId',
+    fallbackActiveId: 'preset-iron-adaptive-v1',
+    idPrefix: 'preset-custom',
+    responseItemKey: 'preset',
+    activeBodyKey: 'presetId',
+    errors: {
+      load: 'Failed to load voice presets',
+      missingName: 'Preset name is required',
+      save: 'Failed to save voice preset',
+      missingActiveId: 'presetId is required',
+      activate: 'Failed to set active voice preset',
+      forbiddenDelete: 'Cannot delete canonical built-in voice presets',
+      delete: 'Failed to delete voice preset',
+    },
+    events: {
+      saved: 'voice:preset_saved',
+      activated: 'voice:preset_activated',
+      deleted: 'voice:preset_deleted',
+    },
+    canDelete: (id) => !(id.startsWith('preset-iron-') && !id.includes('custom')),
+    formatSaveLog: (saved) => `Voice preset saved: [${saved.name}] (${saved.codeName || 'PRESET'})`,
+    activateLogPrefix: 'Voice preset engaged',
+    deleteLogPrefix: 'Voice preset deleted',
   });
 
   app.post('/api/voice/clips', async (req, res) => {
@@ -3315,36 +3495,6 @@ async function startServer() {
     }
   });
 
-  app.delete('/api/voice/profiles/:id', async (req, res) => {
-    try {
-      const { id } = req.params;
-      let isCanonical = false;
-      const updated = await updateJsonFile<any>(VOICE_PROFILES_FILE, DEFAULT_VOICE_PROFILES_STORE, (parsed) => {
-        const profiles = Array.isArray(parsed?.profiles) ? parsed.profiles : [];
-        const target = profiles.find((p: any) => p.id === id);
-        if (target?.isCanonical) {
-          isCanonical = true;
-          return parsed;
-        }
-        return {
-          ...parsed,
-          profiles: profiles.filter((p: any) => p.id !== id),
-          activeProfileId: parsed.activeProfileId === id ? 'iron-adaptive' : parsed.activeProfileId
-        };
-      });
-
-      if (isCanonical) {
-        return res.status(403).json({ error: 'Cannot delete canonical identity voice profiles' });
-      }
-
-      addDaemonLog('TASK', `Custom voice profile deleted: ${id}`);
-      io.emit('voice:profile_deleted', { id, activeProfileId: updated.activeProfileId });
-      res.json({ success: true, activeProfileId: updated.activeProfileId });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to delete voice profile' });
-    }
-  });
-
   app.delete('/api/voice/profiles/:profileId/clips/:clipId', async (req, res) => {
     try {
       const { profileId, clipId } = req.params;
@@ -3368,174 +3518,6 @@ async function startServer() {
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: 'Failed to delete voice clip' });
-    }
-  });
-
-  // ==========================================
-  // VOICE CLONING ENGINE & TONAL MODELS APIS
-  // ==========================================
-  app.get('/api/voice/clones', async (req, res) => {
-    try {
-      const parsed = await readJsonFile(VOICE_CLONES_FILE, DEFAULT_VOICE_CLONES_STORE);
-      res.json(parsed);
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to load voice clone models' });
-    }
-  });
-
-  app.post('/api/voice/clones', async (req, res) => {
-    try {
-      const model = req.body;
-      if (!model || !model.name) {
-        return res.status(400).json({ error: 'Model name is required' });
-      }
-
-      const modelId = model.id || `clone-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-      const savedModel = {
-        ...model,
-        id: modelId,
-        updatedAt: Date.now()
-      };
-
-      const updated = await updateJsonFile<any>(VOICE_CLONES_FILE, DEFAULT_VOICE_CLONES_STORE, (parsed) => {
-        const clones = Array.isArray(parsed?.clones) ? [...parsed.clones] : [];
-        const existingIdx = clones.findIndex((c: any) => c.id === modelId);
-        if (existingIdx >= 0) {
-          clones[existingIdx] = savedModel;
-        } else {
-          clones.push(savedModel);
-        }
-        return { ...parsed, clones };
-      });
-
-      addDaemonLog('TASK', `Voice clone tonal model persisted: [${savedModel.name}] (${savedModel.tagline || 'Custom'})`);
-      io.emit('voice:clone_saved', savedModel);
-      res.status(200).json({ success: true, model: savedModel, activeCloneId: updated.activeCloneId });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to save voice clone model' });
-    }
-  });
-
-  app.post('/api/voice/clones/active', async (req, res) => {
-    try {
-      const { modelId } = req.body;
-      if (!modelId) return res.status(400).json({ error: 'modelId is required' });
-
-      await updateJsonFile<any>(VOICE_CLONES_FILE, DEFAULT_VOICE_CLONES_STORE, (parsed) => ({
-        ...parsed,
-        activeCloneId: modelId,
-        clones: (Array.isArray(parsed?.clones) ? parsed.clones : []).map((m: any) => ({
-          ...m,
-          isActive: m.id === modelId
-        }))
-      }));
-      addDaemonLog('SYS', `Voice clone tonal model activated: [${modelId}]`);
-      io.emit('voice:clone_activated', { modelId });
-      res.json({ success: true, activeCloneId: modelId });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to set active voice clone model' });
-    }
-  });
-
-  app.delete('/api/voice/clones/:id', async (req, res) => {
-    try {
-      const { id } = req.params;
-      if (id === 'clone-jeremy-irons-canonical') {
-        return res.status(403).json({ error: 'Cannot delete canonical Jeremy Irons master clone' });
-      }
-
-      const updated = await updateJsonFile<any>(VOICE_CLONES_FILE, DEFAULT_VOICE_CLONES_STORE, (parsed) => ({
-        ...parsed,
-        clones: (Array.isArray(parsed?.clones) ? parsed.clones : []).filter((c: any) => c.id !== id),
-        activeCloneId: parsed.activeCloneId === id ? 'clone-jeremy-irons-canonical' : parsed.activeCloneId
-      }));
-      addDaemonLog('TASK', `Voice clone model deleted: ${id}`);
-      io.emit('voice:clone_deleted', { id, activeCloneId: updated.activeCloneId });
-      res.json({ success: true, activeCloneId: updated.activeCloneId });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to delete voice clone model' });
-    }
-  });
-
-  // ==========================================
-  // VOICE PRESET MANAGER APIS
-  // ==========================================
-  app.get('/api/voice/presets', async (req, res) => {
-    try {
-      const parsed = await readJsonFile(VOICE_PRESETS_FILE, DEFAULT_VOICE_PRESETS_STORE);
-      res.json(parsed);
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to load voice presets' });
-    }
-  });
-
-  app.post('/api/voice/presets', async (req, res) => {
-    try {
-      const preset = req.body;
-      if (!preset || !preset.name) {
-        return res.status(400).json({ error: 'Preset name is required' });
-      }
-
-      const presetId = preset.id || `preset-custom-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-      const savedPreset = {
-        ...preset,
-        id: presetId,
-        updatedAt: Date.now()
-      };
-
-      const updated = await updateJsonFile<any>(VOICE_PRESETS_FILE, DEFAULT_VOICE_PRESETS_STORE, (parsed) => {
-        const presets = Array.isArray(parsed?.presets) ? [...parsed.presets] : [];
-        const existingIdx = presets.findIndex((p: any) => p.id === presetId);
-        if (existingIdx >= 0) {
-          presets[existingIdx] = savedPreset;
-        } else {
-          presets.push(savedPreset);
-        }
-        return { ...parsed, presets };
-      });
-
-      addDaemonLog('TASK', `Voice preset saved: [${savedPreset.name}] (${savedPreset.codeName || 'PRESET'})`);
-      io.emit('voice:preset_saved', savedPreset);
-      res.status(200).json({ success: true, preset: savedPreset, activePresetId: updated.activePresetId });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to save voice preset' });
-    }
-  });
-
-  app.post('/api/voice/presets/active', async (req, res) => {
-    try {
-      const { presetId } = req.body;
-      if (!presetId) return res.status(400).json({ error: 'presetId is required' });
-
-      await updateJsonFile<any>(VOICE_PRESETS_FILE, DEFAULT_VOICE_PRESETS_STORE, (parsed) => ({
-        ...parsed,
-        activePresetId: presetId
-      }));
-      addDaemonLog('SYS', `Voice preset engaged: [${presetId}]`);
-      io.emit('voice:preset_activated', { presetId });
-      res.json({ success: true, activePresetId: presetId });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to set active voice preset' });
-    }
-  });
-
-  app.delete('/api/voice/presets/:id', async (req, res) => {
-    try {
-      const { id } = req.params;
-      if (id.startsWith('preset-iron-') && !id.includes('custom')) {
-        return res.status(403).json({ error: 'Cannot delete canonical built-in voice presets' });
-      }
-
-      const updated = await updateJsonFile<any>(VOICE_PRESETS_FILE, DEFAULT_VOICE_PRESETS_STORE, (parsed) => ({
-        ...parsed,
-        presets: (Array.isArray(parsed?.presets) ? parsed.presets : []).filter((p: any) => p.id !== id),
-        activePresetId: parsed.activePresetId === id ? 'preset-iron-adaptive-v1' : parsed.activePresetId
-      }));
-      addDaemonLog('TASK', `Voice preset deleted: ${id}`);
-      io.emit('voice:preset_deleted', { id, activePresetId: updated.activePresetId });
-      res.json({ success: true, activePresetId: updated.activePresetId });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to delete voice preset' });
     }
   });
 
@@ -3864,7 +3846,7 @@ Return a valid JSON object strictly matching this schema:
     return Array.from(found);
   };
 
-  const runGreyHouseLegalQuery = async (req: any, res: any, forcedMode?: string) => {
+  const runGreyHouseLegalQuery = async (req: any, res: any) => {
     res.setHeader('Content-Type', 'application/json');
     try {
       const customApiKey = getCustomApiKey(req);
@@ -3872,7 +3854,7 @@ Return a valid JSON object strictly matching this schema:
       const {
         query,
         practiceArea = 'all',
-        mode: rawMode = 'legal_counsel',
+        mode = 'legal_counsel',
         defenseStatementType = 'reservation_of_rights',
         houseEntityName = 'The Grey House / Principal Preston Johnston',
         opposingParty,
@@ -3882,7 +3864,6 @@ Return a valid JSON object strictly matching this schema:
         selectedPrecedents,
       } = req.body || {};
 
-      const mode = forcedMode || rawMode;
       const cleanQuery = typeof query === 'string' ? query.trim() : '';
       if (!cleanQuery) {
         return res.status(400).json({ error: 'A legal question, statute citation, or defensive factual scenario is required.' });
@@ -4048,8 +4029,6 @@ ${cleanQuery}`;
   };
 
   app.post('/api/legal/counsel', (req, res) => runGreyHouseLegalQuery(req, res));
-  app.post('/api/legal/defense-statement', (req, res) => runGreyHouseLegalQuery(req, res, 'defense_statement'));
-  app.post('/api/legal/defense-strategy', (req, res) => runGreyHouseLegalQuery(req, res, 'defense_strategy'));
 
   const DEFAULT_LEGAL_DOSSIERS_STORE = { dossiers: [] as any[] };
 

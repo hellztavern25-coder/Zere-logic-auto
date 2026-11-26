@@ -1,5 +1,5 @@
 // [TAG: 11]
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useReducer } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Mic,
@@ -56,7 +56,8 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
   compactMode = false
 }) => {
   const [profiles, setProfiles] = useState<VoiceProfile[]>(() => jeremyIronsVoice.getProfiles());
-  const [activeProfile, setActiveProfile] = useState<VoiceProfile>(() => jeremyIronsVoice.getActiveProfile());
+  const [, bumpVoiceStore] = useReducer((n: number) => n + 1, 0);
+  const activeProfile = jeremyIronsVoice.getActiveProfile();
   const [selectedProfileId, setSelectedProfileId] = useState<string>(() => jeremyIronsVoice.getActiveProfile().id);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [currentChunk, setCurrentChunk] = useState<number>(1);
@@ -102,7 +103,7 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
   useEffect(() => {
     const unsubVoice = jeremyIronsVoice.subscribe((state) => {
       setIsSpeaking(state.isSpeaking);
-      setActiveProfile(state.profile);
+      bumpVoiceStore();
       if (state.profiles && state.profiles.length > 0) {
         setProfiles(state.profiles);
       }
@@ -118,7 +119,7 @@ export const VoiceEmulator: React.FC<VoiceEmulatorProps> = ({
     jeremyIronsVoice.loadProfilesFromServer().then((loaded) => {
       setProfiles([...loaded]);
       const currentActive = jeremyIronsVoice.getActiveProfile();
-      setActiveProfile(currentActive);
+      bumpVoiceStore();
       setSelectedProfileId(currentActive.id);
     });
 

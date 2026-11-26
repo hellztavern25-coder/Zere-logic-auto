@@ -60,7 +60,7 @@ declare global {
     };
     __ZEREO_PRINCIPAL_AUDIT_BUFFER__?: PrincipalReasoningAuditLog[];
     __GET_ZEREO_AUDIT_LOGS__?: () => PrincipalReasoningAuditLog[];
-    __CLEAR_ZEREO_AUDIT_BUFFER__?: () => void;
+    __CLEAR_ZEREO_AUDIT_BUFFER__?: (syncServer?: boolean) => Promise<void>;
   }
 }
 
@@ -99,10 +99,17 @@ const App: React.FC = () => {
     if (typeof window !== 'undefined') {
       window.__ZEREO_PRINCIPAL_AUDIT_BUFFER__ = principalAuditBufferRef.current;
       window.__GET_ZEREO_AUDIT_LOGS__ = () => [...principalAuditBufferRef.current];
-      window.__CLEAR_ZEREO_AUDIT_BUFFER__ = () => {
+      window.__CLEAR_ZEREO_AUDIT_BUFFER__ = async (syncServer: boolean = true) => {
         principalAuditBufferRef.current = [];
         if (typeof window !== 'undefined') {
           window.__ZEREO_PRINCIPAL_AUDIT_BUFFER__ = [];
+        }
+        if (syncServer) {
+          try {
+            await fetch('/api/audit/principal-buffer', { method: 'DELETE' });
+          } catch {
+            // Offline view already cleared
+          }
         }
       };
     }

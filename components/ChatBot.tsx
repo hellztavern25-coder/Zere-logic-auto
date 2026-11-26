@@ -5,7 +5,7 @@ import { Send, Brain, Search, MapPin, Loader2, Link as LinkIcon, Trash2, Sparkle
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
-import { getAI, getApiKey, clearApiKey, safeGenerateContent, generateTTS, generateDesiredArt, getTtsQuotaNotice } from '../services/geminiService';
+import { clearApiKey, safeGenerateContent, generateTTS, generateDesiredArt, getTtsQuotaNotice } from '../services/geminiService';
 import { saveArtToVault, saveVaultFile, parseDocumentFile, detectFileType } from '../services/fileVaultService';
 import { generateClaudeContent, getAnthropicKey } from '../services/anthropicService';
 import { GeminiModel, ChatMessage, ChatThread, EmotionalMap, AppTab, VaultFileType } from '../types';
@@ -936,9 +936,6 @@ const ChatBot: React.FC<ChatBotProps> = ({
         return;
       }
 
-      const ai = getAI();
-      const apiKey = getApiKey();
-      
       let modelToUse = GeminiModel.HYDROGEN;
       let tools: any[] = [];
       let toolConfig: any = undefined;
@@ -1286,9 +1283,9 @@ const ChatBot: React.FC<ChatBotProps> = ({
   };
 
   const engageJeremyIronsVoice = async (startMicAfterOpening: boolean = true) => {
-    await jeremyIronsVoice.unlockAudio();
     if (!ttsEnabled) {
       const enabled = setTtsEnabledPreference(true);
+      ttsEnabledRef.current = enabled;
       setTtsEnabled(enabled);
     }
 
@@ -1327,25 +1324,7 @@ const ChatBot: React.FC<ChatBotProps> = ({
       return [...prev, openingMsg];
     });
 
-    isSpeakingRef.current = true;
-    setIsSpeaking(true);
-    await jeremyIronsVoice.speak(
-      openingLine,
-      undefined,
-      () => {
-        isSpeakingRef.current = true;
-        setIsSpeaking(true);
-      },
-      () => {
-        isSpeakingRef.current = false;
-        setIsSpeaking(false);
-        if (startMicAfterOpening && isConversationModeRef.current && !isMicPausedRef.current && !manualHaltRef.current) {
-          micArmTimerRef.current = setTimeout(() => {
-            setMicTriggerCount(c => c + 1);
-          }, 320);
-        }
-      }
-    );
+    await speakText(openingLine, undefined, !startMicAfterOpening, true);
   };
 
   const toggleTTS = () => {

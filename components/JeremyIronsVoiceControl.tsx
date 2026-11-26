@@ -1,5 +1,5 @@
 // [TAG: 11]
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useReducer } from 'react';
 import { Volume2, VolumeX, Sliders, Play, Square, Sparkles, Check, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -25,18 +25,18 @@ export const JeremyIronsVoiceControl: React.FC<JeremyIronsVoiceControlProps> = (
   const [isOpen, setIsOpen] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [currentText, setCurrentText] = useState('');
-  const [activeProfile, setActiveProfile] = useState<VoiceModulationProfile>(() => {
-    return jeremyIronsVoice.getLegacyProfile() || 'Jeremy-Irons-Signature';
-  });
+  const [, bumpVoiceStore] = useReducer((n: number) => n + 1, 0);
+  const activeProfile: VoiceModulationProfile =
+    jeremyIronsVoice.getLegacyProfile() || 'Jeremy-Irons-Signature';
   const [config, setConfig] = useState<JeremyIronsConfig>(() => jeremyIronsVoice.getConfig());
 
   const [ttsQuotaNotice, setTtsQuotaNotice] = useState<string | null>(() => getTtsQuotaNotice());
 
   useEffect(() => {
-    const unsub = jeremyIronsVoice.subscribe(({ isSpeaking, text, legacyProfile, config: storeConfig }) => {
+    const unsub = jeremyIronsVoice.subscribe(({ isSpeaking, text, config: storeConfig }) => {
       setIsSpeaking(isSpeaking);
       setCurrentText(text);
-      if (legacyProfile) setActiveProfile(legacyProfile);
+      bumpVoiceStore();
       if (storeConfig) setConfig(storeConfig);
     });
     const onTtsNotice = (e: Event) => {

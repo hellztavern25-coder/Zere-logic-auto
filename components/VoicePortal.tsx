@@ -25,7 +25,7 @@ import {
   Square
 } from 'lucide-react';
 import { Socket } from 'socket.io-client';
-import { getAI, decodeBase64, encodeBase64, decodeAudioData, getApiKey, clearApiKey } from '../services/geminiService';
+import { getAI, decodeBase64, encodeBase64, decodeAudioData, getAuthHeaders, isRealKey, hasServerGeminiKey, clearApiKey } from '../services/geminiService';
 import { GeminiModel, AppTab } from '../types';
 import { buildVoiceLiveInstruction, AUDITION_LINE_1911_ABSOLUTE } from '../services/stewardIdentity';
 import ButlerAvatar from './ButlerAvatar';
@@ -625,11 +625,12 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
       });
       setAudioStreamState(outputCtx.state);
 
-      const apiKey = getApiKey();
-      if (!apiKey || apiKey === 'undefined') {
+      const authHeader = getAuthHeaders()['Authorization'];
+      const clientKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined;
+      const isServerManagedKey = !isRealKey(clientKey);
+      if (isServerManagedKey && !hasServerGeminiKey()) {
         throw new Error("Live Audio Bridge requires a configured Gemini API key in System Control (TTS & Voice Synthesis remain active).");
       }
-      const isServerManagedKey = apiKey === 'ZEREO_CORE_LINK';
       if (isServerManagedKey && !socket) {
         throw new Error("Neural Bridge socket is offline. Please refresh or configure a custom key in System Control.");
       }
@@ -892,7 +893,7 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
             model: GeminiModel.FLASH_LIVE,
             voiceName: 'Charon',
             systemInstruction: liveSystemInstruction,
-            customApiKey: isServerManagedKey ? undefined : apiKey
+            customApiKey: clientKey
           });
         });
       } else {
@@ -939,7 +940,7 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
       stopLiveConversation();
       const errorMsg = err?.message || JSON.stringify(err);
       if (errorMsg.includes('API key not valid') || errorMsg.includes('INVALID_ARGUMENT')) {
-        if (getApiKey() !== 'ZEREO_CORE_LINK') {
+        if (getAuthHeaders()['Authorization']) {
           clearApiKey();
         }
         setGateWarning("Principal, our neural authorization was rejected. Please verify your Gemini API key in System Control.");

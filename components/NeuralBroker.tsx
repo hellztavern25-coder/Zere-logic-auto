@@ -1,7 +1,8 @@
+// [TAG: 11]
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Activity, Zap, ShieldCheck, CheckCircle2, Loader2, Bell, ShieldAlert } from 'lucide-react';
-import { getApiKey } from '../services/geminiService';
+import { hasActiveNeuralKey } from '../services/geminiService';
 
 const NeuralBroker: React.FC = () => {
   const [pulse, setPulse] = useState<'idle' | 'pinging' | 'pong' | 'fail'>('idle');
@@ -61,9 +62,9 @@ const NeuralBroker: React.FC = () => {
   useEffect(() => {
     // Only show the broker status if we have an active key loaded
     const interval = setInterval(() => {
-       const key = getApiKey();
-       if (key && !showBroker) setShowBroker(true);
-       if (!key && showBroker) setShowBroker(false);
+       const hasKey = hasActiveNeuralKey();
+       if (hasKey && !showBroker) setShowBroker(true);
+       if (!hasKey && showBroker) setShowBroker(false);
     }, 2000);
     return () => clearInterval(interval);
   }, [showBroker]);
@@ -120,7 +121,7 @@ const NeuralBroker: React.FC = () => {
         <div className={`absolute top-0 right-0 w-2 h-2 rounded-full m-2 border border-black/80 shadow-md ${
            doormanStatus === 'ready' ? 'bg-emerald-500 animate-pulse' :
            doormanStatus === 'intercepting' ? 'bg-amber-400' :
-           getApiKey() ? 'bg-amber-600/60' : 'bg-red-600'
+           hasActiveNeuralKey() ? 'bg-amber-600/60' : 'bg-red-600'
         }`} />
       </motion.button>
 

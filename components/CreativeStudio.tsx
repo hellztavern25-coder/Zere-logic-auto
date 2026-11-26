@@ -2,7 +2,7 @@
 // [TAG: 11]
 import React, { useState, useRef } from 'react';
 import { Image as ImageIcon, Sparkles, Wand2, Monitor, Video, Loader2, Download, Upload, Trash2, Database, Check, ExternalLink, BookmarkCheck } from 'lucide-react';
-import { getAI, fileToBase64, getApiKey, clearApiKey, safeGenerateContent } from '../services/geminiService';
+import { getAI, fileToBase64, getAuthHeaders, isRealKey, hasActiveNeuralKey, clearApiKey, safeGenerateContent } from '../services/geminiService';
 import { GeminiModel } from '../types';
 import { buildCreativeStudioInstruction } from '../services/stewardIdentity';
 
@@ -85,21 +85,17 @@ const CreativeStudio: React.FC<CreativeStudioProps> = ({ isPrincipalMode }) => {
     setResultVideo(null);
 
     try {
-      // Check platform key first if in AI Studio, but only if we don't have a local key
+      // Check platform key first if in AI Studio, but only if we don't have a key configured
       if (typeof window !== 'undefined' && (window as any).aistudio) {
         const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-        const localKey = getApiKey();
-        if (!hasKey && !localKey) {
+        if (!hasKey && !hasActiveNeuralKey()) {
           await (window as any).aistudio.openSelectKey();
-          // After opening, if they still don't have it, we'll catch it in getApiKey
         }
       }
 
-      const apiKey = getApiKey();
-      if (!apiKey || apiKey === 'undefined') {
+      if (!hasActiveNeuralKey()) {
         throw new Error("Neural Authorization missing. Please select an API key in System Control or the platform dialog.");
       }
-      const ai = getAI();
       const butlerInstruction = buildCreativeStudioInstruction(isPrincipalMode);
 
       if (activeMode === 'generate') {
@@ -143,6 +139,12 @@ const CreativeStudio: React.FC<CreativeStudioProps> = ({ isPrincipalMode }) => {
         const hasKey = await (window as any).aistudio?.hasSelectedApiKey();
         if (!hasKey) await (window as any).aistudio?.openSelectKey();
 
+        const authHeader = getAuthHeaders()['Authorization'];
+        const clientKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+        if (!isRealKey(clientKey)) {
+          throw new Error("Video generation requires a direct client Gemini API key in System Control.");
+        }
+        const ai = getAI();
         const base64Data = selectedImage?.split(',')[1];
         const mimeType = selectedImage?.split(';')[0].split(':')[1];
 
@@ -166,7 +168,7 @@ const CreativeStudio: React.FC<CreativeStudioProps> = ({ isPrincipalMode }) => {
         const fetchResponse = await fetch(downloadLink, {
           method: 'GET',
           headers: {
-            'x-goog-api-key': getApiKey(),
+            'x-goog-api-key': clientKey,
           },
         });
         const videoBlob = await fetchResponse.blob();
