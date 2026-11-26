@@ -203,74 +203,32 @@ export const VoiceStatusPanel: React.FC<VoiceStatusPanelProps> = ({ socket, clas
     }
   };
 
+  // DSP presets — one object per preset; local state and the server update
+  // both read from it (was 4x duplicated set + update blocks).
+  const DSP_PRESETS: Record<'butler' | 'council' | 'radio' | 'bypass', {
+    pitchShift: number;
+    gainTrim: number;
+    ringModCarrier: number;
+    ringModDepth: number;
+    ringModActive: boolean;
+    ringModWaveform: 'sine' | 'triangle' | 'square';
+  }> = {
+    butler: { pitchShift: -2.4, gainTrim: 2.2, ringModCarrier: 42.0, ringModDepth: 34, ringModActive: true, ringModWaveform: 'sine' },
+    council: { pitchShift: -1.8, gainTrim: 3.0, ringModCarrier: 58.0, ringModDepth: 22, ringModActive: true, ringModWaveform: 'sine' },
+    radio: { pitchShift: 0.0, gainTrim: 4.2, ringModCarrier: 115.0, ringModDepth: 52, ringModActive: true, ringModWaveform: 'square' },
+    bypass: { pitchShift: 0.0, gainTrim: 0.0, ringModCarrier: 40.0, ringModDepth: 0, ringModActive: false, ringModWaveform: 'sine' },
+  };
+
   // Preset Handlers
   const applyPreset = (name: 'butler' | 'council' | 'radio' | 'bypass') => {
-    switch (name) {
-      case 'butler':
-        setPitchShift(-2.4);
-        setGainTrim(2.2);
-        setRingModCarrier(42.0);
-        setRingModDepth(34);
-        setRingModActive(true);
-        setRingModWaveform('sine');
-        updateDspParam({
-          pitchShift: -2.4,
-          gainTrim: 2.2,
-          ringModCarrier: 42.0,
-          ringModDepth: 34,
-          ringModActive: true,
-          ringModWaveform: 'sine'
-        });
-        break;
-      case 'council':
-        setPitchShift(-1.8);
-        setGainTrim(3.0);
-        setRingModCarrier(58.0);
-        setRingModDepth(22);
-        setRingModActive(true);
-        setRingModWaveform('sine');
-        updateDspParam({
-          pitchShift: -1.8,
-          gainTrim: 3.0,
-          ringModCarrier: 58.0,
-          ringModDepth: 22,
-          ringModActive: true,
-          ringModWaveform: 'sine'
-        });
-        break;
-      case 'radio':
-        setPitchShift(0.0);
-        setGainTrim(4.2);
-        setRingModCarrier(115.0);
-        setRingModDepth(52);
-        setRingModActive(true);
-        setRingModWaveform('square');
-        updateDspParam({
-          pitchShift: 0.0,
-          gainTrim: 4.2,
-          ringModCarrier: 115.0,
-          ringModDepth: 52,
-          ringModActive: true,
-          ringModWaveform: 'square'
-        });
-        break;
-      case 'bypass':
-        setPitchShift(0.0);
-        setGainTrim(0.0);
-        setRingModCarrier(40.0);
-        setRingModDepth(0);
-        setRingModActive(false);
-        setRingModWaveform('sine');
-        updateDspParam({
-          pitchShift: 0.0,
-          gainTrim: 0.0,
-          ringModCarrier: 40.0,
-          ringModDepth: 0,
-          ringModActive: false,
-          ringModWaveform: 'sine'
-        });
-        break;
-    }
+    const preset = DSP_PRESETS[name];
+    setPitchShift(preset.pitchShift);
+    setGainTrim(preset.gainTrim);
+    setRingModCarrier(preset.ringModCarrier);
+    setRingModDepth(preset.ringModDepth);
+    setRingModActive(preset.ringModActive);
+    setRingModWaveform(preset.ringModWaveform);
+    updateDspParam({ ...preset });
   };
 
   // Real-time Canvas Waveform / Ring Mod Oscilloscope

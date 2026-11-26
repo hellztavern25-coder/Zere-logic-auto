@@ -650,6 +650,3 @@ export function exportSelectedVoiceLogs(
   }
 }
 
-export function exportVoiceLogsTranscript(logs: VoiceCommandLogEntry[]): void {
-  exportVoiceLogsAsText(logs);
-}

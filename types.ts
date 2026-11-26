@@ -185,11 +185,6 @@ export interface ChatThread {
   avatarUrl?: string;
 }
 
-export interface GroundingChunk {
-  web?: { uri: string; title: string };
-  maps?: { uri: string; title: string };
-}
-
 export type VisualCaptureSource = 'creative_session' | 'screen_snapshot' | 'neural_optical' | 'user_upload';
 
 export interface VisualCapture {
