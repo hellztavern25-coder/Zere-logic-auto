@@ -200,6 +200,47 @@ export function writeThreadCache(threads: ChatThread[]): void {
 }
 
 /**
+ * Shared core of the two history builders below: filters transient errors,
+ * keeps the last `maxTurns` turns, merges consecutive same-role entries with
+ * "\n\n", and opens with a user turn when history starts on the model side.
+ * Each adapter maps a message to a `{ role, text }` turn (or null to skip
+ * it), so the Gemini/Claude output shapes and per-engine text rules stay in
+ * the thin adapters — the alternating-history algorithm itself lives here once.
+ */
+type AlternatingHistoryRole = 'user' | 'model' | 'assistant';
+
+function normaliseAlternatingHistory(
+  history: ChatMessage[],
+  maxTurns: number,
+  modelRole: 'model' | 'assistant',
+  mapMessage: (msg: ChatMessage) => { role: AlternatingHistoryRole; text: string } | null
+): Array<{ role: AlternatingHistoryRole; text: string }> {
+  const recentHistory = (history || []).filter((m) => !isTransientErrorMessage(m)).slice(-maxTurns);
+  const turns: Array<{ role: AlternatingHistoryRole; text: string }> = [];
+
+  for (const msg of recentHistory) {
+    const mapped = mapMessage(msg);
+    if (!mapped || !mapped.text) continue;
+    const last = turns[turns.length - 1];
+    if (last && last.role === mapped.role) {
+      last.text = `${last.text}\n\n${mapped.text}`;
+    } else {
+      turns.push({ role: mapped.role, text: mapped.text });
+    }
+  }
+
+  // The conversation must begin with a 'user' turn.
+  if (turns.length > 0 && turns[0].role === modelRole) {
+    turns.unshift({
+      role: 'user',
+      text: '[Channel opened — resuming dialogue with the Steward.]',
+    });
+  }
+
+  return turns;
+}
+
+/**
  * Builds properly alternating multi-turn Gemini `contents` from the active thread's history
  * plus the current user prompt & optional current image attachment.
  * Historical images are stripped to prevent payload bloat while preserving conversational continuity.
@@ -212,36 +253,19 @@ export function buildMultiTurnContents(
   maxTurns: number = 24,
   extraInlineParts?: Array<{ mimeType: string; data: string }>
 ): Array<{ role: 'user' | 'model'; parts: any[] }> {
-  const recentHistory = (history || []).filter((m) => !isTransientErrorMessage(m)).slice(-maxTurns);
-  const contents: Array<{ role: 'user' | 'model'; parts: any[] }> = [];
-
-  for (const msg of recentHistory) {
+  const turns = normaliseAlternatingHistory(history, maxTurns, 'model', (msg) => {
     const baseText = (msg.text || '').trim();
     const textWithImageNote =
       msg.imageData && !baseText.includes('[Visual')
         ? `${baseText}\n[Earlier visual/screen frame was inspected in this turn]`.trim()
         : baseText;
-
-    if (!textWithImageNote) continue;
-
-    const last = contents[contents.length - 1];
-    if (last && last.role === msg.role) {
-      last.parts[0].text = `${last.parts[0].text}\n\n${textWithImageNote}`;
-    } else {
-      contents.push({
-        role: msg.role,
-        parts: [{ text: textWithImageNote }],
-      });
-    }
-  }
-
-  // Gemini generateContent expects the conversation to begin with a 'user' turn.
-  if (contents.length > 0 && contents[0].role === 'model') {
-    contents.unshift({
-      role: 'user',
-      parts: [{ text: '[Channel opened — resuming dialogue with the Steward.]' }],
-    });
-  }
+    if (!textWithImageNote) return null;
+    return { role: msg.role, text: textWithImageNote };
+  });
+  const contents: Array<{ role: 'user' | 'model'; parts: any[] }> = turns.map((turn) => ({
+    role: turn.role as 'user' | 'model',
+    parts: [{ text: turn.text }],
+  }));
 
   const finalParts: any[] = [
     { text: (currentInput || '').trim() || 'Analyze this input.' },
@@ -292,27 +316,16 @@ export function buildClaudeHistory(
   currentInput: string,
   maxTurns: number = 24
 ): ClaudeTurnMessage[] {
-  const recentHistory = (history || []).filter((m) => !isTransientErrorMessage(m)).slice(-maxTurns);
-  const result: ClaudeTurnMessage[] = [];
-
-  for (const msg of recentHistory) {
+  const turns = normaliseAlternatingHistory(history, maxTurns, 'assistant', (msg) => {
     const text = (msg.text || '').trim();
-    if (!text) continue;
+    if (!text) return null;
     const role: 'user' | 'assistant' = msg.role === 'user' ? 'user' : 'assistant';
-    const last = result[result.length - 1];
-    if (last && last.role === role) {
-      last.content = `${last.content}\n\n${text}`;
-    } else {
-      result.push({ role, content: text });
-    }
-  }
-
-  if (result.length > 0 && result[0].role === 'assistant') {
-    result.unshift({
-      role: 'user',
-      content: '[Channel opened — resuming dialogue with the Steward.]',
-    });
-  }
+    return { role, text };
+  });
+  const result: ClaudeTurnMessage[] = turns.map((turn) => ({
+    role: turn.role as 'user' | 'assistant',
+    content: turn.text,
+  }));
 
   const cleanInput = (currentInput || '').trim() || 'Analyze input.';
   const last = result[result.length - 1];
