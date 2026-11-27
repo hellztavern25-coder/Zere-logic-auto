@@ -19,6 +19,7 @@ import {
   DerivedInstrumentTone,
   AnchorEngineLedger
 } from '../types';
+import { CANONICAL_INSTRUMENT_ARCHETYPES } from './acousticLatticeService';
 
 // Physical constants
 const SPEED_OF_SOUND_AIR_MPS = 343.0; // at 20°C
@@ -49,7 +50,11 @@ const PYTHAGOREAN_FIFTHS_TABLE: Record<string, { alpha: number; beta: number }> 
 // -------------------------------------------------------------
 // INSTRUMENT TIMBRE ARCHETYPES (THE 60-BIT RECIPE PALETTE)
 // -------------------------------------------------------------
-
+// DISENGAGED Nov 27, 2026 (round 5) — kept as fallback per Preston, NEVER deleted.
+// The one canonical timbre DB is CANONICAL_INSTRUMENT_ARCHETYPES in
+// services/acousticLatticeService.ts (Preston's settled picks, Nov 27 2026).
+// Nothing reads this array anymore: deriveInstrumentTone and the studio's
+// archetype picker both read the canonical DB now.
 export const INSTRUMENT_ARCHETYPES: InstrumentArchetype[] = [
   {
     id: 'steward-baritone',
@@ -144,7 +149,12 @@ export const INSTRUMENT_ARCHETYPES: InstrumentArchetype[] = [
 // -------------------------------------------------------------
 // WEB AUDIO SYNTHESIS ENGINE
 // -------------------------------------------------------------
-
+// DISENGAGED Nov 27, 2026 (round 5) — kept as fallback per Preston, NEVER deleted.
+// This was the second AudioContext singleton + second synthesis pipeline
+// (playPureSine / playDerivedTone / playIntervalHarmony duplicated the lattice
+// service's playFlashcardInvariant / playFlashcardRaw / playAnchorInterval).
+// The single synthesis pipeline is now AcousticLatticeService; the studio
+// plays anchor tones through it. Nothing instantiates this class anymore.
 class WebAudioSynthesisPipeline {
   private ctx: AudioContext | null = null;
   private activeNodes: AudioNode[] = [];
@@ -370,10 +380,8 @@ class WebAudioSynthesisPipeline {
 
 export class AnchorEngineService {
   private ledger: AnchorEngineLedger;
-  private audioPipeline: WebAudioSynthesisPipeline;
 
   constructor() {
-    this.audioPipeline = new WebAudioSynthesisPipeline();
     this.ledger = this.loadOrInitializeLedger();
   }
 
@@ -625,7 +633,7 @@ export class AnchorEngineService {
     const interpolation = this.interpolatePitchField(target);
     const f0 = interpolation.targetFrequencyHz;
 
-    const archetype = INSTRUMENT_ARCHETYPES.find(a => a.id === archetypeId) || INSTRUMENT_ARCHETYPES[0];
+    const archetype = CANONICAL_INSTRUMENT_ARCHETYPES.find(a => a.id === archetypeId) || CANONICAL_INSTRUMENT_ARCHETYPES[0];
 
     // Generate 8 harmonics based on derived fundamental f0
     const harmonicSeries = archetype.harmonicAmplitudes.map((amp, index) => {
@@ -651,42 +659,6 @@ export class AnchorEngineService {
       recipeBits: 60, // Exactly 60-bit recipe token representation
       acousticDescription: `${archetype.description} Derived at ${f0.toFixed(2)}Hz via (${interpolation.lowerAnchor.note} ↔ ${interpolation.upperAnchor.note}) interpolation.`
     };
-  }
-
-  /**
-   * Audio: Play pure anchor tone
-   */
-  public async playAnchor(note: string, mode: 'just' | 'et' = 'just', durationSec = 1.6): Promise<void> {
-    const seq = this.ledger.interleavedSequence;
-    const anchor = seq.find(a => a.note.toUpperCase() === note.toUpperCase());
-    if (!anchor) return;
-    const freq = mode === 'just' ? anchor.justIntonationHz : anchor.equalTemperamentHz;
-    await this.audioPipeline.playPureSine(freq, durationSec, 0.32);
-  }
-
-  /**
-   * Audio: Play derived instrument tone
-   */
-  public async playDerived(derived: DerivedInstrumentTone, mode: 'timbre' | 'pure_invariant' = 'timbre', durationSec = 2.0): Promise<void> {
-    if (mode === 'pure_invariant') {
-      await this.audioPipeline.playPureSine(derived.targetFrequencyHz, durationSec, 0.3);
-    } else {
-      await this.audioPipeline.playDerivedTone(derived, durationSec, 0.3);
-    }
-  }
-
-  /**
-   * Audio: Play harmonic 3:2 anchor interval (e.g. A4 + E5)
-   */
-  public async playAnchorInterval(f1: number, f2: number, durationSec = 2.0): Promise<void> {
-    await this.audioPipeline.playIntervalHarmony(f1, f2, durationSec, 0.25);
-  }
-
-  /**
-   * Audio: Stop all synthesis
-   */
-  public stopAudio(): void {
-    this.audioPipeline.stopAll();
   }
 
   /**
