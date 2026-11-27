@@ -1063,6 +1063,22 @@ async function startServer() {
     bufferSize: 256
   };
 
+  // [TAG: 11] Single shared DSP parameter applier (edi/round-4): the socket
+  // voice:dsp_set handler and REST POST /api/voice/dsp-control previously
+  // pasted the same 8-field assignment block. Both call sites now route
+  // through this helper; the REST 403 VOICE_DAEMON_LOCKED guard is unchanged.
+  const applyDspParams = (params: any) => {
+    if (!params) return;
+    if (params.pitchShift !== undefined) dspParams.pitchShift = Number(params.pitchShift);
+    if (params.gainTrim !== undefined) dspParams.gainTrim = Number(params.gainTrim);
+    if (params.ringModCarrier !== undefined) dspParams.ringModCarrier = Number(params.ringModCarrier);
+    if (params.ringModDepth !== undefined) dspParams.ringModDepth = Number(params.ringModDepth);
+    if (params.ringModActive !== undefined) dspParams.ringModActive = Boolean(params.ringModActive);
+    if (params.ringModWaveform !== undefined) dspParams.ringModWaveform = params.ringModWaveform;
+    if (params.sampleRate !== undefined) dspParams.sampleRate = Number(params.sampleRate);
+    if (params.bufferSize !== undefined) dspParams.bufferSize = Number(params.bufferSize);
+  };
+
   const dspStartTime = Date.now();
   let dspPacketsCounter = 0;
 
@@ -1380,44 +1396,12 @@ async function startServer() {
       }
     });
 
-    socket.on('voice:dsp_poll', () => {
-      socket.emit('voice:dsp_metrics', {
-        metrics: getLiveDspMetrics(),
-        socketPath: VOICE_DSP_SOCKET_PATH,
-        timestamp: Date.now()
-      });
-    });
-
     socket.on('voice:dsp_set', (params: any) => {
-      if (params) {
-        if (params.pitchShift !== undefined) dspParams.pitchShift = Number(params.pitchShift);
-        if (params.gainTrim !== undefined) dspParams.gainTrim = Number(params.gainTrim);
-        if (params.ringModCarrier !== undefined) dspParams.ringModCarrier = Number(params.ringModCarrier);
-        if (params.ringModDepth !== undefined) dspParams.ringModDepth = Number(params.ringModDepth);
-        if (params.ringModActive !== undefined) dspParams.ringModActive = Boolean(params.ringModActive);
-        if (params.ringModWaveform !== undefined) dspParams.ringModWaveform = params.ringModWaveform;
-        if (params.sampleRate !== undefined) dspParams.sampleRate = Number(params.sampleRate);
-        if (params.bufferSize !== undefined) dspParams.bufferSize = Number(params.bufferSize);
-      }
+      applyDspParams(params);
       socket.emit('voice:dsp_metrics', {
         metrics: getLiveDspMetrics(),
         socketPath: VOICE_DSP_SOCKET_PATH,
         timestamp: Date.now()
-      });
-    });
-
-    socket.on('voice:bridge_ping', (data: { clientTimestamp?: number } = {}) => {
-      const now = Date.now();
-      const metrics = getLiveDspMetrics();
-      socket.emit('voice:bridge_pong', {
-        clientTimestamp: data.clientTimestamp || now,
-        serverTimestamp: now,
-        socketPath: VOICE_DSP_SOCKET_PATH,
-        sampleRate: dspParams.sampleRate,
-        bufferSize: dspParams.bufferSize,
-        bufferDurationMs: metrics.pipeline.bufferDurationMs,
-        pipelineLatencyMs: metrics.pipeline.latencyMs,
-        status: 'OPTIMAL'
       });
     });
 
@@ -1438,21 +1422,6 @@ async function startServer() {
       });
     });
 
-    socket.on('voice:lock_daemon', () => {
-      principalVoiceOwnership.verified = false;
-      principalVoiceOwnership.daemonInitialized = false;
-      principalVoiceOwnership.daemonStatus = 'STANDBY_LOCKED';
-      principalVoiceOwnership.confidenceScore = 0;
-      principalVoiceOwnership.verificationMethod = 'UNVERIFIED';
-
-      console.log('SERVER: [VOICE DAEMON] Daemon locked by Principal protocol command.');
-      io.emit('voice:daemon_state', {
-        status: 'STANDBY_LOCKED',
-        verified: false,
-        timestamp: Date.now()
-      });
-    });
-
     // ==========================================
     // STEWARD BACKGROUND DAEMON SOCKET HANDLERS
     // ==========================================
@@ -1461,108 +1430,6 @@ async function startServer() {
         ...stewardDaemonState,
         logs: daemonLogs.slice(0, 80)
       });
-    });
-
-    socket.on('daemon:control', async (data: any) => {
-      if (data?.action === 'pause') {
-        stewardDaemonState.status = 'PAUSED';
-        addDaemonLog('DAEMON', 'Steward Background Daemon paused via socket.');
-      } else if (data?.action === 'resume' || data?.action === 'start') {
-        stewardDaemonState.status = 'RUNNING';
-        addDaemonLog('DAEMON', 'Steward Background Daemon resumed via socket.');
-      } else if (data?.action === 'sweep') {
-        stewardDaemonState.lastSweepAt = Date.now();
-        addDaemonLog('VIGILANCE', 'Manual vigilance sweep initiated via socket.');
-        const task: DaemonTask = {
-          id: `sweep-${Date.now()}`,
-          title: 'Manual Vigilance Sweep',
-          description: 'Instant manual diagnostic and integrity audit across memory core.',
-          category: 'SECURITY_SWEEP',
-          priority: 'CRITICAL',
-          status: 'PENDING',
-          createdAt: Date.now()
-        };
-        stewardDaemonState.tasks.unshift(task);
-        executeDaemonTask(task);
-      } else if (data?.action === 'clear_logs') {
-        daemonLogs.length = 0;
-        addDaemonLog('SYS', 'Daemon telemetry buffer cleared.');
-      }
-      await saveDaemonState();
-      io.emit('daemon:state', stewardDaemonState);
-    });
-
-    socket.on('daemon:enqueue_task', async (taskData: any) => {
-      if (!taskData?.title) return;
-      const newTask: DaemonTask = {
-        id: `task-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        title: taskData.title,
-        description: taskData.description,
-        category: taskData.category || 'CUSTOM_DIRECTIVE',
-        priority: taskData.priority || 'HIGH',
-        status: 'PENDING',
-        createdAt: Date.now()
-      };
-      stewardDaemonState.tasks.unshift(newTask);
-      addDaemonLog('TASK', `Directive enqueued via Socket: [${newTask.title}]`);
-      await saveDaemonState();
-      io.emit('daemon:task_event', { task: newTask, event: 'enqueued' });
-      io.emit('daemon:state', stewardDaemonState);
-      if (taskData.executeNow && !stewardDaemonState.currentTask) {
-        executeDaemonTask(newTask);
-      }
-    });
-
-    socket.on('daemon:demand_briefing', async () => {
-      addDaemonLog('BRIEFING', 'Principal demanded Situational Intelligence Briefing via socket.');
-      const briefingText = await generateSituationalBriefing();
-      stewardDaemonState.latestBriefing = {
-        text: briefingText,
-        timestamp: Date.now()
-      };
-      await saveDaemonState();
-      io.emit('daemon:briefing', stewardDaemonState.latestBriefing);
-      io.emit('daemon:state', stewardDaemonState);
-    });
-
-    // Visual Capture Timeline Handlers
-    socket.on('visual:get_captures', async () => {
-      const captures = await readJsonFile<any[]>(VISUAL_CAPTURES_FILE, []);
-      socket.emit('visual:captures_list', Array.isArray(captures) ? captures : []);
-    });
-
-    socket.on('visual:save_capture', async (captureData: any) => {
-      try {
-        const newCapture = {
-          id: captureData.id || `vc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-          title: captureData.title || 'Visual Capture',
-          description: captureData.description || '',
-          imageUrl: captureData.imageUrl || '',
-          source: captureData.source || 'creative_session',
-          metadata: captureData.metadata || {},
-          timestamp: captureData.timestamp || Date.now()
-        };
-        await updateJsonFile<any[]>(VISUAL_CAPTURES_FILE, [], (current) => {
-          const list = Array.isArray(current) ? current : [];
-          return [newCapture, ...list];
-        });
-        addDaemonLog('TASK', `Visual capture archived: [${newCapture.title}] via ${newCapture.source}`);
-        io.emit('visual:capture_added', newCapture);
-      } catch (err: any) {
-        console.error('Failed to save visual capture via socket:', err);
-      }
-    });
-
-    socket.on('visual:delete_capture', async (id: string) => {
-      try {
-        await updateJsonFile<any[]>(VISUAL_CAPTURES_FILE, [], (current) =>
-          (Array.isArray(current) ? current : []).filter((c: any) => c.id !== id)
-        );
-        addDaemonLog('TASK', `Visual capture purged from vault: ${id}`);
-        io.emit('visual:capture_deleted', id);
-      } catch (err: any) {
-        console.error('Failed to delete visual capture via socket:', err);
-      }
     });
 
     // ==========================================
@@ -1665,18 +1532,6 @@ async function startServer() {
       }
     });
 
-    socket.on('live:client_content', (payload: { turns?: any[]; turnComplete?: boolean }) => {
-      if (!liveSession || !payload?.turns) return;
-      try {
-        liveSession.sendClientContent({
-          turns: payload.turns,
-          turnComplete: payload.turnComplete ?? true,
-        });
-      } catch (err: any) {
-        console.warn(`SERVER: [LIVE PROXY] sendClientContent failed (${socket.id}):`, err?.message || err);
-      }
-    });
-
     socket.on('live:stop', () => {
       closeLiveSession('client_stop');
     });
@@ -1709,11 +1564,6 @@ async function startServer() {
       if (principalAuditBuffer.length > 500) {
         principalAuditBuffer.pop();
       }
-      io.emit('neural:audit_ack', {
-        id: auditEntry.id,
-        timestamp: Date.now(),
-        bufferSize: principalAuditBuffer.length
-      });
     }
     return res.status(200).json({
       success: true,
@@ -2040,15 +1890,7 @@ async function startServer() {
       });
     }
 
-    const { pitchShift, gainTrim, ringModCarrier, ringModDepth, ringModActive, ringModWaveform, sampleRate, bufferSize } = req.body || {};
-    if (pitchShift !== undefined) dspParams.pitchShift = Number(pitchShift);
-    if (gainTrim !== undefined) dspParams.gainTrim = Number(gainTrim);
-    if (ringModCarrier !== undefined) dspParams.ringModCarrier = Number(ringModCarrier);
-    if (ringModDepth !== undefined) dspParams.ringModDepth = Number(ringModDepth);
-    if (ringModActive !== undefined) dspParams.ringModActive = Boolean(ringModActive);
-    if (ringModWaveform !== undefined) dspParams.ringModWaveform = ringModWaveform;
-    if (sampleRate !== undefined) dspParams.sampleRate = Number(sampleRate);
-    if (bufferSize !== undefined) dspParams.bufferSize = Number(bufferSize);
+    applyDspParams(req.body || {});
 
     res.status(200).json({
       success: true,

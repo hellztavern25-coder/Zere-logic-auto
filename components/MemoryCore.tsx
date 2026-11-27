@@ -102,6 +102,21 @@ const MemoryCore: React.FC = () => {
     }
   };
 
+  // Single visual-capture persist path (was inlined 2x: screen + file upload).
+  // Errors propagate so each caller keeps its own catch behaviour.
+  const saveVisualCapture = async (payload: any) => {
+    const res = await fetch('/api/visual-captures', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      const saved = await res.json();
+      setVisualCaptures(prev => [saved, ...prev]);
+      setActiveFilter('visual');
+    }
+  };
+
   // Direct Screen Capture from inside Memory Core
   const captureScreenToVault = async () => {
     if (isCapturingScreen) return;
@@ -140,17 +155,7 @@ const MemoryCore: React.FC = () => {
         timestamp: Date.now()
       };
 
-      const res = await fetch('/api/visual-captures', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (res.ok) {
-        const saved = await res.json();
-        setVisualCaptures(prev => [saved, ...prev]);
-        setActiveFilter('visual');
-      }
+      await saveVisualCapture(payload);
     } catch (err) {
       console.error('Screen capture cancelled or failed:', err);
     } finally {
@@ -183,16 +188,7 @@ const MemoryCore: React.FC = () => {
       };
 
       try {
-        const res = await fetch('/api/visual-captures', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (res.ok) {
-          const saved = await res.json();
-          setVisualCaptures(prev => [saved, ...prev]);
-          setActiveFilter('visual');
-        }
+        await saveVisualCapture(payload);
       } catch (err) {
         console.error('Failed to commit uploaded asset:', err);
       }

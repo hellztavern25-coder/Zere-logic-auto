@@ -150,6 +150,17 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [useSearchQuery, setUseSearchQuery] = useState<string>('');
   const [testAffectPrompt, setTestAffectPrompt] = useState<string>('');
+
+  // Single decode + persist path for the affect-decoder tester (was inlined 3x).
+  const decodeAndPost = (prompt: string) => {
+    const decoded = analyzeEmotionalState(prompt);
+    setEmotionalMap(decoded);
+    fetch('/api/emotional-map', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(decoded)
+    }).catch(() => {});
+  };
   const [copiedUseId, setCopiedUseId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1089,26 +1100,14 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                       className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-[11px] text-zinc-200 focus:outline-none focus:border-amber-500/50"
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && testAffectPrompt.trim()) {
-                          const decoded = analyzeEmotionalState(testAffectPrompt);
-                          setEmotionalMap(decoded);
-                          fetch('/api/emotional-map', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(decoded)
-                          }).catch(() => {});
+                          decodeAndPost(testAffectPrompt);
                         }
                       }}
                     />
                     <button
                       onClick={() => {
                         if (!testAffectPrompt.trim()) return;
-                        const decoded = analyzeEmotionalState(testAffectPrompt);
-                        setEmotionalMap(decoded);
-                        fetch('/api/emotional-map', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify(decoded)
-                        }).catch(() => {});
+                        decodeAndPost(testAffectPrompt);
                       }}
                       className="px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
                     >
@@ -1130,13 +1129,7 @@ const TopLeftMenu: React.FC<TopLeftMenuProps> = ({
                         key={sIdx}
                         onClick={() => {
                           setTestAffectPrompt(sample);
-                          const decoded = analyzeEmotionalState(sample);
-                          setEmotionalMap(decoded);
-                          fetch('/api/emotional-map', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(decoded)
-                          }).catch(() => {});
+                          decodeAndPost(sample);
                         }}
                         className="text-[8px] font-mono px-2 py-1 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-amber-300 border border-zinc-800 transition-all text-left truncate max-w-full"
                       >

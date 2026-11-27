@@ -26,7 +26,7 @@ import RadialTacticalFAB from './components/RadialTacticalFAB';
 import AcousticLatticeStudio from './components/AcousticLatticeStudio';
 import LegalCounselPortal from './components/LegalCounselPortal';
 import { AppTab, GeminiModel } from './types';
-import { getAI, refreshConfig, getApiKey, isServerPrincipalActive, safeGenerateContent } from './services/geminiService';
+import { refreshConfig, isServerPrincipalActive, safeGenerateContent } from './services/geminiService';
 import { headerPulse } from './services/headerPulseService';
 import { resolveNavTab } from './services/navigationConfig';
 import {

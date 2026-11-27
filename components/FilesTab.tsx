@@ -108,6 +108,18 @@ export const FilesTab: React.FC<FilesTabProps> = ({ onNavigate, isPrincipalMode 
     loadFiles();
   }, []);
 
+  // Single seed-defaults path (was inlined 3x with small differences).
+  const seedDefaults = async (opts?: { persist?: boolean; forceSelect?: boolean }) => {
+    const defaults = getPreloadedVaultFiles();
+    if (opts?.persist) {
+      for (const f of defaults) {
+        await saveVaultFile(f);
+      }
+    }
+    setFiles(defaults);
+    if (opts?.forceSelect || !selectedFileId) setSelectedFileId(defaults[0].id);
+  };
+
   const loadFiles = async () => {
     try {
       const stored = await getAllVaultFiles();
@@ -116,18 +128,11 @@ export const FilesTab: React.FC<FilesTabProps> = ({ onNavigate, isPrincipalMode 
         if (!selectedFileId) setSelectedFileId(stored[0].id);
       } else {
         // Preload default tactical files
-        const defaults = getPreloadedVaultFiles();
-        for (const f of defaults) {
-          await saveVaultFile(f);
-        }
-        setFiles(defaults);
-        if (!selectedFileId) setSelectedFileId(defaults[0].id);
+        await seedDefaults({ persist: true });
       }
     } catch (err) {
       console.warn('Error loading files:', err);
-      const defaults = getPreloadedVaultFiles();
-      setFiles(defaults);
-      if (!selectedFileId) setSelectedFileId(defaults[0].id);
+      await seedDefaults();
     }
   };
 
@@ -463,12 +468,7 @@ DIRECTIVE FROM PRINCIPAL: "${promptToUse}"`);
 
   const handleResetVault = async () => {
     await clearAllVaultFiles();
-    const defaults = getPreloadedVaultFiles();
-    for (const d of defaults) {
-      await saveVaultFile(d);
-    }
-    setFiles(defaults);
-    setSelectedFileId(defaults[0].id);
+    await seedDefaults({ persist: true, forceSelect: true });
   };
 
   const formatTime = (secs: number) => {
