@@ -58,7 +58,7 @@ export const JEREMY_IRONS_ACOUSTIC_REFERENCE = {
     speechRate: 0.88,
     chestResonanceDb: 6.0,
     thoracicWarmthDb: 2.6,
-    articulationBoostDb: 4.5,
+    articulationBoostDb: 1.6,
     gravelSaturation: 0.85
   }
 };
@@ -759,7 +759,7 @@ export const VoiceSpectralAnalysis: React.FC<VoiceSpectralAnalysisProps> = ({
 
     // British consonant bite boost
     if (metrics.rpArticulationRatio < JEREMY_IRONS_ACOUSTIC_REFERENCE.rpArticulationRatio * 0.85) {
-      tuning.articulationBoostDb = Math.min(7.5, Number(((activeDspConfig?.articulationBoostDb || 4.5) + 2.0).toFixed(1)));
+      tuning.articulationBoostDb = Math.min(7.5, Number(((activeDspConfig?.articulationBoostDb || 1.6) + 2.0).toFixed(1)));
     }
 
     // Vocal gravel saturation

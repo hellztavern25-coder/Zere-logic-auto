@@ -922,15 +922,15 @@ async function startServer() {
           harmonicsToNoiseRatioDb: 18.2,
           gravelSaturation: 0.85,
           formants: {
-            f1Hz: 520,
-            f2Hz: 1450,
-            f3Hz: 2650
+            f1Hz: 375,
+            f2Hz: 1320,
+            f3Hz: 2640
           },
           spectralCentroidHz: 1180,
           spectralTiltDb: -4.2,
           chestResonanceDb: 6.0,
-          warmthDb: 2.5,
-          articulationDb: 4.5
+          warmthDb: 2.6,
+          articulationDb: 1.6
         },
         prosodyDNA: {
           speechRateWpm: 104,
@@ -942,14 +942,14 @@ async function startServer() {
         },
         systemPromptStyle: 'dry, gravelly, aristocratic British baritone, unhurried measured cadence, crisp Oxford plosives',
         dspConfig: {
-          pitchMultiplier: 0.78,
+          pitchMultiplier: 0.87,
           speechRate: 0.88,
           chestResonanceDb: 6.0,
-          thoracicWarmthDb: 2.5,
-          articulationBoostDb: 4.5,
+          thoracicWarmthDb: 2.6,
+          articulationBoostDb: 1.6,
           gravelSaturation: 0.85,
-          antiBoxNotchDb: -2.4,
-          roomAmbience: 0.20
+          antiBoxNotchDb: -2.5,
+          roomAmbience: 0.18
         },
         speechSynthesisConfig: {
           pitch: 0.65,

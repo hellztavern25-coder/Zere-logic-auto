@@ -771,9 +771,9 @@ function makeGravelCurve(amount: number = 0.5): Float32Array {
 /**
  * Creates the Jeremy Irons Web Audio DSP chain connected to the target destination.
  * Implements formant-shifting presets and 3-pole formant modeling:
- * F1: Pharyngeal cavity / deep baritone floor (380Hz, +6.2dB)
- * F2: Lingual oral cavity / darkened RP vowel backness (1350Hz, -3.0dB)
- * F3: Actor's projection formant / British razor articulation (2680Hz, +6.5dB)
+ * F1: Pharyngeal cavity / deep baritone floor (375Hz, +4.5dB)
+ * F2: Lingual oral cavity / darkened RP vowel backness (1320Hz, -2.8dB)
+ * F3: Actor's projection formant / British razor articulation (2640Hz, +2.4dB)
  * Plus sub-harmonic chest resonance, organic soft-sigmoid gravel, and dynamic compression.
  */
 export function buildJeremyIronsDSP(
@@ -811,7 +811,7 @@ export function buildJeremyIronsDSP(
   warmthFilter.type = 'peaking';
   warmthFilter.frequency.value = 220;
   warmthFilter.Q.value = 1.2;
-  warmthFilter.gain.value = 2.2;
+  warmthFilter.gain.value = 2.6;
 
   // 4. Formant 2 (F2): Oral/Lingual Cavity Backness (~1320Hz) - Notch for Darkened RP Vowels
   const f2Filter = ctx.createBiquadFilter();
@@ -825,7 +825,7 @@ export function buildJeremyIronsDSP(
   deboxFilter.type = 'peaking';
   deboxFilter.frequency.value = 650;
   deboxFilter.Q.value = 1.4;
-  deboxFilter.gain.value = -2.4;
+  deboxFilter.gain.value = -2.5;
 
   // 6. Formant 3 (F3): Smoothed Actor's Projection Formant (~2640Hz, no metallic spike)
   const f3Filter = ctx.createBiquadFilter();
