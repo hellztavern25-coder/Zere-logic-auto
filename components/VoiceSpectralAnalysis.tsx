@@ -54,11 +54,11 @@ export const JEREMY_IRONS_ACOUSTIC_REFERENCE = {
   speechRateWpm: 128, // Unhurried, deliberate aristocrat cadence
   meanPauseDurationMs: 440, // Generous dramatic punctuation pauses
   dspDefaults: {
-    pitchMultiplier: 0.78,
+    pitchMultiplier: 0.87,
     speechRate: 0.88,
     chestResonanceDb: 6.0,
-    thoracicWarmthDb: 2.5,
-    articulationBoostDb: 4.5,
+    thoracicWarmthDb: 2.6,
+    articulationBoostDb: 1.6,
     gravelSaturation: 0.85
   }
 };
@@ -740,9 +740,9 @@ export const VoiceSpectralAnalysis: React.FC<VoiceSpectralAnalysisProps> = ({
     // Pitch adjustment
     if (metrics.diagnostics.pitchDiffHz > 8) {
       // Lower pitch transposition
-      tuning.pitchMultiplier = Math.max(0.65, Number(((activeDspConfig?.pitchMultiplier || 0.78) - 0.08).toFixed(2)));
+      tuning.pitchMultiplier = Math.max(0.65, Number(((activeDspConfig?.pitchMultiplier || 0.87) - 0.08).toFixed(2)));
     } else if (metrics.diagnostics.pitchDiffHz < -8) {
-      tuning.pitchMultiplier = Math.min(0.95, Number(((activeDspConfig?.pitchMultiplier || 0.78) + 0.06).toFixed(2)));
+      tuning.pitchMultiplier = Math.min(0.95, Number(((activeDspConfig?.pitchMultiplier || 0.87) + 0.06).toFixed(2)));
     }
 
     // Cadence speed adjustment
@@ -759,7 +759,7 @@ export const VoiceSpectralAnalysis: React.FC<VoiceSpectralAnalysisProps> = ({
 
     // British consonant bite boost
     if (metrics.rpArticulationRatio < JEREMY_IRONS_ACOUSTIC_REFERENCE.rpArticulationRatio * 0.85) {
-      tuning.articulationBoostDb = Math.min(7.5, Number(((activeDspConfig?.articulationBoostDb || 4.5) + 2.0).toFixed(1)));
+      tuning.articulationBoostDb = Math.min(7.5, Number(((activeDspConfig?.articulationBoostDb || 1.6) + 2.0).toFixed(1)));
     }
 
     // Vocal gravel saturation

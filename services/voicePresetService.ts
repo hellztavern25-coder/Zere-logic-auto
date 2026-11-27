@@ -20,12 +20,12 @@ export const FACTORY_VOICE_PRESETS: VoiceTonalPreset[] = [
     sourceModelName: 'Jeremy Irons (Canonical Aristocrat)',
     dspConfig: {
       pitchMultiplier: 0.87,
-      speechRate: 0.90,
-      chestResonanceDb: 5.2,
+      speechRate: 0.88,
+      chestResonanceDb: 6.0,
       thoracicWarmthDb: 2.6,
       articulationBoostDb: 1.6,
-      gravelSaturation: 0.42,
-      antiBoxNotchDb: -2.4,
+      gravelSaturation: 0.85,
+      antiBoxNotchDb: -2.5,
       roomAmbience: 0.18
     },
     systemPromptDirective: 'dry, gravelly, aristocratic British baritone, steady low-E chest register, unhurried measured cadence, crisp Oxford bite',

@@ -1267,27 +1267,27 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
             <div className="bg-black/50 p-2.5 rounded-xl border border-amber-500/20">
               <span className="text-[9px] text-zinc-500 block uppercase">F1 Pharyngeal</span>
               <span className="text-amber-300 font-bold text-sm">
-                {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f1Hz || 380} Hz
+                {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f1Hz || 375} Hz
               </span>
-              <span className="text-[9px] text-zinc-400 block">+{JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f1GainDb || 6.2} dB (Floor)</span>
+              <span className="text-[9px] text-zinc-400 block">+{JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f1GainDb || 4.5} dB (Floor)</span>
             </div>
 
             {/* F2 */}
             <div className="bg-black/50 p-2.5 rounded-xl border border-amber-500/20">
               <span className="text-[9px] text-zinc-500 block uppercase">F2 Lingual Retract</span>
               <span className="text-amber-300 font-bold text-sm">
-                {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f2Hz || 1350} Hz
+                {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f2Hz || 1320} Hz
               </span>
-              <span className="text-[9px] text-zinc-400 block">{JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f2GainDb || -3.0} dB (RP Notch)</span>
+              <span className="text-[9px] text-zinc-400 block">{JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f2GainDb || -2.8} dB (RP Notch)</span>
             </div>
 
             {/* F3 */}
             <div className="bg-black/50 p-2.5 rounded-xl border border-amber-500/20">
               <span className="text-[9px] text-zinc-500 block uppercase">F3 Actor's Formant</span>
               <span className="text-amber-300 font-bold text-sm">
-                {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f3Hz || 2680} Hz
+                {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f3Hz || 2640} Hz
               </span>
-              <span className="text-[9px] text-zinc-400 block">+{JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f3GainDb || 6.5} dB (Bite)</span>
+              <span className="text-[9px] text-zinc-400 block">+{JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.f3GainDb || 2.4} dB (Bite)</span>
             </div>
 
             {/* Tract Factor */}
@@ -1303,7 +1303,7 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
             <div className="bg-black/50 p-2.5 rounded-xl border border-amber-500/20">
               <span className="text-[9px] text-zinc-500 block uppercase">Sigmoid Gravel</span>
               <span className="text-zinc-200 font-bold text-sm">
-                {Math.round((JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.gravelAmount || 0.88) * 100)}%
+                {Math.round((JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.gravelAmount || 0.85) * 100)}%
               </span>
               <span className="text-[9px] text-zinc-400 block">4x Oversampled</span>
             </div>
@@ -1312,7 +1312,7 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
             <div className="bg-black/50 p-2.5 rounded-xl border border-amber-500/20">
               <span className="text-[9px] text-zinc-500 block uppercase">Chest Depth</span>
               <span className="text-zinc-200 font-bold text-sm">
-                +{JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.chestResonanceDb || 6.8} dB
+                +{JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.chestResonanceDb || 6.0} dB
               </span>
               <span className="text-[9px] text-zinc-400 block">@ 105 Hz Sub-Shelf</span>
             </div>
@@ -1328,7 +1328,7 @@ const VoicePortal: React.FC<VoicePortalProps> = ({ socket, avatarUrl, onAvatarCl
           <div className="flex items-center gap-3">
             <span>Rate: {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.speechRate || 0.88}x</span>
             <span>•</span>
-            <span>Pitch: {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.pitchRate || 0.86}x</span>
+            <span>Pitch: {JEREMY_IRONS_FORMANT_PRESETS[activeFormantPreset]?.pitchRate || 0.87}x</span>
             <span>•</span>
             <span className="text-amber-400 font-bold">Address: Principal</span>
           </div>

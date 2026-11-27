@@ -43,14 +43,14 @@ import {
   acousticLatticeService, 
   CANONICAL_ROOM_COORDINATES, 
   FLASHCARDS_DECK_F, 
+  CANONICAL_INSTRUMENT_ARCHETYPES,
   CANONICAL_AE_ANCHORS, 
   CANONICAL_RECIPES,
   calculateNoteFrequency,
   PITCH_CLASSES
 } from '../services/acousticLatticeService';
 import {
-  anchorEngine,
-  INSTRUMENT_ARCHETYPES
+  anchorEngine
 } from '../services/anchorEngine';
 
 interface AcousticLatticeStudioProps {
@@ -111,7 +111,6 @@ const AcousticLatticeStudio: React.FC<AcousticLatticeStudioProps> = ({
     return () => {
       acousticLatticeService.stopAudio();
       acousticLatticeService.stopEarListening();
-      anchorEngine.stopAudio();
     };
   }, []);
 
@@ -153,7 +152,6 @@ const AcousticLatticeStudio: React.FC<AcousticLatticeStudioProps> = ({
 
   const handleStop = () => {
     acousticLatticeService.stopAudio();
-    anchorEngine.stopAudio();
     setIsPlayingAudio(false);
     setPlayingMode(null);
     setActiveDerivedPlayMode(null);
@@ -176,7 +174,12 @@ const AcousticLatticeStudio: React.FC<AcousticLatticeStudioProps> = ({
   const handlePlayAnchorTone = async (note: string, mode: 'just' | 'et') => {
     setIsPlayingAudio(true);
     setActiveDerivedPlayMode('anchor_pair');
-    await anchorEngine.playAnchor(note, mode);
+    // Round 5: anchor playback runs through the single lattice pipeline now.
+    const anchor = anchorEngine.getLedger().interleavedSequence.find(a => a.note.toUpperCase() === note.toUpperCase());
+    if (anchor) {
+      const freq = mode === 'just' ? anchor.justIntonationHz : anchor.equalTemperamentHz;
+      await acousticLatticeService.playPureSine(freq, 1.6, 0.32);
+    }
     setIsPlayingAudio(false);
     setActiveDerivedPlayMode(null);
   };
@@ -184,7 +187,12 @@ const AcousticLatticeStudio: React.FC<AcousticLatticeStudioProps> = ({
   const handlePlayDerivedTone = async (mode: 'timbre' | 'pure_invariant') => {
     setIsPlayingAudio(true);
     setActiveDerivedPlayMode(mode);
-    await anchorEngine.playDerived(derivedTone, mode);
+    // Round 5: derived-tone playback runs through the single lattice pipeline now.
+    if (mode === 'pure_invariant') {
+      await acousticLatticeService.playPureSine(derivedTone.targetFrequencyHz, 2.0, 0.3);
+    } else {
+      await acousticLatticeService.playDerivedTone(derivedTone, 2.0, 0.3);
+    }
     setIsPlayingAudio(false);
     setActiveDerivedPlayMode(null);
   };
@@ -1078,7 +1086,7 @@ const AcousticLatticeStudio: React.FC<AcousticLatticeStudioProps> = ({
               <div className="space-y-1.5">
                 <span className="text-[8px] font-mono uppercase text-zinc-500 block">Select Instrument Voice Archetype:</span>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {INSTRUMENT_ARCHETYPES.map((arch) => {
+                  {CANONICAL_INSTRUMENT_ARCHETYPES.map((arch) => {
                     const isSelected = selectedArchetypeId === arch.id;
                     return (
                       <button

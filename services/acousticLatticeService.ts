@@ -16,7 +16,9 @@ import {
   RecipePerformancePiece, 
   SixtyBitScoreToken, 
   ClosedLoopEarAudit,
-  AcousticTimbreFingerprint
+  AcousticTimbreFingerprint,
+  InstrumentArchetype,
+  DerivedInstrumentTone
 } from '../types';
 
 // Web Audio Context Singleton
@@ -211,7 +213,7 @@ export const FLASHCARDS_DECK_F: NoteFlashcard[] = [
       genre: 'Baroque Classical',
       harmonicAmplitudes: [1.0, 0.55, 0.32, 0.18, 0.11, 0.06, 0.03, 0.01],
       spectralCentroidHz: 1100,
-      formants: { f1: 390, f2: 1200, f3: 2500 },
+      formants: { f1: 300, f2: 1100, f3: 2200 }, // canonical: anchor values per Preston, Nov 27 2026
       attackTimeMs: 4,
       decayTimeMs: 420,
       sustainLevel: 0.55,
@@ -240,7 +242,7 @@ export const FLASHCARDS_DECK_F: NoteFlashcard[] = [
       genre: 'Opera',
       harmonicAmplitudes: [1.0, 0.80, 0.75, 0.60, 0.50, 0.35, 0.25, 0.15],
       spectralCentroidHz: 2800,
-      formants: { f1: 580, f2: 1900, f3: 3100 },
+      formants: { f1: 650, f2: 1650, f3: 2850 }, // canonical: anchor values per Preston, Nov 27 2026
       attackTimeMs: 40,
       decayTimeMs: 80,
       sustainLevel: 0.92,
@@ -306,6 +308,107 @@ export const FLASHCARDS_DECK_F: NoteFlashcard[] = [
       gravelOrAirNoise: 0.28,
       description: 'Strained double-reed resistance, nasal ancient overtone stack, intense fragile emotion.'
     }
+  }
+];
+
+// -------------------------------------------------------------
+// 2b. CANONICAL TIMBRE DATABASE — THE ONE CANONICAL TIMBRE DB
+// -------------------------------------------------------------
+// Built Nov 27, 2026 (round 5) from Preston's settled picks. The canonical set
+// is a BLEND, not one file's copy: tenor-sax formants from the lattice deck,
+// concert-grand + operatic-tenor formants from the anchor engine. For fields
+// Preston did not pick (harmonic series, envelope, gravel), the lattice deck's
+// values are canonical — the deck is the live copy hosted in this service.
+// anchorEngine.ts INSTRUMENT_ARCHETYPES is DISENGAGED (kept as fallback per
+// Preston, never deleted) and is no longer read by the studio or deriveInstrumentTone.
+export const CANONICAL_INSTRUMENT_ARCHETYPES: InstrumentArchetype[] = [
+  {
+    id: 'steward-baritone',
+    name: 'The Steward Vocal Profile (Jeremy Irons)',
+    category: 'Vocal / Dramatic Baritone',
+    sourceOrigin: 'ZereØ Core Identity Substrate (2026)',
+    harmonicAmplitudes: [1.0, 0.92, 0.58, 0.44, 0.32, 0.22, 0.14, 0.08],
+    formants: { f1: 380, f2: 1350, f3: 2680 },
+    envelope: { attackMs: 25, decayMs: 110, sustainLevel: 0.85, releaseMs: 280 },
+    airGravelNoise: 0.38,
+    description: 'Aristocratic British baritone gravitas. Deep pharyngeal cavity, elongated vocal tract, vocal fry friction, and dry mahogany resonance.'
+  },
+  {
+    id: 'harmon-trumpet',
+    name: 'Harmon-Muted Trumpet (Miles Davis)',
+    category: 'Brass / Muted Acoustic',
+    sourceOrigin: 'Kind of Blue (1959)',
+    harmonicAmplitudes: [1.0, 0.85, 0.72, 0.35, 0.18, 0.08, 0.04, 0.02],
+    formants: { f1: 520, f2: 1750, f3: 2850 },
+    envelope: { attackMs: 18, decayMs: 80, sustainLevel: 0.75, releaseMs: 140 },
+    airGravelNoise: 0.22,
+    description: 'Piercing metallic intimacy, sharp breath envelope, bright 2nd and 3rd partials, tight acoustic containment.'
+  },
+  {
+    id: 'tenor-sax',
+    name: 'Tenor Saxophone (John Coltrane)',
+    category: 'Woodwind / Reed',
+    sourceOrigin: 'A Love Supreme (1964)',
+    harmonicAmplitudes: [1.0, 0.60, 0.88, 0.45, 0.38, 0.20, 0.12, 0.06],
+    formants: { f1: 480, f2: 1620, f3: 2950 }, // canonical: lattice values per Preston
+    envelope: { attackMs: 22, decayMs: 95, sustainLevel: 0.82, releaseMs: 180 },
+    airGravelNoise: 0.35,
+    description: 'Warm, raspy brass-reed resistance. Husky lower partials with spiritual upper-register harmonic thrust.'
+  },
+  {
+    id: 'concert-grand',
+    name: 'Steinway D-274 Concert Grand (Glenn Gould)',
+    category: 'Acoustic Percussion / Strings',
+    sourceOrigin: 'Goldberg Variations (1981)',
+    harmonicAmplitudes: [1.0, 0.55, 0.32, 0.18, 0.11, 0.06, 0.03, 0.01],
+    formants: { f1: 300, f2: 1100, f3: 2200 }, // canonical: anchor values per Preston
+    envelope: { attackMs: 4, decayMs: 420, sustainLevel: 0.55, releaseMs: 500 },
+    airGravelNoise: 0.02,
+    description: 'Percussive felt hammer strike, crystalline upper partials, rapid initial transient and long linear decay.'
+  },
+  {
+    id: 'operatic-tenor',
+    name: 'Spinto Tenor (Luciano Pavarotti)',
+    category: 'Vocal / Heroic Operatic',
+    sourceOrigin: 'Modena Masterclass & Puccini Archives',
+    harmonicAmplitudes: [1.0, 0.80, 0.75, 0.60, 0.50, 0.35, 0.25, 0.15],
+    formants: { f1: 650, f2: 1650, f3: 2850 }, // canonical: anchor values per Preston; Singer's Formant ring around 2.8kHz
+    envelope: { attackMs: 40, decayMs: 80, sustainLevel: 0.92, releaseMs: 250 },
+    airGravelNoise: 0.12,
+    description: 'Heroic Italian spinto vocal projection with piercing 2.8kHz acoustic ring ("squillo") capable of cutting through a 90-piece orchestra.'
+  },
+  {
+    id: 'french-horn',
+    name: 'Conical French Horn in F (Berlin Phil)',
+    category: 'Brass / Conical Bore',
+    sourceOrigin: 'Beethoven Symphony No. 9 (1963)',
+    harmonicAmplitudes: [1.0, 0.95, 0.65, 0.40, 0.22, 0.10, 0.05, 0.01],
+    formants: { f1: 340, f2: 980, f3: 2400 },
+    envelope: { attackMs: 65, decayMs: 120, sustainLevel: 0.88, releaseMs: 320 },
+    airGravelNoise: 0.05,
+    description: 'Heroic conical brass acoustic warmth. Dominant lower fundamental with gentle bell flair.'
+  },
+  {
+    id: 'bassoon-modernist',
+    name: 'High French Bassoon (Igor Stravinsky)',
+    category: 'Woodwind / Double Reed',
+    sourceOrigin: 'The Rite of Spring (1960)',
+    harmonicAmplitudes: [1.0, 0.40, 0.82, 0.30, 0.55, 0.15, 0.25, 0.05],
+    formants: { f1: 440, f2: 1480, f3: 2800 },
+    envelope: { attackMs: 30, decayMs: 90, sustainLevel: 0.78, releaseMs: 210 },
+    airGravelNoise: 0.28,
+    description: 'Strained double-reed hyper-register. Primitive, ritualistic overtone stack with high emotional tension.'
+  },
+  {
+    id: 'invariant-pure',
+    name: 'Pure Invariant Resonator (Zero Timbre)',
+    category: 'Mathematical Reference',
+    sourceOrigin: 'ZereØ Coordinate Lattice Invariant',
+    harmonicAmplitudes: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    formants: { f1: 0, f2: 0, f3: 0 },
+    envelope: { attackMs: 15, decayMs: 40, sustainLevel: 1.0, releaseMs: 150 },
+    airGravelNoise: 0.0,
+    description: 'The isolated fundamental f0. Free of timbral masking, acoustic environment, and human physical rendering artifacts.'
   }
 ];
 
@@ -593,6 +696,151 @@ export class AcousticLatticeService {
 
     return new Promise(resolve => {
       setTimeout(resolve, durationMs);
+    });
+  }
+
+  /**
+   * Play a pure sinusoidal tone at an exact frequency.
+   * Moved here Nov 27, 2026 (round 5): the anchor engine's duplicate pipeline
+   * (WebAudioSynthesisPipeline) is disengaged — kept as fallback in anchorEngine.ts.
+   * All studio playback now runs through this one pipeline, so stopAudio() stops it.
+   */
+  public playPureSine(frequencyHz: number, durationSec = 1.5, volume = 0.3): Promise<void> {
+    this.stopAudio();
+    const ctx = getAudioContext();
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(frequencyHz, now);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(volume, now + 0.05);
+    gain.gain.setValueAtTime(volume, now + durationSec - 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + durationSec);
+
+    this.activeOscillators.push(osc);
+    this.activeGains.push(gain);
+
+    return new Promise(resolve => {
+      setTimeout(resolve, durationSec * 1000);
+    });
+  }
+
+  /**
+   * Play a derived instrument tone (additive harmonics + formants + envelope + gravel).
+   * Moved here Nov 27, 2026 (round 5) from the disengaged anchor pipeline:
+   * same ADSR + formant filters + H1-H8 additive + air-noise shape, one pipeline.
+   * The tone's timbre comes from CANONICAL_INSTRUMENT_ARCHETYPES (Preston's picks).
+   */
+  public playDerivedTone(derived: DerivedInstrumentTone, durationSec = 2.0, volume = 0.28): Promise<void> {
+    this.stopAudio();
+    const ctx = getAudioContext();
+    const now = ctx.currentTime;
+
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.0001, now);
+
+    // Apply ADSR
+    const attack = Math.max(0.005, derived.envelope.attackMs / 1000);
+    const decay = Math.max(0.01, derived.envelope.decayMs / 1000);
+    const sustain = derived.envelope.sustainLevel * volume;
+    const release = Math.max(0.02, derived.envelope.releaseMs / 1000);
+
+    masterGain.gain.linearRampToValueAtTime(volume, now + attack);
+    masterGain.gain.linearRampToValueAtTime(sustain, now + attack + decay);
+    const releaseStart = Math.max(now + attack + decay, now + durationSec - release);
+    masterGain.gain.setValueAtTime(sustain, releaseStart);
+    masterGain.gain.exponentialRampToValueAtTime(0.0001, releaseStart + release);
+
+    // Formant filters if specified
+    let outputNode: AudioNode = masterGain;
+    if (derived.formants.f1 > 0) {
+      const bq1 = ctx.createBiquadFilter();
+      bq1.type = 'peaking';
+      bq1.frequency.setValueAtTime(derived.formants.f1, now);
+      bq1.Q.setValueAtTime(3.5, now);
+      bq1.gain.setValueAtTime(5.0, now);
+
+      const bq2 = ctx.createBiquadFilter();
+      bq2.type = 'peaking';
+      bq2.frequency.setValueAtTime(derived.formants.f2, now);
+      bq2.Q.setValueAtTime(4.0, now);
+      bq2.gain.setValueAtTime(4.0, now);
+
+      masterGain.connect(bq1);
+      bq1.connect(bq2);
+      outputNode = bq2;
+    }
+
+    outputNode.connect(ctx.destination);
+    this.activeGains.push(masterGain);
+
+    // Additive harmonic series
+    derived.harmonicSeries.forEach((h) => {
+      if (h.relativeAmplitude <= 0.001) return;
+      if (h.frequencyHz > 18000) return; // avoid aliasing
+
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(h.frequencyHz, now);
+
+      const oscGain = ctx.createGain();
+      oscGain.gain.setValueAtTime(h.relativeAmplitude, now);
+
+      osc.connect(oscGain);
+      oscGain.connect(masterGain);
+
+      this.activeOscillators.push(osc);
+      this.activeGains.push(oscGain);
+
+      osc.start(now);
+      osc.stop(releaseStart + release);
+    });
+
+    // Optional subtle vocal fry or air turbulence noise
+    if (derived.airGravelNoise > 0.05) {
+      try {
+        const bufferSize = ctx.sampleRate * 1.5;
+        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = (Math.random() * 2 - 1) * 0.05;
+        }
+
+        const whiteNoise = ctx.createBufferSource();
+        whiteNoise.buffer = noiseBuffer;
+        whiteNoise.loop = true;
+
+        const noiseFilter = ctx.createBiquadFilter();
+        noiseFilter.type = 'bandpass';
+        noiseFilter.frequency.setValueAtTime(derived.targetFrequencyHz * 1.5, now);
+        noiseFilter.Q.setValueAtTime(2.0, now);
+
+        const noiseGain = ctx.createGain();
+        noiseGain.gain.setValueAtTime(derived.airGravelNoise * 0.06, now);
+
+        whiteNoise.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(masterGain);
+
+        this.activeGains.push(noiseGain);
+        whiteNoise.start(now);
+        whiteNoise.stop(releaseStart + release);
+      } catch {}
+    }
+
+    return new Promise(resolve => {
+      setTimeout(() => {
+        resolve();
+      }, (durationSec + release) * 1000);
     });
   }
 
