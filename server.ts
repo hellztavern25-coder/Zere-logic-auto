@@ -1717,7 +1717,12 @@ async function startServer() {
   });
 
   // Export Identity Voice Profile endpoint for remote ZereØ instance mirroring (also serves canonical static path)
-  app.get(['/api/voice/identity-profile', '/api/voice-profile/identity', '/zereo_identity_voice_profile.json'], async (req, res) => {
+  app.get(['/api/voice/identity-profile', '/api/voice-profile/identity', '/zereo_identity_voice_profile.json'], async (req, res, next) => {
+    // Let Vite handle ?import requests so the JSON is transformed to an ES module
+    // instead of being served as raw application/json (blank preview fix).
+    if (req.query.import !== undefined) {
+      return next();
+    }
     try {
       const data = await fs.readFile(IDENTITY_VOICE_PROFILE_FILE, 'utf8');
       res.setHeader('Content-Type', 'application/json');
