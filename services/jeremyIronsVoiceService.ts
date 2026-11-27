@@ -81,11 +81,11 @@ export const JEREMY_IRONS_FORMANT_PRESETS: Record<string, FormantPresetDefinitio
     f3Hz: 2640,
     f3GainDb: 2.4,
     vocalTractLengthFactor: 1.14,
-    chestResonanceDb: 5.2,
+    chestResonanceDb: 6.0,
     articulationDb: 1.6,
-    gravelAmount: 0.42,
+    gravelAmount: 0.85,
     pitchRate: 0.87,
-    speechRate: 0.90,
+    speechRate: 0.88,
     description: 'Anchored around Low E (82.4 Hz) with natural pharyngeal cavity depth, darkened RP vowel backness, and warm analog baritone presence without metallic distortion.'
   },
   'theatrical-menace': {
@@ -147,10 +147,10 @@ export const JEREMY_IRONS_FORMANT_PRESETS: Record<string, FormantPresetDefinitio
 export interface JeremyIronsConfig {
   baseVoice: 'Charon' | 'Fenrir' | 'Orus';
   pitchRate: number; // 0.84 to 0.92 (default 0.87 - Low E2 anchor)
-  gravelAmount: number; // 0.0 to 1.0 (default 0.42)
-  chestResonanceDb: number; // dB boost at 85Hz (default 5.2)
+  gravelAmount: number; // 0.0 to 1.0 (default 0.85)
+  chestResonanceDb: number; // dB boost at 85Hz (default 6.0)
   articulationDb: number; // dB boost at 3100Hz (default 1.6)
-  speechRate: number; // 0.80 to 1.15 (default 0.90)
+  speechRate: number; // 0.80 to 1.15 (default 0.88)
   // Specific Formant-Shifting Presets in DSP core to mimic his gravitas:
   formantPresetName?: string;
   f1Hz?: number;
@@ -192,10 +192,10 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
     config: {
       baseVoice: CANONICAL_BASE_VOICE,
       pitchRate: 0.87,
-      gravelAmount: 0.42,
-      chestResonanceDb: 5.2,
+      gravelAmount: 0.85,
+      chestResonanceDb: 6.0,
       articulationDb: 1.6,
-      speechRate: 0.90,
+      speechRate: 0.88,
       formantPresetName: 'sovereign-gravitas',
       f1Hz: 375,
       f1GainDb: 4.5,
@@ -220,10 +220,10 @@ export const VOICE_MODULATION_PROFILES: Record<VoiceModulationProfile, Modulatio
     config: {
       baseVoice: CANONICAL_BASE_VOICE,
       pitchRate: 0.87,
-      gravelAmount: 0.42,
-      chestResonanceDb: 5.2,
+      gravelAmount: 0.85,
+      chestResonanceDb: 6.0,
       articulationDb: 1.6,
-      speechRate: 0.90,
+      speechRate: 0.88,
       formantPresetName: 'sovereign-gravitas',
       f1Hz: 375,
       f1GainDb: 4.5,
@@ -378,11 +378,11 @@ export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
     ],
     dspConfig: {
       pitchMultiplier: 0.87,
-      speechRate: 0.90,
-      chestResonanceDb: 5.2,
+      speechRate: 0.88,
+      chestResonanceDb: 6.0,
       thoracicWarmthDb: 2.6,
       articulationBoostDb: 1.6,
-      gravelSaturation: 0.42,
+      gravelSaturation: 0.85,
       antiBoxNotchDb: -2.5,
       roomAmbience: 0.18,
       formantPresetName: 'sovereign-gravitas',
@@ -448,13 +448,14 @@ export const CANONICAL_VOICE_PROFILES: VoiceProfile[] = [
     ],
     dspConfig: {
       pitchMultiplier: 0.87,
-      speechRate: 0.90,
-      chestResonanceDb: 5.2,
-      thoracicWarmthDb: 2.5,
+      speechRate: 0.88,
+      chestResonanceDb: 6.0,
+      thoracicWarmthDb: 2.6,
       articulationBoostDb: 1.6,
-      gravelSaturation: 0.42,
-      antiBoxNotchDb: -2.4,
-      roomAmbience: 0.20
+      gravelSaturation: 0.85,
+      antiBoxNotchDb: -2.5,
+      roomAmbience: 0.18,
+      formantPresetName: 'sovereign-gravitas'
     },
     speechSynthesisConfig: {
       pitch: 0.81,
@@ -789,7 +790,7 @@ export function buildJeremyIronsDSP(
   const chestFilter = ctx.createBiquadFilter();
   chestFilter.type = 'lowshelf';
   chestFilter.frequency.value = 85;
-  chestFilter.gain.value = Math.min(6.2, Math.max(2.0, config.chestResonanceDb ?? 5.2));
+  chestFilter.gain.value = Math.min(6.2, Math.max(2.0, config.chestResonanceDb ?? 6.0));
 
   // 1b. Low-E2 (82.41 Hz) Fundamental Chest Resonance Anchor
   const lowEAnchor = ctx.createBiquadFilter();
@@ -842,7 +843,7 @@ export function buildJeremyIronsDSP(
 
   // 8. Light Analog WaveShaper (Subtle warm vocal fold texture, zero robotic buzz)
   const waveshaper = ctx.createWaveShaper();
-  const gravel = Math.min(1, Math.max(0, config.gravelAmount ?? 0.42));
+  const gravel = Math.min(1, Math.max(0, config.gravelAmount ?? 0.85));
   waveshaper.curve = makeGravelCurve(gravel * 0.14);
   waveshaper.oversample = '4x';
 
@@ -914,7 +915,7 @@ export function buildJeremyIronsDSP(
     f1: f1Filter.frequency.value,
     f2: f2Filter.frequency.value,
     f3: f3Filter.frequency.value,
-    gravel: config.gravelAmount ?? 0.42,
+    gravel: config.gravelAmount ?? 0.85,
     tractFactor: config.vocalTractLengthFactor ?? 1.14,
     chestDb: chestFilter.gain.value
   });
@@ -1108,7 +1109,7 @@ class JeremyIronsPlaybackManager {
       ...(parsed || {}),
       baseVoice: migratedBase,
       pitchRate: clampLowEPitchRate(parsed?.pitchRate),
-      gravelAmount: rawGravel > 0.7 ? 0.42 : rawGravel
+      gravelAmount: rawGravel > 0.7 ? 0.85 : rawGravel
     };
   }
 
@@ -1253,10 +1254,10 @@ class JeremyIronsPlaybackManager {
       ...(meta?.config || DEFAULT_JEREMY_IRONS_CONFIG),
       baseVoice: profile.baseVoice || this.activeConfig.baseVoice || CANONICAL_BASE_VOICE,
       pitchRate: clampLowEPitchRate(dsp?.pitchMultiplier ?? meta?.config.pitchRate),
-      gravelAmount: dsp?.gravelSaturation ?? meta?.config.gravelAmount ?? 0.42,
-      chestResonanceDb: dsp?.chestResonanceDb ?? meta?.config.chestResonanceDb ?? 5.2,
+      gravelAmount: dsp?.gravelSaturation ?? meta?.config.gravelAmount ?? 0.85,
+      chestResonanceDb: dsp?.chestResonanceDb ?? meta?.config.chestResonanceDb ?? 6.0,
       articulationDb: dsp?.articulationBoostDb ?? meta?.config.articulationDb ?? 1.6,
-      speechRate: dsp?.speechRate ?? meta?.config.speechRate ?? 0.90,
+      speechRate: dsp?.speechRate ?? meta?.config.speechRate ?? 0.88,
       formantPresetName: dsp?.formantPresetName || meta?.config.formantPresetName || this.activeFormantPreset,
       f1Hz: formants?.f1Hz ?? meta?.config.f1Hz,
       f1GainDb: formants?.f1GainDb ?? meta?.config.f1GainDb,
@@ -1796,10 +1797,10 @@ class JeremyIronsPlaybackManager {
         const config: JeremyIronsConfig = {
           baseVoice: profile.baseVoice || CANONICAL_BASE_VOICE,
           pitchRate: clampLowEPitchRate(profile.dspConfig.pitchMultiplier ?? LOW_E_TARGET_PITCH_RATE),
-          gravelAmount: profile.dspConfig.gravelSaturation ?? 0.42,
-          chestResonanceDb: profile.dspConfig.chestResonanceDb ?? 5.2,
+          gravelAmount: profile.dspConfig.gravelSaturation ?? 0.85,
+          chestResonanceDb: profile.dspConfig.chestResonanceDb ?? 6.0,
           articulationDb: profile.dspConfig.articulationBoostDb ?? 1.6,
-          speechRate: profile.dspConfig.speechRate ?? 0.90,
+          speechRate: profile.dspConfig.speechRate ?? 0.88,
           formantPresetName: profile.dspConfig.formantPresetName || 'sovereign-gravitas',
           f1Hz: formants?.f1Hz ?? 375,
           f1GainDb: formants?.f1GainDb ?? 4.5,
