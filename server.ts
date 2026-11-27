@@ -636,7 +636,7 @@ async function startServer() {
         status: 'COMPLETED',
         createdAt: Date.now() - 60000,
         completedAt: Date.now() - 55000,
-        result: 'Cognitive baseline anchored. All neural arrays synchronized to Principal frequency ([credential:8c678b0c-20e5-4e99-bc93-61d682f7c9fe]).'
+        result: 'Cognitive baseline anchored. All neural arrays synchronized to Principal frequency (8212).'
       }
     ],
     latestBriefing: {
@@ -741,7 +741,7 @@ async function startServer() {
       if (task.category === 'SECURITY_SWEEP') {
         const memories = await readJsonFile<any[]>(MEMORY_FILE, []);
         const verifiedMemories = (Array.isArray(memories) ? memories : []).filter((m: any) => m.title && m.content).length;
-        resultText = `Security sweep complete. Evaluated ${verifiedMemories} memory vectors. Biometric signature: LOCKED ([credential:32fddb4d-3187-45b9-a242-3deef6610dbd]). Reasoning buffer: ${principalAuditBuffer.length} items logged. Zero logic corruption detected.`;
+        resultText = `Security sweep complete. Evaluated ${verifiedMemories} memory vectors. Biometric signature: LOCKED (8212). Reasoning buffer: ${principalAuditBuffer.length} items logged. Zero logic corruption detected.`;
       } else if (task.category === 'MEMORY_INDEX') {
         let pruned = 0;
         const indexedMemories = await updateJsonFile<any[]>(MEMORY_FILE, [], (current) => {
@@ -1009,8 +1009,8 @@ async function startServer() {
   const ARCHITECT_SAVED_VOICEPRINT = {
     architect: "Preston Johnston (Council Grey)",
     designation: "Sole Architect & Solid State of the 1¹",
-    biometricId: "ARCHITECT-SIG-GREY-13MEU-[credential:d3b1c3bb-969f-4f07-91c7-e3953ba7d855]",
-    passcodeSignet: "[credential:4fdf4e00-5932-4c70-9f86-a13016de7184]",
+    biometricId: "ARCHITECT-SIG-GREY-13MEU-8212",
+    passcodeSignet: "8212",
     passphraseSignet: "Are the 1911's loaded and silver polished???",
     acousticProfile: {
       targetF0Hz: 118.0,
@@ -1036,7 +1036,7 @@ async function startServer() {
   const principalVoiceOwnership = {
     verified: bootPrincipalActive,
     verifiedAt: bootPrincipalActive ? Date.now() : (null as number | null),
-    verificationMethod: bootPrincipalActive ? 'PRINCIPAL_CONFIG_[credential:b97c25fd-6072-409d-8332-4c7e9c834bbc]' : 'UNVERIFIED',
+    verificationMethod: bootPrincipalActive ? 'PRINCIPAL_CONFIG_8212' : 'UNVERIFIED',
     confidenceScore: bootPrincipalActive ? 99.8 : 0,
     daemonInitialized: bootPrincipalActive,
     daemonStatus: bootPrincipalActive ? 'ONLINE' : 'STANDBY_LOCKED', // 'STANDBY_LOCKED' | 'INITIALIZING' | 'ONLINE'
@@ -1747,20 +1747,20 @@ async function startServer() {
     let method = 'UNVERIFIED';
     const auditReasons: string[] = [];
 
-    // 1. Passcode / Signet Cryptographic Match (Code [credential:dbccf3b1-4a10-4489-ae3e-cb4b646aab3a] or Passphrase)
+    // 1. Passcode / Signet Cryptographic Match (Code 8212 or Passphrase)
     const normalizedTranscript = (transcript || voiceSignetPhrase || '').toLowerCase().trim();
     const isSignetPhrase = 
       normalizedTranscript.includes("1911") || 
       normalizedTranscript.includes("silver polished") ||
       normalizedTranscript.includes("council grey") ||
       normalizedTranscript.includes("preston johnston");
-    const isCode[credential:8a920db3-4ba1-45b3-8910-e1c1a4138528] = passcodeOverride === '[credential:d78f9966-d43c-4977-ac3f-99ebeb3b6339]' || normalizedTranscript.includes('[credential:83b267ad-b12d-4015-891e-49905fc8a292]');
+    const isCode8212 = passcodeOverride === '8212' || normalizedTranscript.includes('8212');
 
-    if (isCode[credential:8e38dabd-66c3-4375-b46c-3a79e8889601] || isSignetPhrase) {
+    if (isCode8212 || isSignetPhrase) {
       isMatch = true;
-      confidence = isSignetPhrase && isCode[credential:bef7ed7a-48ea-43e5-a278-cc0d9012094a] ? 99.8 : (isSignetPhrase ? 98.4 : 96.5);
-      method = isSignetPhrase ? 'ACOUSTIC_SIGNET_MATCH' : 'CRYPTOGRAPHIC_PASSCODE_[credential:fe73cb6b-1630-4098-9231-235208aadad2]';
-      auditReasons.push(isSignetPhrase ? 'Architect Neural Passphrase Verified' : 'Passcode [credential:a3745388-7bdd-4389-b0d4-fd2b0468f58a] Verified');
+      confidence = isSignetPhrase && isCode8212 ? 99.8 : (isSignetPhrase ? 98.4 : 96.5);
+      method = isSignetPhrase ? 'ACOUSTIC_SIGNET_MATCH' : 'CRYPTOGRAPHIC_PASSCODE_8212';
+      auditReasons.push(isSignetPhrase ? 'Architect Neural Passphrase Verified' : 'Passcode 8212 Verified');
     }
 
     // 2. Acoustic Bio-Print Spectral & Pitch Matching
@@ -1822,7 +1822,7 @@ async function startServer() {
         model: 'VOICE_DSP_BIOMETRIC_MODULE',
         durationMs: 42,
         status: 'OPTIMAL',
-        auditHash: `VOICE-[credential:5d4878e8-874d-43e2-95dc-13f3448a11fa]-${Math.random().toString(16).substring(2, 8).toUpperCase()}`,
+        auditHash: `VOICE-8212-${Math.random().toString(16).substring(2, 8).toUpperCase()}`,
         principalVerified: true
       };
       principalAuditBuffer.unshift(auditLog);
